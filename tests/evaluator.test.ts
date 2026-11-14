@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Card, Rank, Suit } from '../src/engine/types.ts';
 import {
+  evaluateFiveCards,
   evaluateThreeCards,
   evaluateSevenCards,
   evaluateVisibleHandSummary,
@@ -38,23 +39,16 @@ describe('evaluator: 2-suit (Black/Pink) 3-card initial hand & first actor', () 
   });
 });
 
-describe('evaluator: 2-suit 52-card 7-choose-5 Holdem hand ranking', () => {
-  it('correctly orders all 9 hand categories including duplicate-rank same-suit flushes', () => {
-    const straightFlush = evaluateSevenCards([
-      c(10, 'P', 0), c(11, 'P', 0), c(12, 'P', 0), c(13, 'P', 0), c(14, 'P', 0), c(14, 'P', 1), c(3, 'B', 0),
-    ]);
+describe('evaluator: probability-reranked 2-suit 52-card hierarchy', () => {
+  it('orders Quads > StraightFlush > FullHouse > Straight > Trips > TwoPair > Flush > OnePair > HighCard', () => {
     const quads = evaluateSevenCards([
       c(9, 'B', 0), c(9, 'B', 1), c(9, 'P', 0), c(9, 'P', 1), c(14, 'B', 0), c(2, 'P', 0), c(3, 'B', 0),
     ]);
+    const straightFlush = evaluateSevenCards([
+      c(10, 'P', 0), c(11, 'P', 0), c(12, 'P', 0), c(13, 'P', 0), c(14, 'P', 0), c(14, 'P', 1), c(3, 'B', 0),
+    ]);
     const fullHouse = evaluateSevenCards([
       c(13, 'B', 0), c(13, 'B', 1), c(13, 'P', 0), c(7, 'B', 0), c(7, 'P', 0), c(14, 'P', 0), c(2, 'B', 0),
-    ]);
-    // In 2-suit deck, 5 Pink cards can include a pair of Aces (A粉#0, A粉#1, J粉, 8粉, 4粉) -> Flush!
-    const flushWithPair = evaluateSevenCards([
-      c(14, 'P', 0), c(14, 'P', 1), c(11, 'P', 0), c(8, 'P', 0), c(4, 'P', 0), c(13, 'B', 0), c(13, 'B', 1),
-    ]);
-    const normalFlush = evaluateSevenCards([
-      c(14, 'B', 0), c(13, 'B', 0), c(11, 'B', 0), c(8, 'B', 0), c(4, 'B', 0), c(2, 'P', 0), c(3, 'P', 0),
     ]);
     const straight = evaluateSevenCards([
       c(14, 'B', 0), c(2, 'P', 0), c(3, 'B', 0), c(4, 'P', 0), c(5, 'B', 0), c(13, 'P', 0), c(9, 'B', 1),
@@ -65,22 +59,28 @@ describe('evaluator: 2-suit 52-card 7-choose-5 Holdem hand ranking', () => {
     const twoPair = evaluateSevenCards([
       c(12, 'B', 0), c(12, 'P', 0), c(6, 'B', 0), c(6, 'P', 0), c(14, 'B', 0), c(4, 'P', 0), c(2, 'B', 0),
     ]);
+    const flushWithPair = evaluateSevenCards([
+      c(14, 'P', 0), c(14, 'P', 1), c(11, 'P', 0), c(8, 'P', 0), c(4, 'P', 0), c(13, 'B', 0), c(3, 'B', 1),
+    ]);
+    const normalFlush = evaluateSevenCards([
+      c(14, 'B', 0), c(13, 'B', 0), c(11, 'B', 0), c(8, 'B', 0), c(4, 'B', 0), c(2, 'P', 0), c(3, 'P', 0),
+    ]);
     const onePair = evaluateSevenCards([
-      c(10, 'B', 0), c(10, 'P', 0), c(14, 'B', 0), c(9, 'P', 0), c(5, 'B', 0), c(3, 'P', 0), c(2, 'B', 1),
+      c(10, 'B', 0), c(10, 'P', 0), c(14, 'B', 0), c(9, 'P', 0), c(5, 'B', 0), c(3, 'P', 0), c(2, 'P', 1),
     ]);
     const highCard = evaluateSevenCards([
-      c(14, 'B', 0), c(12, 'P', 0), c(9, 'B', 0), c(6, 'P', 0), c(4, 'B', 0), c(3, 'P', 0), c(2, 'B', 1),
+      c(14, 'B', 0), c(12, 'P', 0), c(9, 'B', 0), c(6, 'P', 0), c(4, 'B', 0), c(3, 'P', 0), c(2, 'P', 1),
     ]);
 
     const ordered = [
-      straightFlush,
       quads,
+      straightFlush,
       fullHouse,
-      flushWithPair,
-      normalFlush,
       straight,
       trips,
       twoPair,
+      flushWithPair,
+      normalFlush,
       onePair,
       highCard,
     ];
@@ -90,10 +90,24 @@ describe('evaluator: 2-suit 52-card 7-choose-5 Holdem hand ranking', () => {
         `${ordered[i].categoryKey} (${ordered[i].score}) should beat ${ordered[i + 1].categoryKey} (${ordered[i + 1].score})`
       );
     }
-    assert.equal(straightFlush.categoryKey, 'straight-flush');
-    assert.equal(flushWithPair.categoryKey, 'flush');
-    assert.equal(straight.categoryKey, 'straight');
-    assert.equal(straight.tiebreakers[0], 5);
+    assert.equal(quads.category, 8);
+    assert.equal(straightFlush.category, 7);
+    assert.equal(twoPair.category, 3);
+    assert.equal(normalFlush.category, 2);
+  });
+
+  it('scores a same-suit Two Pair as Two Pair (cat 3) rather than downgrading to Flush (cat 2)', () => {
+    const suitedTwoPair = evaluateFiveCards([
+      c(13, 'P', 0), c(13, 'P', 1), c(7, 'P', 0), c(7, 'P', 1), c(2, 'P', 0),
+    ]);
+    assert.equal(suitedTwoPair.categoryKey, 'two-pair');
+    assert.equal(suitedTwoPair.category, 3);
+
+    const suitedOnePair = evaluateFiveCards([
+      c(14, 'P', 0), c(14, 'P', 1), c(9, 'P', 0), c(6, 'P', 0), c(2, 'P', 0),
+    ]);
+    assert.equal(suitedOnePair.categoryKey, 'flush');
+    assert.equal(suitedOnePair.category, 2);
   });
 
   it('summarizes 2-4 known cards accurately and detects 2-suit flush draw', () => {

@@ -114,34 +114,44 @@ export function evaluateFiveCards(cards: Card[]): HandEvaluation {
   let categoryKey: HandEvaluation['categoryKey'] = 'high-card';
   let tiebreakers: number[] = ranksDesc;
 
-  if (isFlush && straightHigh !== null) {
+  // Probability-reranked hierarchy for 52-card 2-suit (26B + 26P) deck:
+  // 8: Four of a Kind (0.168% in 7 cards)
+  // 7: Straight Flush (0.426%)
+  // 6: Full House     (2.596%)
+  // 5: Straight       (4.398%)
+  // 4: Three of a Kind(4.887%)
+  // 3: Two Pair       (23.839%)
+  // 2: Flush          (27.677% excl / 41.892% raw)
+  // 1: One Pair       (25.969% excl / 78.985% raw)
+  // 0: High Card      (10.039%)
+  if (groups[0][1] === 4) {
     category = 8;
-    categoryKey = 'straight-flush';
-    tiebreakers = [straightHigh];
-  } else if (groups[0][1] === 4) {
-    category = 7;
     categoryKey = 'four-of-a-kind';
     tiebreakers = [groups[0][0], groups[1][0]];
+  } else if (isFlush && straightHigh !== null) {
+    category = 7;
+    categoryKey = 'straight-flush';
+    tiebreakers = [straightHigh];
   } else if (groups[0][1] === 3 && groups[1][1] === 2) {
     category = 6;
     categoryKey = 'full-house';
     tiebreakers = [groups[0][0], groups[1][0]];
-  } else if (isFlush) {
-    category = 5;
-    categoryKey = 'flush';
-    tiebreakers = ranksDesc;
   } else if (straightHigh !== null) {
-    category = 4;
+    category = 5;
     categoryKey = 'straight';
     tiebreakers = [straightHigh];
   } else if (groups[0][1] === 3) {
-    category = 3;
+    category = 4;
     categoryKey = 'three-of-a-kind';
     tiebreakers = [groups[0][0], groups[1][0], groups[2][0]];
   } else if (groups[0][1] === 2 && groups[1][1] === 2) {
-    category = 2;
+    category = 3;
     categoryKey = 'two-pair';
     tiebreakers = [groups[0][0], groups[1][0], groups[2][0]];
+  } else if (isFlush) {
+    category = 2;
+    categoryKey = 'flush';
+    tiebreakers = ranksDesc;
   } else if (groups[0][1] === 2) {
     category = 1;
     categoryKey = 'one-pair';
@@ -228,13 +238,13 @@ export function evaluateVisibleHandSummary(
   let category = 0;
   if (counts[0] === 4) {
     label = '四条';
-    category = 7;
+    category = 8;
   } else if (counts[0] === 3) {
     label = '三条';
-    category = 3;
+    category = 4;
   } else if (counts[0] === 2 && counts[1] === 2) {
     label = '两对';
-    category = 2;
+    category = 3;
   } else if (counts[0] === 2) {
     label = '一对';
     category = 1;

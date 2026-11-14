@@ -348,6 +348,26 @@ export function getLegalRaiseRange(
   return { allowed: max > 0, min, max };
 }
 
+/**
+ * Generates up to 3 clean deduplicated integer raise choices (low / mid / max) without a slider.
+ */
+export function computeThreeRaisePresets(min: number, max: number): number[] {
+  if (max <= 0 || min <= 0 || max < min) return [];
+  if (min === max) return [min];
+  const span = max - min;
+  const rawMid = (min + max) / 2;
+  let mid: number;
+  if (span >= 60) {
+    mid = Math.floor(rawMid / 10) * 10;
+  } else if (span >= 10) {
+    mid = Math.round(rawMid / 5) * 5;
+  } else {
+    mid = Math.round(rawMid);
+  }
+  const clampedMid = Math.max(min, Math.min(max, mid));
+  return Array.from(new Set([min, clampedMid, max])).sort((a, b) => a - b);
+}
+
 export function isActionLegal(state: GameState, action: GameAction): boolean {
   if (state.phase === 'showdown') return false;
   const actorId = state.currentTurn;

@@ -13,6 +13,7 @@ import {
   createInitialState,
   applyAction,
   computeBattleSituation,
+  computeThreeRaisePresets,
   getCurrentRaiseCap,
   getNextSwapFee,
   getRemainingSuitStats,
@@ -137,5 +138,13 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     state = applyAction(state, { type: 'call' });
     assert.equal(state.phase, 'showdown');
     assert.ok(state.board.every((b) => b.isOpen));
+  });
+
+  it('computes up to 3 clean deduplicated integer raise presets without slider', () => {
+    assert.deepEqual(computeThreeRaisePresets(10, 20), [10, 15, 20]);
+    assert.deepEqual(computeThreeRaisePresets(10, 40), [10, 25, 40]);
+    assert.deepEqual(computeThreeRaisePresets(10, 100), [10, 50, 100]);
+    assert.deepEqual(computeThreeRaisePresets(10, 10), [10]);
+    assert.deepEqual(computeThreeRaisePresets(8, 12), [8, 10, 12]);
   });
 });

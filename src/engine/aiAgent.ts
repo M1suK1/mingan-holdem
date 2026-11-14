@@ -40,9 +40,9 @@ function scoreCurrentPartialHand(hand: Card[], openBoard: Card[]): number {
     suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
   }
   const maxSuit = Math.max(...suitCounts.values());
-  // In 2-suit deck, 4 of same suit is a strong flush draw!
-  if (maxSuit >= 4) strength += 0.16;
-  else if (maxSuit === 3) strength += 0.07;
+  // In reranked 2-suit deck, Flush sits between One Pair and Two Pair (modest bonus)
+  if (maxSuit >= 4) strength += 0.08;
+  else if (maxSuit === 3) strength += 0.03;
 
   for (const h of hand) {
     if (openBoard.some((b) => b.rank === h.rank)) {
