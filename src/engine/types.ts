@@ -17,12 +17,18 @@ export interface Card {
 
 export type PlayerId = 'human' | 'ai';
 
+export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit';
+
 export interface HandCard {
   card: Card;
   /** 'open' = visible to both players; 'private' = swapped-in hidden card, visible only to owner */
   visibility: 'open' | 'private';
   /** Once swapped in from board hidden pool, cannot be swapped out again */
   lockedFromSwap: boolean;
+  /** Original unmodified card visible to opponent when tampered */
+  originalCard?: Card;
+  /** Hacker skills applied to this card during the hand */
+  tamperedBy?: HackSkillId[];
 }
 
 export interface BoardSlot {
@@ -31,6 +37,9 @@ export interface BoardSlot {
   isOpen: boolean;
   source: 'initial' | 'flipped' | 'swapped-in';
   swappedBy?: PlayerId;
+  /** Preserved when a tampered open hand card is swapped onto the board */
+  originalCard?: Card;
+  tamperedBy?: HackSkillId[];
 }
 
 export type SwapFeeMode = 'escalating' | 'fixed';
@@ -62,6 +71,10 @@ export interface GameConfig {
   revealOpponentHidden: boolean;
   showDeckTracker: boolean;
   situationOverride: BattleSituation | 'auto';
+  hackPlusCost: number;
+  hackMinusCost: number;
+  hackFlipSuitCost: number;
+  scanCost: number;
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -81,6 +94,10 @@ export const DEFAULT_CONFIG: GameConfig = {
   revealOpponentHidden: false,
   showDeckTracker: true,
   situationOverride: 'auto',
+  hackPlusCost: 40,
+  hackMinusCost: 40,
+  hackFlipSuitCost: 55,
+  scanCost: 50,
 };
 
 export type Phase = 'early' | 'mid' | 'river' | 'showdown';
@@ -95,16 +112,19 @@ export interface PlayerState {
   swapCount: number;
   folded: boolean;
   allIn: boolean;
+  sealedSkills: HackSkillId[];
 }
 
 export type GameAction =
   | { type: 'swap'; handIndex: number; boardIndex: number }
   | { type: 'flip'; boardIndex: number }
-  | { type: 'raise'; amount: number }
+  | { type: 'raise'; amount: number; isHalfStack?: boolean }
   | { type: 'check' }
   | { type: 'fold' }
   | { type: 'call' }
-  | { type: 'end-turn' };
+  | { type: 'end-turn' }
+  | { type: 'hack'; handIndex: number; skill: HackSkillId }
+  | { type: 'scan'; targetKind: 'hand' | 'board'; targetIndex: number };
 
 export interface HandEvaluation {
   category: number; // 0..8
@@ -158,12 +178,17 @@ export interface VfxEvent {
     | 'check'
     | 'fold'
     | 'end-turn'
+    | 'hack'
+    | 'scan'
     | 'allin-reveal'
     | 'showdown';
   actor: PlayerId;
   handIndex?: number;
   boardIndex?: number;
+  targetKind?: 'hand' | 'board';
+  targetIndex?: number;
   amount?: number;
+  caught?: boolean;
   label: string;
   cardLabel?: string;
 }
@@ -180,11 +205,12 @@ export interface ActionLogEntry {
 
 export interface ShowdownResult {
   winner: PlayerId | 'tie';
-  reason: 'fold' | 'showdown';
+  reason: 'fold' | 'showdown' | 'scan-caught';
   potWon: number;
   humanEval?: HandEvaluation;
   aiEval?: HandEvaluation;
   payouts: Record<PlayerId, number>;
+  sealedSkills?: HackSkillId[];
 }
 
 export interface GameState {
@@ -201,6 +227,9 @@ export interface GameState {
   justCalledThisTurn: boolean;
   riverChecksInRow: number;
   riverHasBet: boolean;
+  usedHackThisTurn: boolean;
+  usedScanThisTurn: boolean;
+  scannedKeys: string[];
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
   result?: ShowdownResult;

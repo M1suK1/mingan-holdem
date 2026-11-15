@@ -14,6 +14,8 @@ import {
   getHiddenBoardCount,
   getLegalRaiseRange,
   getNextSwapFee,
+  getVisibleBoardCard,
+  getVisibleHandCard,
   isActionLegal,
 } from './gameEngine.ts';
 
@@ -92,13 +94,19 @@ export function serializeStateForLlm(state: GameState): string {
   const ai = state.players.ai;
   const human = state.players.human;
   const boardSummary = state.board
-    .map((b, i) => `槽#${i + 1}:${b.isOpen ? formatCardShort(b.card) : '加密暗牌'}`)
+    .map((b, i) => `槽#${i + 1}:${b.isOpen ? formatCardShort(getVisibleBoardCard(b, 'ai', false)) : '加密暗牌'}`)
     .join(' | ');
   const aiHand = ai.hand
     .map((h, i) => `手牌#${i + 1}:${formatCardShort(h.card)}(${h.visibility === 'open' ? '公开' : '私有加密'})`)
     .join(' ');
   const humanHand = human.hand
-    .map((h, i) => `手牌#${i + 1}:${h.visibility === 'open' ? `${formatCardShort(h.card)}(公开)` : '未知加密暗牌'}`)
+    .map((h, i) =>
+      `手牌#${i + 1}:${
+        h.visibility === 'open'
+          ? `${formatCardShort(getVisibleHandCard(h, 'ai', 'human', false))}(公开)`
+          : '未知加密暗牌'
+      }`
+    )
     .join(' ');
 
   return [

@@ -4,6 +4,7 @@ import type {
   ContractExpression,
   GameAction,
   GameState,
+  HackSkillId,
   OpponentAgent,
   OpponentDialogue,
   OpponentMood,
@@ -12,9 +13,11 @@ import type {
 import { evaluateSevenCards, evaluateThreeCards } from './evaluator.ts';
 import {
   getBetDiff,
+  getHackSkillCost,
   getHiddenBoardCount,
   getLegalRaiseRange,
   getNextSwapFee,
+  getVisibleBoardCard,
   isActionLegal,
   otherPlayer,
 } from './gameEngine.ts';
@@ -54,7 +57,9 @@ function scoreCurrentPartialHand(hand: Card[], openBoard: Card[]): number {
 
 function pickWeakestSwappableHandIndex(state: GameState, actorId: PlayerId): number | null {
   const actor = state.players[actorId];
-  const openBoard = state.board.filter((b) => b.isOpen).map((b) => b.card);
+  const openBoard = state.board
+    .filter((b) => b.isOpen)
+    .map((b) => getVisibleBoardCard(b, actorId, false));
   const rankFreq = new Map<number, number>();
   const suitFreq = new Map<string, number>();
 
@@ -145,7 +150,11 @@ export class LocalAiAgent implements OpponentAgent {
     dialogue: OpponentDialogue;
   }> {
     const actor = state.players[this.playerId];
-    const openBoard = state.board.filter((b) => b.isOpen).map((b) => b.card);
+    const oppId = otherPlayer(this.playerId);
+    const opp = state.players[oppId];
+    const openBoard = state.board
+      .filter((b) => b.isOpen)
+      .map((b) => getVisibleBoardCard(b, this.playerId, false));
     const myCards = actor.hand.map((h) => h.card);
     const strength = scoreCurrentPartialHand(myCards, openBoard);
 
@@ -158,6 +167,71 @@ export class LocalAiAgent implements OpponentAgent {
     const roll = this.rng();
     const speaker = this.displayName;
     const telemetry = serializeStateForLlm(state);
+
+    // Opportunistic non-consuming Scan or Hacker skill (only when diff === 0; must call raises first!)
+    const lastType = state.lastAction?.type;
+    if (diff === 0 && lastType !== 'hack' && lastType !== 'scan') {
+      // Non-omniscient Scan when opponent is betting aggressively or in late board
+      const scanChance = diff >= 20 ? 0.16 : state.phase !== 'early' ? 0.08 : 0.03;
+      if (actor.chips >= state.config.scanCost + 180 && roll < scanChance) {
+        const oppOpenIdx = opp.hand.findIndex(
+          (h, idx) =>
+            h.visibility === 'open' &&
+            !state.scannedKeys.includes(`${this.playerId}:hand:${idx}`)
+        );
+        if (oppOpenIdx !== -1) {
+          const scanAct: GameAction = {
+            type: 'scan',
+            targetKind: 'hand',
+            targetIndex: oppOpenIdx,
+          };
+          if (isActionLegal(state, scanAct)) {
+            return {
+              action: scanAct,
+              dialogue: buildDialogue(
+                speaker,
+                'tense',
+                `你这张明牌的数据流有点可疑……预支 ${state.config.scanCost} 算力扫描验真！`,
+                telemetry,
+                'angry'
+              ),
+            };
+          }
+        }
+      }
+
+      // Opportunistic Hacker tamper on an unmodified open hand card
+      const hackChance = this.style === 'aggressive' ? 0.14 : this.style === 'balanced' ? 0.09 : 0.04;
+      if (actor.chips >= 280 && roll > 1 - hackChance) {
+        const openIdx = actor.hand.findIndex(
+          (h) => h.visibility === 'open' && (!h.tamperedBy || h.tamperedBy.length === 0)
+        );
+        if (openIdx !== -1) {
+          const candidates: HackSkillId[] = ['plus-one', 'minus-one', 'flip-suit'];
+          const pickSkill = candidates[Math.floor(this.rng() * candidates.length)];
+          const hackAct: GameAction = {
+            type: 'hack',
+            handIndex: openIdx,
+            skill: pickSkill,
+          };
+          if (
+            actor.chips >= getHackSkillCost(state, pickSkill) + 150 &&
+            isActionLegal(state, hackAct)
+          ) {
+            return {
+              action: hackAct,
+              dialogue: buildDialogue(
+                speaker,
+                'confident',
+                '稍微改写了一点底层参数……反正你也看不出区别，继续吧。',
+                telemetry,
+                'smile'
+              ),
+            };
+          }
+        }
+      }
+    }
 
     if (state.phase === 'river') {
       if (diff === 0) {
