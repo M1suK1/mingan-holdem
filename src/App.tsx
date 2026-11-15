@@ -349,6 +349,9 @@ export function App() {
   const hasBootedRef = useRef(false);
   const lastHandledSwapIdRef = useRef<string | null>(null);
   const lastHandledShowdownHandRef = useRef<number>(0);
+  const pendingBundledChatRef = useRef<string | null>(null);
+  const chatDraftRef = useRef('');
+  chatDraftRef.current = chatDraft;
 
   const agentRef = useRef(
     new LocalAiAgent('ai', DEFAULT_CONFIG.aiStyle, FALLBACK_CONTRACT_CHARACTER)
@@ -723,6 +726,8 @@ export function App() {
 
         const cfg = latestLlmRef.current;
         const char = latestCharRef.current;
+        const bundledUserText = pendingBundledChatRef.current ?? undefined;
+        pendingBundledChatRef.current = null;
 
         const llmDecision = await requestLlmPokerDecision({
           character: char,
@@ -733,6 +738,7 @@ export function App() {
           dossier: latestDossierRef.current,
           preset: latestPresetRef.current,
           worldbook: latestWorldbookRef.current,
+          bundledUserText,
         });
 
         if (cancelled) return;
@@ -750,18 +756,39 @@ export function App() {
 
         const decision = await agentRef.current.decide(snapshot);
         if (cancelled) return;
-        setActiveExpression(decision.dialogue.expression);
-        if (decision.action.type !== 'hack') {
-          enqueueTask({
-            kind: 'opponent',
-            speaker: char.name,
-            text: decision.dialogue.text,
-          });
-        }
+        const nextAfterAi = applyAction(snapshot, decision.action);
         setState((prev) => {
           if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
-          return applyAction(prev, decision.action);
+          return nextAfterAi;
         });
+
+        if (bundledUserText && cfg.enabled) {
+          const chatRes = await requestOpponentChatReply({
+            character: char,
+            state: nextAfterAi,
+            llmConfig: cfg,
+            chatHistory: buildChatHistorySnapshot(),
+            userText: bundledUserText,
+            actionContextNote: `你刚才已执行牌桌操作：${nextAfterAi.lastAction?.label ?? decision.action.type}`,
+            campaign: latestCampaignRef.current,
+            dossier: latestDossierRef.current,
+            preset: latestPresetRef.current,
+            worldbook: latestWorldbookRef.current,
+          });
+          if (cancelled) return;
+          if (chatRes.logEntry) setLlmLogs((prev) => [chatRes.logEntry!, ...prev].slice(0, 40));
+          setActiveExpression(chatRes.expression);
+          enqueueOpponentSegments(char.name, chatRes.segments);
+        } else {
+          setActiveExpression(decision.dialogue.expression);
+          if (decision.action.type !== 'hack') {
+            enqueueTask({
+              kind: 'opponent',
+              speaker: char.name,
+              text: decision.dialogue.text,
+            });
+          }
+        }
       } finally {
         if (!cancelled) setIsAiThinking(false);
       }
@@ -862,7 +889,9 @@ export function App() {
     // 普通小局结束（双方筹码均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
     if (state.players.ai.chips > 0 && state.players.human.chips > 0) {
       const cfg = latestLlmRef.current;
-      if (cfg.enabled && cfg.reactAfterEachRound !== false) {
+      const bundledUserText = pendingBundledChatRef.current ?? undefined;
+      pendingBundledChatRef.current = null;
+      if (cfg.enabled && (cfg.reactAfterEachRound !== false || Boolean(bundledUserText))) {
         const currChar = latestCharRef.current;
         const winTxt =
           res.winner === 'human'
@@ -889,6 +918,7 @@ export function App() {
           preset: latestPresetRef.current,
           worldbook: latestWorldbookRef.current,
           roundResultSummary,
+          bundledUserText,
         }).then((enc) => {
           if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
           setActiveExpression(enc.expression);
@@ -907,6 +937,8 @@ export function App() {
       const winnerCamp = latestCampaignRef.current;
       const currDossier = latestDossierRef.current;
       const currChar = latestCharRef.current;
+      const bundledUserText = pendingBundledChatRef.current ?? undefined;
+      pendingBundledChatRef.current = null;
       scheduleTimeout(() => {
         const latest = latestStateRef.current;
         if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
@@ -922,6 +954,7 @@ export function App() {
         chatHistory: buildChatHistorySnapshot(),
         preset: latestPresetRef.current,
         worldbook: latestWorldbookRef.current,
+        bundledUserText,
       }).then((enc) => {
         if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
         if (enc.fromLlm) {
@@ -935,6 +968,8 @@ export function App() {
       const currChar = latestCharRef.current;
       const activeEnt = getActiveDisguiseEntity(loserCamp);
       const eventKind = activeEnt.isCore ? 'core-seized' : 'decoy-escape';
+      const bundledUserText = pendingBundledChatRef.current ?? undefined;
+      pendingBundledChatRef.current = null;
       scheduleTimeout(() => {
         const latest = latestStateRef.current;
         if (latest.phase !== 'showdown' || latest.players.human.chips !== 0) return;
@@ -951,6 +986,7 @@ export function App() {
         preset: latestPresetRef.current,
         worldbook: latestWorldbookRef.current,
         detailNote: activeEnt.name,
+        bundledUserText,
       }).then((enc) => {
         if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
         if (enc.fromLlm) {
@@ -969,6 +1005,20 @@ export function App() {
     setHoldProgress(0);
   }, []);
 
+  const applyActionWithPreInputBundle = (action: GameAction) => {
+    const nextState = applyAction(latestStateRef.current, action);
+    setState(nextState);
+    const buffered = chatDraftRef.current.trim();
+    if (
+      buffered.length > 0 &&
+      (nextState.currentTurn === 'ai' || nextState.phase === 'showdown')
+    ) {
+      setChatDraft('');
+      pendingBundledChatRef.current = buffered;
+      enqueueTask({ kind: 'human', text: buffered });
+    }
+  };
+
   const executeHumanAction = (action: GameAction) => {
     cancelHoldHalfRaise();
     setSelectedHandIndex(null);
@@ -977,7 +1027,7 @@ export function App() {
     setShowRaiseTiers(false);
     setScanMode(false);
     setPendingSkillTargetId(null);
-    setState((prev) => applyAction(prev, action));
+    applyActionWithPreInputBundle(action);
   };
 
   const startHoldHalfRaise = (halfAmt: number) => {
@@ -1095,7 +1145,7 @@ export function App() {
       return;
     }
     setScanMode(false);
-    setState((prev) => applyAction(prev, action));
+    applyActionWithPreInputBundle(action);
   };
 
   const handleSelectHumanCard = (handIndex: number) => {
@@ -1275,6 +1325,7 @@ export function App() {
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
     lastHandledShowdownHandRef.current = 0;
+    pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,
       opponentName: targetChar.name,
@@ -2290,7 +2341,7 @@ export function App() {
                 id="chat-input-preview"
                 type="text"
                 className="lc-chat-input"
-                placeholder={`向 ${character.name} 发送消息...`}
+                placeholder={`向 ${character.name} 预输入对话（执行操作后随动作一起发送，回车直发）...`}
                 value={chatDraft}
                 maxLength={200}
                 onChange={(e) => setChatDraft(e.target.value)}
@@ -2306,9 +2357,14 @@ export function App() {
                 type="submit"
                 className="lc-chat-send-btn"
                 disabled={!chatDraft.trim()}
+                title={
+                  isHumanTurn && chatDraft.trim()
+                    ? '点击直接发送；若直接出牌，本句将随操作一起合并发给 LLM'
+                    : '发送消息'
+                }
               >
                 <PixelSendIcon size={13} />
-                发送
+                {isHumanTurn && chatDraft.trim() ? '直发' : '发送'}
               </button>
             </form>
           </section>

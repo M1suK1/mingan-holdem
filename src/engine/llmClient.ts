@@ -699,6 +699,7 @@ export async function requestOpponentChatReply(params: {
   llmConfig: LlmConfig;
   chatHistory: ChatMessage[];
   userText: string;
+  actionContextNote?: string;
   campaign?: CampaignState;
   dossier?: PursuerDossier;
   preset?: ChatPreset;
@@ -726,6 +727,9 @@ export async function requestOpponentChatReply(params: {
   const rt = resolveRuntimeContext(params);
   const recentMsgs = formatChatHistoryForLlm(chatHistory);
 
+  const actionNote = params.actionContextNote?.trim()
+    ? `\n【附带牌桌动作上下文】${params.actionContextNote.trim()}`
+    : '';
   const extraNote = llmConfig.customSystemPrompt.trim()
     ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
     : '';
@@ -738,7 +742,7 @@ export async function requestOpponentChatReply(params: {
     campaign: rt.campaign,
     triggerText: userText,
     tableSummary: serializeStateForLlm(state),
-    taskContext: `玩家对你说道：「${userText}」${extraNote}`,
+    taskContext: `玩家对你说道：「${userText}」${actionNote}${extraNote}`,
     historyMessages: recentMsgs,
     overloadPersona: llmConfig.overloadPersona,
   });
@@ -818,6 +822,7 @@ export async function requestEncounterDialogue(params: {
   worldbook?: WorldbookEntry[];
   detailNote?: string;
   roundResultSummary?: string;
+  bundledUserText?: string;
 }): Promise<{
   reply: string;
   segments: ChatDialogueSegment[];
@@ -880,6 +885,9 @@ export async function requestEncounterDialogue(params: {
   };
 
   const rt = resolveRuntimeContext({ character, campaign, dossier, preset: params.preset, worldbook: params.worldbook });
+  const bundledPart = params.bundledUserText?.trim()
+    ? `\n【玩家同时对你说】：「${params.bundledUserText.trim()}」（请在回应当前局势结果的同时，一并接话回应玩家的这句发言）`
+    : '';
   const composed = composePresetPrompt({
     preset: rt.preset,
     scope: 'encounter',
@@ -887,9 +895,9 @@ export async function requestEncounterDialogue(params: {
     character,
     dossier,
     campaign,
-    triggerText: `${eventKind} ${dossier.faction} 虚拟实体 诱饵 通缉`,
+    triggerText: `${eventKind} ${dossier.faction} 虚拟实体 诱饵 通缉 ${params.bundledUserText ?? ''}`,
     tableSummary: serializeStateForLlm(state),
-    taskContext: eventDescMap[eventKind],
+    taskContext: `${eventDescMap[eventKind]}${bundledPart}`,
     historyMessages: formatChatHistoryForLlm(params.chatHistory),
     overloadPersona: llmConfig.overloadPersona,
   });
@@ -1010,6 +1018,7 @@ export async function requestLlmPokerDecision(params: {
   dossier?: PursuerDossier;
   preset?: ChatPreset;
   worldbook?: WorldbookEntry[];
+  bundledUserText?: string;
 }): Promise<{
   action: GameAction;
   reply: string;
@@ -1026,6 +1035,10 @@ export async function requestLlmPokerDecision(params: {
   // 若仅剩唯一强制动作（例如跟注后的 end-turn），跳过网络请求直接交由本地即时完成
   if (legalHints.length <= 1) return null;
 
+  const bundledSpeech = params.bundledUserText?.trim();
+  const bundledPrompt = bundledSpeech
+    ? `\n【玩家随刚才的操作同时对你说】：「${bundledSpeech}」（请一次同时处理牌桌行动决策，并在 segments 中回应玩家这句话！）`
+    : '';
   const extraNote = llmConfig.customSystemPrompt.trim()
     ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
     : '';
@@ -1038,9 +1051,9 @@ export async function requestLlmPokerDecision(params: {
     character,
     dossier: rt.dossier,
     campaign: rt.campaign,
-    triggerText: `决策 ${state.phase} 博弈 加注 黑客技能 扫描`,
+    triggerText: `决策 ${state.phase} 博弈 加注 黑客技能 扫描 ${bundledSpeech ?? ''}`,
     tableSummary: serializeStateForLlm(state),
-    taskContext: `可选合法动作（请择一输出）：${legalHints.join(' 或 ')}${extraNote}`,
+    taskContext: `可选合法动作（请择一输出）：${legalHints.join(' 或 ')}${bundledPrompt}${extraNote}`,
     historyMessages: formatChatHistoryForLlm(params.chatHistory),
     overloadPersona: llmConfig.overloadPersona,
     compactMode: fastMode,

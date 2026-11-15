@@ -43,6 +43,7 @@ import {
   generateLocalPersonaReply,
   parseDialogueSegments,
   requestEncounterDialogue,
+  requestLlmPokerDecision,
   sanitizeExpression,
   serializeStateForLlm,
 } from '../src/engine/llmClient.ts';
@@ -501,5 +502,71 @@ describe('Thinking effort tuning & round-settled LLM感想', () => {
     assert.equal(sanitizeExpression('confident'), 'smile');
     assert.equal(sanitizeExpression('nervous'), 'shy');
     assert.equal(sanitizeExpression('anger'), 'angry');
+  });
+
+  it('bundles player pre-typed speech into a single requestLlmPokerDecision call when handoff occurs', async () => {
+    const state = createInitialState({ config: DEFAULT_CONFIG, opponentName: FALLBACK_CONTRACT_CHARACTER.name });
+    state.currentTurn = 'ai';
+    const camp = createInitialCampaign('GHOST-7');
+    const dossier = buildPursuerDossier(FALLBACK_CONTRACT_CHARACTER, 1);
+
+    let capturedBody = '';
+    let fetchCalls = 0;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      fetchCalls += 1;
+      capturedBody = String(init?.body ?? '');
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: { type: 'flip', boardIndex: 0 },
+                  segments: [
+                    { kind: 'thought', text: '他想靠话术干扰我，先翻牌试探。' },
+                    { kind: 'speech', text: '少拿诱饵挑衅我，看看这张公共牌再说！' },
+                  ],
+                  expression: 'angry',
+                }),
+              },
+              finish_reason: 'stop',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as typeof fetch;
+
+    try {
+      const res = await requestLlmPokerDecision({
+        character: FALLBACK_CONTRACT_CHARACTER,
+        state,
+        llmConfig: {
+          enabled: true,
+          drivePokerActions: true,
+          provider: 'openai',
+          endpoint: 'https://example.invalid/v1',
+          apiKey: 'test',
+          authMode: 'bearer',
+          model: 'deepseek-chat',
+          temperature: 0.7,
+          fastDecisionMode: false,
+          overloadPersona: true,
+          customSystemPrompt: '',
+        },
+        campaign: camp,
+        dossier,
+        bundledUserText: '我有诱饵伪装，你抓不到我本体！',
+      });
+      assert.equal(fetchCalls, 1);
+      assert.ok(res);
+      assert.equal(res.action.type, 'flip');
+      assert.equal(res.expression, 'angry');
+      assert.equal(res.segments.length, 2);
+      assert.ok(capturedBody.includes('我有诱饵伪装，你抓不到我本体！'));
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });
