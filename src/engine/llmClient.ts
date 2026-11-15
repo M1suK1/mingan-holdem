@@ -1,8 +1,10 @@
 import type {
+  CampaignState,
   ContractExpression,
   GameAction,
   GameState,
   OpponentMood,
+  PursuerDossier,
 } from './types.ts';
 import {
   CONTRACT_EXPRESSIONS,
@@ -18,17 +20,41 @@ import {
   getVisibleHandCard,
   isActionLegal,
 } from './gameEngine.ts';
+import {
+  applyRegexScripts,
+  builtinPresets,
+  composePresetPrompt,
+  type ChatPreset,
+} from './presets.ts';
+import { createInitialCampaign } from './campaign.ts';
+import { buildPursuerDossier } from './skillPool.ts';
+import {
+  builtinWorldbook,
+  syncDynamicWorldbookEntries,
+  type WorldbookEntry,
+} from './worldbook.ts';
+import { vertexChat } from './vertexClient.ts';
 
 export const LLM_STORAGE_KEY = 'mingan-cyber-holdem:llm-config:v1';
+
+export type LlmProvider = 'openai' | 'vertex';
+export type LlmAuthMode = 'bearer' | 'x-api-key' | 'header' | 'none';
 
 export interface LlmConfig {
   enabled: boolean;
   drivePokerActions: boolean;
+  provider: LlmProvider;
   endpoint: string;
   apiKey: string;
-  authMode: 'bearer' | 'none';
+  authMode: LlmAuthMode;
+  headerName?: string;
   model: string;
+  vertexLocation?: string;
+  vertexSecret?: string;
   temperature: number;
+  topP?: number;
+  maxTokens?: number;
+  thinking?: boolean;
   overloadPersona: boolean;
   customSystemPrompt: string;
 }
@@ -36,12 +62,19 @@ export interface LlmConfig {
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
   enabled: false,
   drivePokerActions: false,
+  provider: 'openai',
   endpoint: 'https://api.openai.com/v1',
   apiKey: '',
   authMode: 'bearer',
+  headerName: 'X-API-Key',
   model: 'deepseek-chat',
+  vertexLocation: 'us-central1',
+  vertexSecret: '',
   temperature: 0.75,
-  overloadPersona: false,
+  topP: 0.95,
+  maxTokens: 1024,
+  thinking: true,
+  overloadPersona: true,
   customSystemPrompt: '',
 };
 
@@ -59,12 +92,17 @@ export interface ChatMessage {
 export interface LlmCallLog {
   id: string;
   timestamp: number;
-  kind: 'chat' | 'decision' | 'ping';
+  kind: 'chat' | 'decision' | 'encounter' | 'ping';
   ok: boolean;
+  provider?: LlmProvider;
   model: string;
   durationMs: number;
   summary: string;
+  presetName?: string;
+  worldbookHits?: string[];
+  requestSections?: Array<{ label: string; text: string }>;
   rawPreview?: string;
+  reasoning?: string;
 }
 
 export function loadSavedLlmConfig(): LlmConfig {
@@ -90,6 +128,10 @@ export function saveLlmConfigToStorage(cfg: LlmConfig): void {
   }
 }
 
+/**
+ * 严格遵循信息隔离原则序列化牌桌态势：
+ * 绝不向 AI/LLM 泄露玩家私有暗牌或玩家未公开黑客篡改结果。
+ */
 export function serializeStateForLlm(state: GameState): string {
   const ai = state.players.ai;
   const human = state.players.human;
@@ -111,11 +153,12 @@ export function serializeStateForLlm(state: GameState): string {
 
   return [
     `[局数:#${state.handNumber} | 阶段:${state.phase} | 奖池:${state.pot}]`,
-    `我方(${ai.name})算力筹码:${ai.chips} 已下注:${ai.roundBet} | 对手(玩家)筹码:${human.chips} 已下注:${human.roundBet}`,
-    `我方手牌: ${aiHand}`,
+    `追捕者(${ai.name})算力筹码:${ai.chips} 已下注:${ai.roundBet} | 通缉黑客(玩家)筹码:${human.chips} 已下注:${human.roundBet}`,
+    `追捕者手牌: ${aiHand}`,
     `玩家可见手牌: ${humanHand}`,
     `中央节点池(4张): ${boardSummary}`,
     `当前需补差额:${getBetDiff(state, 'ai')} | 本段已加注次数:${state.raisesInSubPhase}`,
+    `技能权限: 本回合已用黑客改牌=${state.usedHackThisTurn ? '是' : '否'} | 本回合已用扫描=${state.usedScanThisTurn ? '是' : '否'} | 我方被封技能=${ai.sealedSkills.join(',') || '无'}`,
   ].join('\n');
 }
 
@@ -125,7 +168,7 @@ export function buildCharacterSystemPrompt(
 ): string {
   const personaText =
     config.overloadPersona && character.witchPersonality
-      ? `【深层过载态人格】${character.witchPersonality}`
+      ? `【虚拟实体过载人格】${character.witchPersonality}`
       : `【常态人格】${character.personality}`;
 
   const traitsLine = character.traits.length
@@ -145,7 +188,7 @@ export function buildCharacterSystemPrompt(
     : '';
 
   return [
-    `你正在赛博空间黑客牌桌游戏中扮演「${character.name}」（称号：${character.title}，代号：${character.codename}）。`,
+    `你正在黑域协议空间扮演追捕者「${character.name}」（称号：${character.title}，代号：${character.codename}）。`,
     `你们正在进行《明暗博弈德州（黑/粉双花色52张版）》1v1单挑。全过程请用贴合角色的自然中文回答，严禁输出任何Emoji表情符号。`,
     `【双花色精确概率重排牌型大小】四条 > 同花顺 > 葫芦 > 顺子 > 三条 > 两对 > 同花 > 一对 > 高牌。`,
     `【代表台词】「${character.quote}」`,
@@ -180,9 +223,10 @@ function sanitizeExpression(val: unknown, fallback: ContractExpression = 'calm')
   return fallback;
 }
 
-/**
- * Character-authentic offline reply synthesizer using real fields from night-sugar-office contract card.
- */
+function stripEmoji(text: string): string {
+  return text.replace(/[\p{Extended_Pictographic}\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+}
+
 export function generateLocalPersonaReply(
   character: ContractCharacter,
   state: GameState,
@@ -192,14 +236,24 @@ export function generateLocalPersonaReply(
   const msg = userMessage.trim();
   const diff = getBetDiff(state, 'human');
   const hiddenCount = getHiddenBoardCount(state);
-  const sample = character.voice?.samples?.[state.actionHistory.length % (character.voice?.samples?.length || 1)];
+  const sample =
+    character.voice?.samples?.[state.actionHistory.length % (character.voice?.samples?.length || 1)];
 
   if (/底牌|暗牌|什么牌|同花|顺子/.test(msg)) {
     return {
       expression: 'smile',
-      reply: overloadMode && character.witchPersonality
-        ? `想偷看我的私有扇区？把你的视线和筹码全押上来，等终局摊牌那一刻我自然会让你看个够。`
-        : `想知道我换进来的暗牌是不是黑粉同花？交足底池门票（当前奖池 ${state.pot}）再来套我的话吧。`,
+      reply:
+        overloadMode && character.witchPersonality
+          ? '想窥探我的私有扇区？把你的算力和虚拟实体全部押上来，摊牌时我自然会让你看清。'
+          : `想知道我换进来的暗牌是不是黑粉同花？交足底池门票（当前奖池 ${state.pot}）再来套话吧。`,
+    };
+  }
+
+  if (/诱饵|伪装|本体|通缉|追捕|实体/.test(msg)) {
+    return {
+      expression: 'angry',
+      reply:
+        '别指望靠一副伪装诱饵就能在黑域协议下全身而退——算力清零之时，我会亲自核验你的本体签名。',
     };
   }
 
@@ -208,7 +262,7 @@ export function generateLocalPersonaReply(
       expression: 'angry',
       reply:
         diff > 0
-          ? `少用言语干扰我的频段——现在差额 ${diff} 摆在桌上，先跟注或者反加证明你的胆量。`
+          ? `少用言语干扰我的频段——差额 ${diff} 摆在桌上，先跟注或者反加证明你的胆量。`
           : `心理战对我可不管用。桌面上还有 ${hiddenCount} 个加密节点未揭开，好戏才刚开始。`,
     };
   }
@@ -232,7 +286,7 @@ export function generateLocalPersonaReply(
 
   return {
     expression: 'shy',
-    reply: `收到你的通讯信号了。不过在牌桌上，筹码推进的声音可比聊天记录更有说服力。`,
+    reply: '收到你的通讯信号了。不过在黑域牌桌上，算力推进的声音可比聊天记录更有说服力。',
   };
 }
 
@@ -244,19 +298,27 @@ function buildEndpointUrl(endpoint: string): string {
 
 export async function callOpenAiCompatible(
   config: LlmConfig,
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  presetSettings?: ChatPreset['settings']
 ): Promise<{ content: string; durationMs: number }> {
   const t0 = Date.now();
   const url = buildEndpointUrl(config.endpoint);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (config.authMode === 'bearer' && config.apiKey.trim()) {
-    headers.Authorization = `Bearer ${config.apiKey.trim()}`;
+  const key = config.apiKey.trim();
+  if (key && config.authMode !== 'none') {
+    if (config.authMode === 'x-api-key') {
+      headers['x-api-key'] = key;
+    } else if (config.authMode === 'header') {
+      headers[config.headerName?.trim() || 'X-API-Key'] = key;
+    } else {
+      headers.Authorization = `Bearer ${key}`;
+    }
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 18000);
+  const timeoutId = setTimeout(() => controller.abort(), 22000);
 
   try {
     const res = await fetch(url, {
@@ -264,7 +326,9 @@ export async function callOpenAiCompatible(
       headers,
       body: JSON.stringify({
         model: config.model.trim() || 'deepseek-chat',
-        temperature: config.temperature,
+        temperature: presetSettings?.temperature ?? config.temperature,
+        top_p: presetSettings?.topP ?? config.topP ?? 0.95,
+        max_tokens: presetSettings?.maxTokens ?? config.maxTokens ?? 1024,
         messages,
       }),
       signal: controller.signal,
@@ -272,7 +336,7 @@ export async function callOpenAiCompatible(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 120) || res.statusText}`);
+      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 140) || res.statusText}`);
     }
 
     const data = (await res.json()) as {
@@ -288,12 +352,97 @@ export async function callOpenAiCompatible(
   }
 }
 
+export async function dispatchModelCall(params: {
+  config: LlmConfig;
+  preset?: ChatPreset;
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+}): Promise<{
+  content: string;
+  reasoning?: string;
+  durationMs: number;
+  provider: LlmProvider;
+  model: string;
+}> {
+  const { config, preset, messages } = params;
+  const useOverride = Boolean(preset?.api?.enabled);
+  const provider: LlmProvider = useOverride
+    ? preset?.api?.provider ?? config.provider
+    : config.provider;
+  const model = (useOverride && preset?.api?.model?.trim()) || config.model;
+
+  const t0 = Date.now();
+  if (provider === 'vertex') {
+    const secret =
+      (useOverride && preset?.api?.apiKey?.trim()) || config.vertexSecret || config.apiKey || '';
+    const location =
+      (useOverride && preset?.api?.location?.trim()) || config.vertexLocation || 'us-central1';
+
+    const res = await vertexChat(
+      { model: model || 'gemini-2.5-flash', location, secret },
+      messages,
+      {
+        temperature: preset?.settings.temperature ?? config.temperature,
+        topP: preset?.settings.topP ?? config.topP ?? 0.95,
+        maxTokens: preset?.settings.maxTokens ?? config.maxTokens ?? 1024,
+        thinking: preset?.settings.thinking ?? config.thinking ?? true,
+      }
+    );
+    if (!res.ok) {
+      throw new Error(res.message);
+    }
+    return {
+      content: res.text,
+      reasoning: res.reasoning,
+      durationMs: Date.now() - t0,
+      provider: 'vertex',
+      model,
+    };
+  }
+
+  const effectiveConfig: LlmConfig =
+    useOverride && preset?.api
+      ? {
+          ...config,
+          endpoint: preset.api.endpoint?.trim() || config.endpoint,
+          apiKey: preset.api.apiKey?.trim() || config.apiKey,
+          model,
+        }
+      : { ...config, model };
+
+  const out = await callOpenAiCompatible(effectiveConfig, messages, preset?.settings);
+  return {
+    content: out.content,
+    durationMs: out.durationMs,
+    provider: 'openai',
+    model,
+  };
+}
+
+function resolveRuntimeContext(params: {
+  character: ContractCharacter;
+  campaign?: CampaignState;
+  dossier?: PursuerDossier;
+  preset?: ChatPreset;
+  worldbook?: WorldbookEntry[];
+}) {
+  const campaign = params.campaign ?? createInitialCampaign();
+  const dossier = params.dossier ?? buildPursuerDossier(params.character, campaign.roundIndex);
+  const preset = params.preset ?? builtinPresets()[0];
+  const baseWb = params.worldbook ?? builtinWorldbook();
+  const syncedWb = syncDynamicWorldbookEntries(baseWb, campaign, params.character, dossier);
+  return { campaign, dossier, preset, worldbook: syncedWb };
+}
+
 export async function requestOpponentChatReply(params: {
   character: ContractCharacter;
   state: GameState;
   llmConfig: LlmConfig;
   chatHistory: ChatMessage[];
   userText: string;
+  campaign?: CampaignState;
+  dossier?: PursuerDossier;
+  preset?: ChatPreset;
+  worldbook?: WorldbookEntry[];
 }): Promise<{
   reply: string;
   expression: ContractExpression;
@@ -313,31 +462,43 @@ export async function requestOpponentChatReply(params: {
     return { ...local, fromLlm: false };
   }
 
-  const sys = [
-    buildCharacterSystemPrompt(character, llmConfig),
-    '请严格只输出一段 JSON 对象，格式为：{"reply":"你的中文回复（80字以内，无Emoji）","expression":"calm|smile|surprise|sad|angry|shy"}',
-  ].join('\n');
-
+  const rt = resolveRuntimeContext(params);
   const recentMsgs = chatHistory.slice(-6).map((m) => ({
     role: (m.sender === 'human' ? 'user' : 'assistant') as 'user' | 'assistant',
     content: m.text,
   }));
 
-  try {
-    const { content, durationMs } = await callOpenAiCompatible(llmConfig, [
-      { role: 'system', content: sys },
-      ...recentMsgs,
-      {
-        role: 'user',
-        content: `【当前牌桌态势】\n${serializeStateForLlm(state)}\n\n【玩家对你说】：${userText}`,
-      },
-    ]);
+  const extraNote = llmConfig.customSystemPrompt.trim()
+    ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
+    : '';
+  const composed = composePresetPrompt({
+    preset: rt.preset,
+    scope: 'chat',
+    worldbook: rt.worldbook,
+    character,
+    dossier: rt.dossier,
+    campaign: rt.campaign,
+    triggerText: userText,
+    tableSummary: serializeStateForLlm(state),
+    taskContext: `玩家对你说道：「${userText}」${extraNote}`,
+    historyMessages: recentMsgs,
+    overloadPersona: llmConfig.overloadPersona,
+  });
 
-    const parsed = extractJsonPayload(content);
-    const reply =
+  try {
+    const out = await dispatchModelCall({
+      config: llmConfig,
+      preset: rt.preset,
+      messages: composed.messages,
+    });
+
+    const cleanedContent = applyRegexScripts(out.content, rt.preset.regex, 'output');
+    const parsed = extractJsonPayload(cleanedContent);
+    const rawReply =
       typeof parsed?.reply === 'string' && parsed.reply.trim()
         ? parsed.reply.trim()
-        : content.replace(/[\p{Extended_Pictographic}]/gu, '').slice(0, 140);
+        : cleanedContent.slice(0, 140);
+    const reply = stripEmoji(rawReply);
     const expression = sanitizeExpression(parsed?.expression, 'smile');
 
     return {
@@ -349,10 +510,15 @@ export async function requestOpponentChatReply(params: {
         timestamp: Date.now(),
         kind: 'chat',
         ok: true,
-        model: llmConfig.model,
-        durationMs,
+        provider: out.provider,
+        model: out.model,
+        durationMs: out.durationMs,
         summary: `对话响应成功 (${expression})`,
-        rawPreview: content.slice(0, 220),
+        presetName: rt.preset.name,
+        worldbookHits: composed.worldbookHits.map((h) => `${h.name}(${h.reason === 'constant' ? '常驻' : '关键词'})`),
+        requestSections: composed.sections,
+        rawPreview: out.content.slice(0, 400),
+        reasoning: out.reasoning,
       },
     };
   } catch (err) {
@@ -372,11 +538,116 @@ export async function requestOpponentChatReply(params: {
         timestamp: Date.now(),
         kind: 'chat',
         ok: false,
+        provider: llmConfig.provider,
         model: llmConfig.model,
         durationMs: 0,
         summary: `LLM 请求失败，已平滑回退本地语料：${errorMsg}`,
+        presetName: rt.preset.name,
+        worldbookHits: composed.worldbookHits.map((h) => h.name),
+        requestSections: composed.sections,
       },
     };
+  }
+}
+
+export async function requestEncounterDialogue(params: {
+  eventKind: 'pursuer-arrive' | 'pursuer-defeated' | 'decoy-escape' | 'core-seized';
+  character: ContractCharacter;
+  state: GameState;
+  llmConfig: LlmConfig;
+  campaign: CampaignState;
+  dossier: PursuerDossier;
+  preset?: ChatPreset;
+  worldbook?: WorldbookEntry[];
+  detailNote?: string;
+}): Promise<{
+  reply: string;
+  expression: ContractExpression;
+  fromLlm: boolean;
+  logEntry?: LlmCallLog;
+}> {
+  const { eventKind, character, state, llmConfig, campaign, dossier, detailNote } = params;
+
+  const fallbackMap: Record<typeof eventKind, { reply: string; expression: ContractExpression }> = {
+    'pursuer-arrive': {
+      reply: `通缉目标 ${campaign.playerCodename}，我是${dossier.identityTitle}。黑域协议已锁定这片扇区，交出你的虚拟实体吧。`,
+      expression: 'angry',
+    },
+    'pursuer-defeated': {
+      reply: `可恶……算力防线被你彻底击穿了。按黑域协议，这具虚拟实体和技能权限归你了。`,
+      expression: 'sad',
+    },
+    'decoy-escape': {
+      reply: `居然只是个伪装诱饵实体？算你滑头……等下次定位到你的本体签名，可没这么好运了！`,
+      expression: 'surprise',
+    },
+    'core-seized': {
+      reply: `伪装耗尽了？你的本体虚拟实体已由我正式接管。本次通缉追捕任务完成，断开连接吧。`,
+      expression: 'smile',
+    },
+  };
+
+  if (!llmConfig.enabled) {
+    return { ...fallbackMap[eventKind], fromLlm: false };
+  }
+
+  const eventDescMap: Record<typeof eventKind, string> = {
+    'pursuer-arrive': `【事件：追捕者拦截开场】你刚刚通过黑域协议定位到通缉黑客 ${campaign.playerCodename}，以虚拟实体姿态降临牌桌，向对方发出开局追捕宣言。`,
+    'pursuer-defeated': `【事件：追捕者败北】你的算力已归零，你的虚拟实体即将被玩家按黑域协议夺取，发表不甘或认可的败北台词。`,
+    'decoy-escape': `【事件：玩家牺牲伪装诱饵逃脱】你打穿了对手的算力，却发现对方出战的只是一具俘获来的伪装诱饵（${detailNote ?? '诱饵实体'}），让玩家本体成功逃脱，表达震惊或警告。`,
+    'core-seized': `【事件：剥离玩家本体实体（失败结局）】玩家以本体虚拟实体出战且算力归零，你成功夺走了玩家本体，宣告这场通缉猎杀圆满收网。`,
+  };
+
+  const rt = resolveRuntimeContext({ character, campaign, dossier, preset: params.preset, worldbook: params.worldbook });
+  const composed = composePresetPrompt({
+    preset: rt.preset,
+    scope: 'encounter',
+    worldbook: rt.worldbook,
+    character,
+    dossier,
+    campaign,
+    triggerText: `${eventKind} ${dossier.faction} 虚拟实体 诱饵 通缉`,
+    tableSummary: serializeStateForLlm(state),
+    taskContext: eventDescMap[eventKind],
+    overloadPersona: llmConfig.overloadPersona,
+  });
+
+  try {
+    const out = await dispatchModelCall({
+      config: llmConfig,
+      preset: rt.preset,
+      messages: composed.messages,
+    });
+    const cleaned = applyRegexScripts(out.content, rt.preset.regex, 'output');
+    const parsed = extractJsonPayload(cleaned);
+    const reply = stripEmoji(
+      typeof parsed?.reply === 'string' && parsed.reply.trim()
+        ? parsed.reply.trim()
+        : fallbackMap[eventKind].reply
+    );
+    const expression = sanitizeExpression(parsed?.expression, fallbackMap[eventKind].expression);
+    return {
+      reply,
+      expression,
+      fromLlm: true,
+      logEntry: {
+        id: `llm-enc-${Date.now()}`,
+        timestamp: Date.now(),
+        kind: 'encounter',
+        ok: true,
+        provider: out.provider,
+        model: out.model,
+        durationMs: out.durationMs,
+        summary: `遭遇剧情响应 (${eventKind})`,
+        presetName: rt.preset.name,
+        worldbookHits: composed.worldbookHits.map((h) => h.name),
+        requestSections: composed.sections,
+        rawPreview: out.content.slice(0, 400),
+        reasoning: out.reasoning,
+      },
+    };
+  } catch {
+    return { ...fallbackMap[eventKind], fromLlm: false };
   }
 }
 
@@ -399,28 +670,47 @@ export function enumerateLegalActionHints(state: GameState): string[] {
     if (raiseRange.allowed) {
       hints.push(`{"type":"raise","amount":${raiseRange.min}..${raiseRange.max}}`);
     }
-    return hints;
+  } else {
+    if (state.justCalledThisTurn) {
+      hints.push('{"type":"end-turn"}');
+    }
+    const hiddenSlots = state.board.filter((b) => !b.isOpen).map((b) => b.index);
+    if (hiddenSlots.length > 0) {
+      hints.push(`{"type":"flip","boardIndex":${hiddenSlots.join('|')}}`);
+      const fee = getNextSwapFee(state, 'ai');
+      const swappable = ai.hand
+        .map((h, i) => (h.visibility === 'open' && !h.lockedFromSwap ? i : -1))
+        .filter((i) => i >= 0);
+      if (ai.chips >= fee && swappable.length > 0) {
+        hints.push(
+          `{"type":"swap","handIndex":${swappable.join('|')},"boardIndex":${hiddenSlots.join('|')}}`
+        );
+      }
+    }
+    if (raiseRange.allowed) {
+      hints.push(`{"type":"raise","amount":${raiseRange.min}..${raiseRange.max}}`);
+    }
   }
 
-  if (state.justCalledThisTurn) {
-    hints.push('{"type":"end-turn"}');
-  }
-  const hiddenSlots = state.board.filter((b) => !b.isOpen).map((b) => b.index);
-  if (hiddenSlots.length > 0) {
-    hints.push(`{"type":"flip","boardIndex":${hiddenSlots.join('|')}}`);
-    const fee = getNextSwapFee(state, 'ai');
-    const swappable = ai.hand
-      .map((h, i) => (h.visibility === 'open' && !h.lockedFromSwap ? i : -1))
+  // Optional hacker / scan skills when diff === 0
+  if (!state.usedHackThisTurn) {
+    const openHandIdx = ai.hand
+      .map((h, i) => (h.visibility === 'open' ? i : -1))
       .filter((i) => i >= 0);
-    if (ai.chips >= fee && swappable.length > 0) {
+    const availableSkills = (['plus-one', 'minus-one', 'flip-suit'] as const).filter(
+      (s) => !ai.sealedSkills.includes(s)
+    );
+    if (openHandIdx.length > 0 && availableSkills.length > 0 && ai.chips >= 40) {
       hints.push(
-        `{"type":"swap","handIndex":${swappable.join('|')},"boardIndex":${hiddenSlots.join('|')}}`
+        `{"type":"hack","handIndex":${openHandIdx.join('|')},"skill":"${availableSkills.join('|')}"}`
       );
     }
   }
-  if (raiseRange.allowed) {
-    hints.push(`{"type":"raise","amount":${raiseRange.min}..${raiseRange.max}}`);
+
+  if (!state.usedScanThisTurn && ai.chips >= state.config.scanCost) {
+    hints.push('{"type":"scan","targetKind":"hand|board","targetIndex":0..3}');
   }
+
   return hints;
 }
 
@@ -428,6 +718,10 @@ export async function requestLlmPokerDecision(params: {
   character: ContractCharacter;
   state: GameState;
   llmConfig: LlmConfig;
+  campaign?: CampaignState;
+  dossier?: PursuerDossier;
+  preset?: ChatPreset;
+  worldbook?: WorldbookEntry[];
 }): Promise<{
   action: GameAction;
   reply: string;
@@ -438,29 +732,43 @@ export async function requestLlmPokerDecision(params: {
   const { character, state, llmConfig } = params;
   if (!llmConfig.enabled || !llmConfig.drivePokerActions) return null;
 
+  const rt = resolveRuntimeContext(params);
   const legalHints = enumerateLegalActionHints(state);
-  const sys = [
-    buildCharacterSystemPrompt(character, llmConfig),
-    '现在轮到你出牌决策。请根据牌面与赔率选择一项合法行动，并严格只返回一段 JSON：',
-    '{"action": <合法动作对象>, "reply": "出招时的一句简短台词(无Emoji)", "expression": "calm|smile|surprise|sad|angry|shy"}',
-    `当前可选合法动作格式：${legalHints.join(' 或 ')}`,
-  ].join('\n');
+  const extraNote = llmConfig.customSystemPrompt.trim()
+    ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
+    : '';
+
+  const composed = composePresetPrompt({
+    preset: rt.preset,
+    scope: 'decision',
+    worldbook: rt.worldbook,
+    character,
+    dossier: rt.dossier,
+    campaign: rt.campaign,
+    triggerText: `决策 ${state.phase} 博弈 加注 黑客技能 扫描`,
+    tableSummary: serializeStateForLlm(state),
+    taskContext: `可选合法动作（请择一输出）：${legalHints.join(' 或 ')}${extraNote}`,
+    overloadPersona: llmConfig.overloadPersona,
+  });
 
   try {
-    const { content, durationMs } = await callOpenAiCompatible(llmConfig, [
-      { role: 'system', content: sys },
-      { role: 'user', content: serializeStateForLlm(state) },
-    ]);
-    const parsed = extractJsonPayload(content);
+    const out = await dispatchModelCall({
+      config: llmConfig,
+      preset: rt.preset,
+      messages: composed.messages,
+    });
+    const cleaned = applyRegexScripts(out.content, rt.preset.regex, 'output');
+    const parsed = extractJsonPayload(cleaned);
     const candidate = parsed?.action as GameAction | undefined;
     if (!candidate || typeof candidate !== 'object' || !isActionLegal(state, candidate)) {
       return null;
     }
     const expression = sanitizeExpression(parsed?.expression, 'smile');
-    const reply =
+    const rawReply =
       typeof parsed?.reply === 'string' && parsed.reply.trim()
         ? parsed.reply.trim()
         : '这一步协议已经写入。';
+    const reply = stripEmoji(rawReply);
     const mood: OpponentMood =
       expression === 'smile'
         ? 'confident'
@@ -480,10 +788,15 @@ export async function requestLlmPokerDecision(params: {
         timestamp: Date.now(),
         kind: 'decision',
         ok: true,
-        model: llmConfig.model,
-        durationMs,
+        provider: out.provider,
+        model: out.model,
+        durationMs: out.durationMs,
         summary: `LLM 决策执行: ${candidate.type}`,
-        rawPreview: content.slice(0, 220),
+        presetName: rt.preset.name,
+        worldbookHits: composed.worldbookHits.map((h) => h.name),
+        requestSections: composed.sections,
+        rawPreview: out.content.slice(0, 400),
+        reasoning: out.reasoning,
       },
     };
   } catch {

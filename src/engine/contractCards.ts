@@ -264,6 +264,29 @@ export function resolveCharacterPortrait(
   return character.portrait || '/assets/opponent-halfbody.webp';
 }
 
+/** 虚拟实体形象（魔女化形象），无魔女化差分时平滑回退至常态立绘 */
+export function resolveVirtualEntityPortrait(
+  character: ContractCharacter,
+  expression: ContractExpression = 'calm'
+): string {
+  const exact = character.variants[`witchform:${expression}`];
+  if (exact) return exact;
+  if (character.variants['witchform:calm']) return character.variants['witchform:calm'];
+  if (character.witchPortrait) return character.witchPortrait;
+  return resolveCharacterPortrait(character, expression, true);
+}
+
+/** 现实形象（契约礼装），用于现实/虚拟双世界对照与后续拓展 */
+export function resolveRealityPortrait(
+  character: ContractCharacter,
+  expression: ContractExpression = 'calm'
+): string {
+  const exact = character.variants[`custom:${expression}`];
+  if (exact) return exact;
+  if (character.variants['custom:calm']) return character.variants['custom:calm'];
+  return character.portrait || '/assets/opponent-halfbody.webp';
+}
+
 export function moodToExpression(mood: OpponentMood): ContractExpression {
   switch (mood) {
     case 'confident':

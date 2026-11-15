@@ -43,7 +43,7 @@ import { evaluateVisibleHandSummary } from './engine/evaluator.ts';
 import {
   FALLBACK_CONTRACT_CHARACTER,
   deriveAiStyleFromCharacter,
-  resolveCharacterPortrait,
+  resolveVirtualEntityPortrait,
   type ContractCardSummary,
   type ContractCharacter,
 } from './engine/contractCards.ts';
@@ -53,7 +53,31 @@ import {
   registerImportedContractCard,
 } from './engine/cardRepository.ts';
 import {
+  createInitialCampaign,
+  getActiveDisguiseEntity,
+  loadCampaignState,
+  resolveMatchDefeat,
+  resolveMatchVictory,
+  saveCampaignState,
+  selectMatchDisguise,
+  claimVictoryLoot,
+} from './engine/campaign.ts';
+import { buildPursuerDossier, getSkillById } from './engine/skillPool.ts';
+import {
+  loadActivePresetId,
+  loadPresets,
+  saveActivePresetId,
+  savePresets,
+  type ChatPreset,
+} from './engine/presets.ts';
+import {
+  loadWorldbook,
+  saveWorldbook,
+  type WorldbookEntry,
+} from './engine/worldbook.ts';
+import {
   loadSavedLlmConfig,
+  requestEncounterDialogue,
   requestLlmPokerDecision,
   requestOpponentChatReply,
   saveLlmConfigToStorage,
@@ -91,19 +115,22 @@ import {
 
 const ContractArchiveModal = lazy(() => import('./components/ContractArchiveModal.tsx'));
 const LlmTerminalModal = lazy(() => import('./components/LlmTerminalModal.tsx'));
+const PresetWorldbookModal = lazy(() => import('./components/PresetWorldbookModal.tsx'));
+const CampaignOutcomeModal = lazy(() => import('./components/CampaignOutcomeModal.tsx'));
 const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.tsx'));
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
+  keyName: 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
-  { id: 'menu-contracts', keyName: 'contracts', label: '契约档案', note: '切换夜糖事务所角色与立绘', icon: 'contracts' },
-  { id: 'menu-llm', keyName: 'llm', label: 'LLM 链路', note: '配置在线大模型神经接入', icon: 'llm' },
-  { id: 'menu-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与博弈细则', icon: 'rules' },
+  { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
+  { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
+  { id: 'menu-preset-wb', keyName: 'preset-wb', label: '预设与世界书', note: '编辑 SillyTavern 兼容预设词条与世界书注入', icon: 'rules' },
+  { id: 'menu-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与黑域实体规则', icon: 'rules' },
   { id: 'menu-audit', keyName: 'audit', label: '对局流水', note: '查看历史出牌与动作日志', icon: 'audit' },
   { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
 ];
@@ -141,6 +168,7 @@ type ActiveModal =
   | { type: 'settings-menu' }
   | { type: 'contracts' }
   | { type: 'llm' }
+  | { type: 'preset-wb'; section: 'preset' | 'worldbook' }
   | { type: 'protocol'; tab: 'rules' | 'suits' | 'audit' }
   | { type: 'tuning' }
   | { type: 'confirm-reset' };
@@ -225,7 +253,35 @@ export function App() {
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
+  const [presets, setPresets] = useState<ChatPreset[]>(() => loadPresets());
+  const [activePresetId, setActivePresetId] = useState<string>(() => loadActivePresetId(loadPresets()));
+  const [worldbook, setWorldbook] = useState<WorldbookEntry[]>(() => loadWorldbook());
+  const [campaign, setCampaign] = useState(() => loadCampaignState());
+  const [manualDisguiseOpen, setManualDisguiseOpen] = useState(false);
   const [toasts, setToasts] = useState<CyberToast[]>([]);
+
+  const dossier = useMemo(
+    () => buildPursuerDossier(character, campaign.roundIndex),
+    [character, campaign.roundIndex]
+  );
+  const activePreset = useMemo(
+    () => presets.find((p) => p.id === activePresetId) ?? presets[0],
+    [presets, activePresetId]
+  );
+  const activeDisguise = useMemo(() => getActiveDisguiseEntity(campaign), [campaign]);
+
+  useEffect(() => {
+    saveCampaignState(campaign);
+  }, [campaign]);
+
+  const latestCampaignRef = useRef(campaign);
+  latestCampaignRef.current = campaign;
+  const latestDossierRef = useRef(dossier);
+  latestDossierRef.current = dossier;
+  const latestPresetRef = useRef(activePreset);
+  latestPresetRef.current = activePreset;
+  const latestWorldbookRef = useRef(worldbook);
+  latestWorldbookRef.current = worldbook;
 
   // Chat Stack & FIFO Bubble Queue
   const [messages, setMessages] = useState<ChatItem[]>([
@@ -614,6 +670,10 @@ export function App() {
           character: char,
           state: snapshot,
           llmConfig: cfg,
+          campaign: latestCampaignRef.current,
+          dossier: latestDossierRef.current,
+          preset: latestPresetRef.current,
+          worldbook: latestWorldbookRef.current,
         });
 
         if (cancelled) return;
@@ -743,7 +803,63 @@ export function App() {
             : `完全同分平局？一人一半回收算力池，下一局再见真章。`;
 
     enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
-  }, [state.phase, state.result, state.handNumber, character.name, enqueueTask]);
+
+    // 整场算力归零：触发黑域协议虚拟实体夺取 / 诱饵逃脱 / 失败结局
+    if (state.players.ai.chips === 0) {
+      const winnerCamp = latestCampaignRef.current;
+      const currDossier = latestDossierRef.current;
+      const currChar = latestCharRef.current;
+      scheduleTimeout(() => {
+        const latest = latestStateRef.current;
+        if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+        setCampaign((prev) => resolveMatchVictory(prev, currChar, currDossier));
+      }, 1150);
+      void requestEncounterDialogue({
+        eventKind: 'pursuer-defeated',
+        character: currChar,
+        state,
+        llmConfig: latestLlmRef.current,
+        campaign: winnerCamp,
+        dossier: currDossier,
+        preset: latestPresetRef.current,
+        worldbook: latestWorldbookRef.current,
+      }).then((enc) => {
+        if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
+        if (enc.fromLlm) {
+          setActiveExpression(enc.expression);
+          enqueueTask({ kind: 'opponent', speaker: currChar.name, text: enc.reply });
+        }
+      });
+    } else if (state.players.human.chips === 0) {
+      const loserCamp = latestCampaignRef.current;
+      const currDossier = latestDossierRef.current;
+      const currChar = latestCharRef.current;
+      const activeEnt = getActiveDisguiseEntity(loserCamp);
+      const eventKind = activeEnt.isCore ? 'core-seized' : 'decoy-escape';
+      scheduleTimeout(() => {
+        const latest = latestStateRef.current;
+        if (latest.phase !== 'showdown' || latest.players.human.chips !== 0) return;
+        setCampaign((prev) => resolveMatchDefeat(prev, currChar.name, currDossier.identityTitle));
+      }, 1150);
+      void requestEncounterDialogue({
+        eventKind,
+        character: currChar,
+        state,
+        llmConfig: latestLlmRef.current,
+        campaign: loserCamp,
+        dossier: currDossier,
+        preset: latestPresetRef.current,
+        worldbook: latestWorldbookRef.current,
+        detailNote: activeEnt.name,
+      }).then((enc) => {
+        if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
+        if (enc.fromLlm) {
+          setActiveExpression(enc.expression);
+          enqueueTask({ kind: 'opponent', speaker: currChar.name, text: enc.reply });
+        }
+      });
+    }
+  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, scheduleTimeout]);
 
   const cancelHoldHalfRaise = useCallback(() => {
     if (holdIntervalRef.current !== null) {
@@ -957,7 +1073,8 @@ export function App() {
     setState((prev) => startNextHand(prev));
   };
 
-  const performFullReset = (customConfig?: GameConfig) => {
+  const performFullReset = (customConfig?: GameConfig, nextCharacter?: ContractCharacter) => {
+    const targetChar = nextCharacter ?? character;
     const cfg = customConfig ?? state.config;
     for (const id of timersRef.current) {
       window.clearTimeout(id);
@@ -974,24 +1091,59 @@ export function App() {
     setShowRaiseTiers(false);
     setVfxTestMode('auto');
     setRoundLossFlicker(false);
+    setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
     lastHandledShowdownHandRef.current = 0;
-    setState(
-      createInitialState({
-        config: cfg,
-        opponentName: character.name,
-      })
-    );
+    const freshState = createInitialState({
+      config: cfg,
+      opponentName: targetChar.name,
+    });
+    setState(freshState);
     setMessages([
       {
         id: `reset-${Date.now()}`,
         sender: 'opponent',
-        speaker: character.name,
-        text: '战局已重置。新的算力注入完成，请出牌。',
+        speaker: targetChar.name,
+        text: '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
         crushed: false,
       },
     ]);
+    return freshState;
+  };
+
+  const advanceToNextPursuerMatch = async (nextCamp: typeof campaign) => {
+    let nextChar = character;
+    if (catalog.length > 1) {
+      const currIdx = catalog.findIndex((c) => c.fileName === character.fileName);
+      const nextCard = catalog[(currIdx + 1) % catalog.length];
+      try {
+        nextChar = await loadContractCharacterByFile(nextCard.fileName);
+        setCharacter(nextChar);
+      } catch {
+        // Keep current character if loading fails
+      }
+    }
+    const nextDossier = buildPursuerDossier(nextChar, nextCamp.roundIndex);
+    const freshState = performFullReset(
+      { ...state.config, aiStyle: deriveAiStyleFromCharacter(nextChar) },
+      nextChar
+    );
+    const arrive = await requestEncounterDialogue({
+      eventKind: 'pursuer-arrive',
+      character: nextChar,
+      state: freshState,
+      llmConfig: latestLlmRef.current,
+      campaign: nextCamp,
+      dossier: nextDossier,
+      preset: latestPresetRef.current,
+      worldbook: latestWorldbookRef.current,
+    });
+    if (arrive.logEntry) {
+      setLlmLogs((p) => [arrive.logEntry!, ...p].slice(0, 40));
+    }
+    setActiveExpression(arrive.expression);
+    enqueueTask({ kind: 'opponent', speaker: nextChar.name, text: arrive.reply });
   };
 
   const handleSwitchContractFile = async (fileName: string) => {
@@ -1066,12 +1218,24 @@ export function App() {
 
     enqueueTask({ kind: 'human', text: trimmed });
 
+    const historySnapshot = messagesRef.current.slice(-6).map((m) => ({
+      id: m.id,
+      sender: m.sender,
+      speakerName: m.speaker,
+      text: m.text,
+      timestamp: Date.now(),
+    }));
+
     const res = await requestOpponentChatReply({
       character,
       state: latestStateRef.current,
       llmConfig,
-      chatHistory: [],
+      chatHistory: historySnapshot,
       userText: trimmed,
+      campaign,
+      dossier,
+      preset: activePreset,
+      worldbook,
     });
     if (res.logEntry) {
       setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
@@ -1184,10 +1348,10 @@ export function App() {
     (vfxTestMode === 'low' || (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
   const isLowCompute = isAiLowCompute || isHumanLowCompute;
 
-  const portraitSrc = resolveCharacterPortrait(
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（无魔女化差分时平滑回退）
+  const portraitSrc = resolveVirtualEntityPortrait(
     character,
-    activeExpression,
-    llmConfig.overloadPersona
+    activeExpression
   );
   const accentColor = llmConfig.overloadPersona
     ? '#FF4757'
@@ -1273,11 +1437,11 @@ export function App() {
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
               <span>
-                {character.name} [{character.title}]
+                {character.name} · {dossier.identityTitle}
               </span>
             </div>
             <span className="lc-opp-codename">
-              {isAiThinking ? 'THINKING...' : character.codename.toUpperCase()}
+              {isAiThinking ? 'THINKING...' : `R${campaign.roundIndex} · T${dossier.threatLevel}`}
             </span>
           </header>
 
@@ -1537,159 +1701,206 @@ export function App() {
           </div>
         </section>
 
-        {/* COL 2, ROW 3: Player 3 Cards + 1-Line Hacker & Scan Skill Bar */}
+        {/* COL 2, ROW 3: Player Avatar Dock (Left) + 3 Cards + Hacker & Scan Skill Bar */}
         <section
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
           aria-label="己方手牌序列区"
         >
-          <div className="lc-status-strip" style={{ width: '100%' }}>
-            <span className="lc-micro-tag cyan">
-              己方：{humanSummary.label} · {humanSummary.detail}
-            </span>
-            <span className="lc-micro-tag">可用算力 {human.chips}</span>
-          </div>
-
-          <div className="lc-cards-row">
-            {human.hand.map((hc, idx) => {
-              const isPrivate = hc.visibility === 'private';
-              const canSelectOpen = isHumanTurn && !isPrivate;
-              const canDrag =
-                isHumanTurn &&
-                state.phase !== 'river' &&
-                !isPrivate &&
-                !hc.lockedFromSwap &&
-                hiddenCount > 0 &&
-                diff === 0 &&
-                human.chips >= swapFee;
-              const isSwappingHidden = Boolean(
-                swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
-              );
-              const tamperLabel =
-                hc.originalCard &&
-                (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
-                  ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
-                  : undefined;
-
-              return (
-                <CyberCard3D
-                  key={`human-hand-${idx}`}
-                  id={`human-hand-card-${idx}`}
-                  card={hc.card}
-                  faceDown={false}
-                  size="lg"
-                  isOwnPrivate={isPrivate}
-                  selected={selectedHandIndex === idx}
-                  draggable={canDrag}
-                  isDragSource={draggedHandIndex === idx}
-                  isSwappingHidden={isSwappingHidden}
-                  tamperLabel={tamperLabel}
-                  justActed={Boolean(
-                    !isSwappingHidden &&
-                      evt &&
-                      ((evt.actor === 'human' && evt.type === 'swap' && evt.handIndex === idx) ||
-                        (evt.actor === 'human' && evt.type === 'hack' && evt.handIndex === idx))
-                  )}
-                  isWinner={
-                    isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
-                  }
-                  actionHint={
-                    isPrivate
-                      ? '己方私有暗牌（不可换出，不可篡改）'
-                      : canDrag
-                        ? '拖拽至暗牌互换；点击选中后可用黑客技能或点暗牌互换'
-                        : canSelectOpen
-                          ? '点击选中明牌以使用黑客技能'
-                          : undefined
-                  }
-                  onClick={canSelectOpen ? () => handleSelectHumanCard(idx) : undefined}
-                  onDragStart={canDrag ? (e) => handleHandDragStart(idx, e) : undefined}
-                  onDragEnd={() => {
-                    setDraggedHandIndex(null);
-                    setDragOverBoardIndex(null);
-                  }}
+          <div className="lc-player-main-split">
+            <div
+              className={`lc-player-avatar-dock ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
+              style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
+            >
+              <div className="lc-avatar-frame">
+                <img
+                  src={activeDisguise.virtualPortrait}
+                  alt={activeDisguise.name}
+                  className="lc-avatar-img"
                 />
-              );
-            })}
-          </div>
+                <span className={`lc-avatar-badge ${activeDisguise.isCore ? 'core' : 'decoy'}`}>
+                  {activeDisguise.isCore ? '本体' : '诱饵'}
+                </span>
+              </div>
+              <div className="lc-avatar-name" title={activeDisguise.name}>
+                {activeDisguise.codename}
+              </div>
+              <div className="lc-avatar-meta">
+                通缉 LV.{campaign.wantedLevel} · 诱饵 {campaign.capturedEntities.length}
+              </div>
+              <button
+                id="player-btn-switch-disguise"
+                type="button"
+                className="lc-avatar-switch-btn"
+                onClick={() => {
+                  if (state.handNumber === 1 && state.actionHistory.length === 0) {
+                    setManualDisguiseOpen(true);
+                  } else if (campaign.capturedEntities.length === 0) {
+                    pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
+                  } else {
+                    pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
+                  }
+                }}
+                title="每局开战前可选择俘获的虚拟实体作为伪装诱饵"
+              >
+                {campaign.capturedEntities.length > 0 ? '切换伪装' : '伪装库(0)'}
+              </button>
+            </div>
 
-          {/* Hacker Skills (+1 / -1 / Flip Suit) + Universal Scan Bar */}
-          <div className="lc-hack-bar" role="group" aria-label="黑客与扫描技能栏">
-            {(
-              [
-                {
-                  id: 'hack-btn-plus-one',
-                  skill: 'plus-one' as const,
-                  label: '+1',
-                  cost: state.config.hackPlusCost,
-                  icon: <PixelPlusOneIcon size={12} />,
-                },
-                {
-                  id: 'hack-btn-minus-one',
-                  skill: 'minus-one' as const,
-                  label: '-1',
-                  cost: state.config.hackMinusCost,
-                  icon: <PixelMinusOneIcon size={12} />,
-                },
-                {
-                  id: 'hack-btn-flip-suit',
-                  skill: 'flip-suit' as const,
-                  label: '反色',
-                  cost: state.config.hackFlipSuitCost,
-                  icon: <PixelFlipSuitIcon size={12} />,
-                },
-              ] as const
-            ).map((btn) => {
-              const isSealed = human.sealedSkills.includes(btn.skill);
-              const usedThisTurn = state.usedHackThisTurn;
-              const disabled = !isHumanTurn || diff > 0 || isSealed || usedThisTurn || human.chips < btn.cost;
-              return (
+            <div className="lc-player-cards-col">
+              <div className="lc-status-strip" style={{ width: '100%' }}>
+                <span className="lc-micro-tag cyan">
+                  己方：{humanSummary.label} · {humanSummary.detail}
+                </span>
+                <span className="lc-micro-tag">可用算力 {human.chips}</span>
+              </div>
+
+              <div className="lc-cards-row">
+                {human.hand.map((hc, idx) => {
+                  const isPrivate = hc.visibility === 'private';
+                  const canSelectOpen = isHumanTurn && !isPrivate;
+                  const canDrag =
+                    isHumanTurn &&
+                    state.phase !== 'river' &&
+                    !isPrivate &&
+                    !hc.lockedFromSwap &&
+                    hiddenCount > 0 &&
+                    diff === 0 &&
+                    human.chips >= swapFee;
+                  const isSwappingHidden = Boolean(
+                    swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
+                  );
+                  const tamperLabel =
+                    hc.originalCard &&
+                    (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
+                      ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
+                      : undefined;
+
+                  return (
+                    <CyberCard3D
+                      key={`human-hand-${idx}`}
+                      id={`human-hand-card-${idx}`}
+                      card={hc.card}
+                      faceDown={false}
+                      size="lg"
+                      isOwnPrivate={isPrivate}
+                      selected={selectedHandIndex === idx}
+                      draggable={canDrag}
+                      isDragSource={draggedHandIndex === idx}
+                      isSwappingHidden={isSwappingHidden}
+                      tamperLabel={tamperLabel}
+                      justActed={Boolean(
+                        !isSwappingHidden &&
+                          evt &&
+                          ((evt.actor === 'human' && evt.type === 'swap' && evt.handIndex === idx) ||
+                            (evt.actor === 'human' && evt.type === 'hack' && evt.handIndex === idx))
+                      )}
+                      isWinner={
+                        isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
+                      }
+                      actionHint={
+                        isPrivate
+                          ? '己方私有暗牌（不可换出，不可篡改）'
+                          : canDrag
+                            ? '拖拽至暗牌互换；点击选中后可用黑客技能或点暗牌互换'
+                            : canSelectOpen
+                              ? '点击选中明牌以使用黑客技能'
+                              : undefined
+                      }
+                      onClick={canSelectOpen ? () => handleSelectHumanCard(idx) : undefined}
+                      onDragStart={canDrag ? (e) => handleHandDragStart(idx, e) : undefined}
+                      onDragEnd={() => {
+                        setDraggedHandIndex(null);
+                        setDragOverBoardIndex(null);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* Hacker Skills (+1 / -1 / Flip Suit) + Universal Scan Bar */}
+              <div className="lc-hack-bar" role="group" aria-label="黑客与扫描技能栏">
+                {(
+                  [
+                    {
+                      id: 'hack-btn-plus-one',
+                      skill: 'plus-one' as const,
+                      label: '+1',
+                      cost: state.config.hackPlusCost,
+                      icon: <PixelPlusOneIcon size={12} />,
+                    },
+                    {
+                      id: 'hack-btn-minus-one',
+                      skill: 'minus-one' as const,
+                      label: '-1',
+                      cost: state.config.hackMinusCost,
+                      icon: <PixelMinusOneIcon size={12} />,
+                    },
+                    {
+                      id: 'hack-btn-flip-suit',
+                      skill: 'flip-suit' as const,
+                      label: '反色',
+                      cost: state.config.hackFlipSuitCost,
+                      icon: <PixelFlipSuitIcon size={12} />,
+                    },
+                  ] as const
+                ).map((btn) => {
+                  const isSealed = human.sealedSkills.includes(btn.skill);
+                  const usedThisTurn = state.usedHackThisTurn;
+                  const disabled = !isHumanTurn || diff > 0 || isSealed || usedThisTurn || human.chips < btn.cost;
+                  return (
+                    <button
+                      key={btn.skill}
+                      id={btn.id}
+                      type="button"
+                      className={`lc-hack-btn ${isSealed ? 'is-sealed' : ''}`}
+                      disabled={disabled}
+                      onClick={() => handleExecuteHack(btn.skill)}
+                      title={
+                        diff > 0
+                          ? '遭遇加注，请先在右侧跟注后再使用技能'
+                          : isSealed
+                            ? '此技能已被扫描抓获封印'
+                            : usedThisTurn
+                              ? '黑客技能每回合限用 1 次'
+                              : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                      }
+                    >
+                      {btn.icon}
+                      <span>{isSealed ? '封印' : usedThisTurn ? '已用' : btn.label}</span>
+                      {!isSealed && !usedThisTurn && <span className="lc-hack-cost">{btn.cost}</span>}
+                    </button>
+                  );
+                })}
+
                 <button
-                  key={btn.skill}
-                  id={btn.id}
+                  id="hack-btn-scan-toggle"
                   type="button"
-                  className={`lc-hack-btn ${isSealed ? 'is-sealed' : ''}`}
-                  disabled={disabled}
-                  onClick={() => handleExecuteHack(btn.skill)}
+                  className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
+                  disabled={!isHumanTurn || diff > 0 || state.usedScanThisTurn || human.chips < state.config.scanCost}
+                  onClick={() => setScanMode((s) => !s)}
                   title={
                     diff > 0
-                      ? '遭遇加注，请先在右侧跟注后再使用技能'
-                      : isSealed
-                        ? '此技能已被扫描抓获封印'
-                        : usedThisTurn
-                          ? '黑客技能每回合限用 1 次'
-                          : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                      ? '遭遇加注，请先在右侧跟注后再进行扫描'
+                      : state.usedScanThisTurn
+                        ? '扫描技能每回合限用 1 次'
+                        : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${state.config.scanCost}，每回合限 1 次）`
                   }
                 >
-                  {btn.icon}
-                  <span>{isSealed ? '封印' : usedThisTurn ? '已用' : btn.label}</span>
-                  {!isSealed && !usedThisTurn && <span className="lc-hack-cost">{btn.cost}</span>}
+                  <PixelScanIcon size={12} />
+                  <span>{state.usedScanThisTurn ? '已用' : scanMode ? '取消' : '扫描'}</span>
+                  {!state.usedScanThisTurn && <span className="lc-hack-cost">{state.config.scanCost}</span>}
                 </button>
-              );
-            })}
+              </div>
 
-            <button
-              id="hack-btn-scan-toggle"
-              type="button"
-              className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
-              disabled={!isHumanTurn || diff > 0 || state.usedScanThisTurn || human.chips < state.config.scanCost}
-              onClick={() => setScanMode((s) => !s)}
-              title={
-                diff > 0
-                  ? '遭遇加注，请先在右侧跟注后再进行扫描'
-                  : state.usedScanThisTurn
-                    ? '扫描技能每回合限用 1 次'
-                    : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${state.config.scanCost}，每回合限 1 次）`
-              }
-            >
-              <PixelScanIcon size={12} />
-              <span>{state.usedScanThisTurn ? '已用' : scanMode ? '取消' : '扫描'}</span>
-              {!state.usedScanThisTurn && <span className="lc-hack-cost">{state.config.scanCost}</span>}
-            </button>
-          </div>
-
-          <div className="lc-player-footer">
-            <span>PRIV=私有暗牌 · MOD=篡改仅己方可见</span>
-            <span>换牌门票：{swapFee}</span>
+              <div className="lc-player-footer">
+                <span>
+                  {campaign.acquiredSkills.length > 0
+                    ? `已获技能: ${campaign.acquiredSkills.map((id) => getSkillById(id)?.name ?? id).slice(-2).join(' / ')}`
+                    : 'PRIV=私有暗牌 · MOD=篡改仅己方可见'}
+                </span>
+                <span>换牌门票：{swapFee}</span>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -2237,6 +2448,8 @@ export function App() {
                   onClick={() => {
                     if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
                     else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
+                    else if (item.keyName === 'preset-wb')
+                      setActiveModal({ type: 'preset-wb', section: 'preset' });
                     else if (item.keyName === 'rules') setActiveModal({ type: 'protocol', tab: 'suits' });
                     else if (item.keyName === 'audit') setActiveModal({ type: 'protocol', tab: 'audit' });
                     else if (item.keyName === 'tuning') setActiveModal({ type: 'tuning' });
@@ -2342,7 +2555,11 @@ export function App() {
           <LlmTerminalModal
             config={llmConfig}
             character={character}
+            dossier={dossier}
+            campaign={campaign}
             state={state}
+            activePreset={activePreset}
+            worldbook={worldbook}
             logs={llmLogs}
             onSaveConfig={(next) => {
               setLlmConfig(next);
@@ -2350,8 +2567,84 @@ export function App() {
             }}
             onAppendLog={(entry) => setLlmLogs((prev) => [entry, ...prev].slice(0, 40))}
             onClearLogs={() => setLlmLogs([])}
+            onOpenPresetWorldbook={(sec) => setActiveModal({ type: 'preset-wb', section: sec })}
             onNotify={pushToast}
             onClose={() => setActiveModal({ type: 'none' })}
+          />
+        )}
+
+        {activeModal.type === 'preset-wb' && (
+          <PresetWorldbookModal
+            initialSection={activeModal.section}
+            presets={presets}
+            activePresetId={activePreset.id}
+            worldbook={worldbook}
+            campaign={campaign}
+            character={character}
+            dossier={dossier}
+            onUpdatePresets={(nextPresets, nextActiveId) => {
+              setPresets(nextPresets);
+              savePresets(nextPresets);
+              if (nextActiveId) {
+                setActivePresetId(nextActiveId);
+                saveActivePresetId(nextActiveId);
+              }
+            }}
+            onUpdateWorldbook={(nextWb) => {
+              setWorldbook(nextWb);
+              saveWorldbook(nextWb);
+            }}
+            onNotify={pushToast}
+            onClose={() => setActiveModal({ type: 'none' })}
+          />
+        )}
+
+        {(campaign.status === 'loot-select' ||
+          campaign.status === 'escaped' ||
+          campaign.status === 'failed-ending' ||
+          campaign.status === 'disguise-select' ||
+          manualDisguiseOpen) && (
+          <CampaignOutcomeModal
+            campaign={campaign}
+            onSelectDisguise={(entityId) => {
+              const nextCamp = selectMatchDisguise(campaign, entityId);
+              setCampaign(nextCamp);
+              setManualDisguiseOpen(false);
+              const chosen = getActiveDisguiseEntity(nextCamp);
+              pushToast(
+                'info',
+                `已切换出战虚拟实体：${chosen.name}`,
+                chosen.isCore ? '警告：以本体迎战败北将触发失败结局' : '安全：当前实体可作为诱饵抵消一次失败'
+              );
+            }}
+            onClaimLootSkill={(skillId) => {
+              const nextCamp = claimVictoryLoot(campaign, skillId);
+              setCampaign(nextCamp);
+              void advanceToNextPursuerMatch(nextCamp);
+            }}
+            onContinueAfterEscape={() => {
+              const nextCamp = {
+                ...campaign,
+                status: (campaign.capturedEntities.length > 0 ? 'disguise-select' : 'active') as
+                  | 'disguise-select'
+                  | 'active',
+                lastEscapeLog: null,
+              };
+              setCampaign(nextCamp);
+              void advanceToNextPursuerMatch(nextCamp);
+            }}
+            onRestartCampaign={() => {
+              const fresh = createInitialCampaign(campaign.playerCodename);
+              setCampaign(fresh);
+              setManualDisguiseOpen(false);
+              performFullReset();
+              pushToast('success', '已重构黑域本体档案，重新开始潜行');
+            }}
+            onCloseOptional={
+              manualDisguiseOpen && campaign.status === 'active'
+                ? () => setManualDisguiseOpen(false)
+                : undefined
+            }
           />
         )}
 

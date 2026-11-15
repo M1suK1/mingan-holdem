@@ -265,3 +265,76 @@ export interface OpponentAgent {
     dialogue: OpponentDialogue;
   }>;
 }
+
+export interface SkillPoolEntry {
+  id: string;
+  name: string;
+  category: 'hack' | 'recon' | 'protocol' | 'passive';
+  summary: string;
+  costHint?: number;
+  implemented: boolean;
+  tags: string[];
+}
+
+export interface VirtualEntity {
+  id: string;
+  name: string;
+  codename: string;
+  isCore: boolean;
+  sourceCharacterFile?: string;
+  sourceCharacterName?: string;
+  pursuerRole?: string;
+  virtualPortrait: string;
+  realityPortrait?: string;
+  accentColor: string;
+  capturedAtHand?: number;
+  capturedAtRound?: number;
+}
+
+export interface PursuerDossier {
+  identityTitle: string;
+  faction: string;
+  motive: string;
+  virtualEntityName: string;
+  threatLevel: number;
+  skillPoolIds: string[];
+}
+
+export interface CampaignState {
+  playerCodename: string;
+  wantedLevel: number;
+  bounty: number;
+  roundIndex: number;
+  coreEntity: VirtualEntity;
+  capturedEntities: VirtualEntity[];
+  activeDisguiseId: string;
+  acquiredSkills: string[];
+  defeatedPursuers: Array<{
+    name: string;
+    identityTitle: string;
+    entityName: string;
+    lootedSkillId?: string;
+    roundIndex: number;
+  }>;
+  pendingLoot?: {
+    pursuerName: string;
+    pursuerIdentity: string;
+    seizedEntity: VirtualEntity;
+    skillChoices: string[];
+  } | null;
+  lastEscapeLog?: {
+    sacrificedEntityName: string;
+    pursuerName: string;
+    roundIndex: number;
+  } | null;
+  status: 'disguise-select' | 'active' | 'loot-select' | 'escaped' | 'failed-ending';
+  failureEnding?: {
+    takenByName: string;
+    takenByIdentity: string;
+    finalWantedLevel: number;
+    roundsSurvived: number;
+    defeatedCount: number;
+    acquiredSkillsCount: number;
+    timestamp: number;
+  } | null;
+}

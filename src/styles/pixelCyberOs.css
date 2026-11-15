@@ -2583,6 +2583,362 @@ button:disabled {
 }
 
 /* =========================================================================
+   8B. Player Avatar Frame (Left of Cards) & Campaign / Preset / Worldbook UI
+   ========================================================================= */
+.lc-player-main-split {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 102px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.lc-player-avatar-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 6px;
+  background: #050810;
+  border: 1px solid var(--entity-accent, var(--neon-cyan));
+  box-shadow: inset 0 0 14px rgba(0, 240, 255, 0.08);
+}
+
+.lc-player-avatar-dock.is-core {
+  border-color: rgba(255, 46, 136, 0.72);
+  box-shadow: inset 0 0 14px rgba(255, 46, 136, 0.12);
+}
+
+.lc-avatar-frame {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  border: 1px solid var(--px-border-bright);
+  background: #020307;
+  overflow: hidden;
+}
+
+.lc-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+.lc-avatar-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(5, 7, 13, 0.92);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan-soft);
+}
+
+.lc-avatar-badge.core {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink-soft);
+}
+
+.lc-avatar-name {
+  width: 100%;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: var(--px-ghost-ui);
+}
+
+.lc-avatar-meta {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.lc-avatar-switch-btn {
+  width: 100%;
+  padding: 3px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--neon-cyan-soft);
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.52);
+  text-shadow: var(--px-ghost-ui);
+}
+
+.lc-avatar-switch-btn:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.22);
+  color: #ffffff;
+}
+
+.lc-player-cards-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Preset & Worldbook Modal */
+.lc-pwb-window {
+  width: min(100%, 980px);
+}
+
+.lc-pwb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-pwb-readonly-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  color: #ffd88a;
+}
+
+.lc-pwb-sampling-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lc-pwb-param {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.lc-pwb-param.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.lc-pwb-macro-strip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  background: #060911;
+  border: 1px dashed var(--px-border-bright);
+}
+
+.lc-macro-chip {
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  background: #0c1322;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: var(--neon-cyan-soft);
+}
+
+.lc-macro-chip:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.18);
+  color: #ffffff;
+}
+
+.lc-pwb-entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lc-pwb-entry-card {
+  padding: 9px;
+  background: #050810;
+  border: 1px solid var(--px-border-bright);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lc-pwb-entry-card.is-contract {
+  border-color: rgba(255, 46, 136, 0.55);
+}
+
+.lc-pwb-entry-card.is-focused {
+  border-color: var(--neon-cyan);
+}
+
+.lc-pwb-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.lc-wb-grid {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.lc-wb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.lc-wb-item-btn {
+  text-align: left;
+  padding: 7px 9px;
+  background: #060911;
+  border: 1px solid var(--px-border);
+  color: var(--text-main);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.lc-wb-item-btn.active {
+  border-color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.1);
+}
+
+.lc-wb-item-btn.is-off {
+  opacity: 0.5;
+}
+
+/* Campaign Loot / Disguise / Failure Modals */
+.lc-entity-capture-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lc-entity-thumb {
+  width: 68px;
+  height: 68px;
+  object-fit: cover;
+  object-position: top center;
+  border: 1px solid var(--neon-cyan);
+  background: #03050a;
+  flex-shrink: 0;
+}
+
+.lc-skill-loot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.lc-skill-loot-card {
+  text-align: left;
+  padding: 10px;
+  background: #060a13;
+  border: 1px solid var(--px-border-bright);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lc-skill-loot-card.selected,
+.lc-skill-loot-card:hover {
+  border-color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.12);
+}
+
+.lc-disguise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.lc-disguise-card {
+  text-align: left;
+  padding: 10px;
+  background: #060a13;
+  border: 1px solid var(--px-border-bright);
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lc-disguise-card.selected {
+  border-color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.14);
+}
+
+.lc-disguise-card.is-core.selected {
+  border-color: var(--neon-pink);
+  background: rgba(255, 46, 136, 0.14);
+}
+
+.lc-log-head-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.lc-log-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--px-border);
+}
+
+.lc-log-pre {
+  margin: 0;
+  padding: 8px;
+  background: #04060b;
+  border: 1px solid var(--px-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  .lc-player-main-split,
+  .lc-wb-grid,
+  .lc-pwb-sampling-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lc-player-avatar-dock {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
+/* =========================================================================
    9. Responsive Adjustments (Narrow Windows)
    ========================================================================= */
 @media (max-width: 960px) {
