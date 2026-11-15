@@ -57,7 +57,6 @@ import {
   requestLlmPokerDecision,
   requestOpponentChatReply,
   saveLlmConfigToStorage,
-  type ChatTrigger,
   type LlmCallLog,
   type LlmConfig,
 } from './engine/llmClient.ts';
@@ -477,39 +476,6 @@ export function App() {
     [processNextTask]
   );
 
-  const chatMemory = useCallback(
-    () => messagesRef.current.slice(-8).map((m) => ({ sender: m.sender, text: m.text })),
-    []
-  );
-
-  /**
-   * 事件驱动的主动台词：LLM 可用时由模型开口（走同一队列，动画一致），
-   * 否则退回本地语料模板。
-   */
-  const speakReaction = useCallback(
-    async (trigger: ChatTrigger, localText: string) => {
-      const cfg = latestLlmRef.current;
-      const speaker = latestCharRef.current.name;
-      if (!cfg.enabled || !cfg.proactiveChat) {
-        enqueueTask({ kind: 'opponent', speaker, text: localText });
-        return;
-      }
-      const res = await requestOpponentChatReply({
-        character: latestCharRef.current,
-        state: latestStateRef.current,
-        llmConfig: cfg,
-        trigger,
-        chatHistory: chatMemory(),
-      });
-      if (res.logEntry) {
-        setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
-      }
-      setActiveExpression(res.expression);
-      enqueueTask({ kind: 'opponent', speaker, text: res.reply });
-    },
-    [chatMemory, enqueueTask]
-  );
-
   // One-shot opening speech on mount
   useEffect(() => {
     if (hasBootedRef.current) return;
@@ -654,20 +620,17 @@ export function App() {
 
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
-          if (llmDecision.action) {
-            setActiveExpression(llmDecision.expression);
-            enqueueTask({
-              kind: 'opponent',
-              speaker: char.name,
-              text: llmDecision.reply,
-            });
-            const llmAction = llmDecision.action;
-            setState((prev) => {
-              if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
-              return applyAction(prev, llmAction);
-            });
-            return;
-          }
+          setActiveExpression(llmDecision.expression);
+          enqueueTask({
+            kind: 'opponent',
+            speaker: char.name,
+            text: llmDecision.reply,
+          });
+          setState((prev) => {
+            if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
+            return applyAction(prev, llmDecision.action);
+          });
+          return;
         }
 
         const decision = await agentRef.current.decide(snapshot);
@@ -779,19 +742,8 @@ export function App() {
             ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
             : `完全同分平局？一人一半回收算力池，下一局再见真章。`;
 
-    const reactionTrigger: ChatTrigger =
-      res.reason === 'scan-caught'
-        ? res.winner === 'human'
-          ? { kind: 'scan-caught-me' }
-          : { kind: 'scan-success' }
-        : res.winner === 'ai'
-          ? { kind: 'showdown-win', potWon: res.potWon }
-          : res.winner === 'human'
-            ? { kind: 'showdown-loss', potWon: res.potWon }
-            : { kind: 'showdown-tie', potWon: res.potWon };
-
-    void speakReaction(reactionTrigger, line);
-  }, [state.phase, state.result, state.handNumber, character.name, enqueueTask, speakReaction]);
+    enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+  }, [state.phase, state.result, state.handNumber, character.name, enqueueTask]);
 
   const cancelHoldHalfRaise = useCallback(() => {
     if (holdIntervalRef.current !== null) {
@@ -809,15 +761,6 @@ export function App() {
     setShowRaiseTiers(false);
     setScanMode(false);
     setState((prev) => applyAction(prev, action));
-
-    if (action.type === 'raise' && (action.isHalfStack || action.amount >= 40)) {
-      void speakReaction(
-        { kind: 'human-raise', amount: action.amount, big: Boolean(action.isHalfStack) || action.amount >= 80 },
-        action.isHalfStack
-          ? `直接把一半算力推进来了？行，那就看看谁先掉线。`
-          : `加 ${action.amount}？这点压力还不至于让我改写策略。`
-      );
-    }
   };
 
   const startHoldHalfRaise = (halfAmt: number) => {
@@ -1127,7 +1070,7 @@ export function App() {
       character,
       state: latestStateRef.current,
       llmConfig,
-      chatHistory: chatMemory(),
+      chatHistory: [],
       userText: trimmed,
     });
     if (res.logEntry) {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, BookOpen, Bot, Code2, Eye, EyeOff, Layers, PlugZap, Trash2, X } from 'lucide-react';
+import { Activity, Bot, Code2, Eye, EyeOff, PlugZap, Trash2, X } from 'lucide-react';
 import type { GameState } from '../engine/types.ts';
 import type { ContractCharacter } from '../engine/contractCards.ts';
 import {
@@ -9,17 +9,6 @@ import {
   type LlmCallLog,
   type LlmConfig,
 } from '../engine/llmClient.ts';
-import {
-  PROMPT_SCOPES,
-  loadPresets,
-  savePresets,
-  type ChatPreset,
-  type PromptScope,
-} from '../engine/llmPreset.ts';
-import { loadWorldbook, saveWorldbook, type WorldbookEntry } from '../engine/worldbook.ts';
-import { composeOpponentPrompt } from '../engine/llmPrompt.ts';
-import LlmPresetEditor from './LlmPresetEditor.tsx';
-import WorldbookEditor from './WorldbookEditor.tsx';
 
 interface LlmTerminalModalProps {
   config: LlmConfig;
@@ -44,33 +33,10 @@ export default function LlmTerminalModal({
   onNotify,
   onClose,
 }: LlmTerminalModalProps) {
-  const [tab, setTab] = useState<'gateway' | 'preset' | 'worldbook' | 'prompt' | 'logs'>('gateway');
+  const [tab, setTab] = useState<'gateway' | 'prompt' | 'logs'>('gateway');
   const [draft, setDraft] = useState<LlmConfig>({ ...config });
   const [showKey, setShowKey] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-  const [presets, setPresets] = useState<ChatPreset[]>(() => loadPresets());
-  const [worldbook, setWorldbook] = useState<WorldbookEntry[]>(() => loadWorldbook(character));
-  const [previewScope, setPreviewScope] = useState<PromptScope>('decision');
-
-  const patchPresets = (next: ChatPreset[]) => {
-    setPresets(next);
-    savePresets(next);
-  };
-
-  const patchWorldbook = (next: WorldbookEntry[]) => {
-    setWorldbook(next);
-    saveWorldbook(next);
-  };
-
-  const composedPreview = composeOpponentPrompt({
-    character,
-    state,
-    config: draft,
-    scope: previewScope,
-    sceneText: '牌桌态势预览',
-    presets,
-    worldbook,
-  });
 
   const handlePing = async () => {
     setIsTesting(true);
@@ -145,28 +111,6 @@ export default function LlmTerminalModal({
             模型网关配置
           </button>
           <button
-            id="llm-tab-preset"
-            type="button"
-            role="tab"
-            aria-selected={tab === 'preset'}
-            className={`modal-tab-btn ${tab === 'preset' ? 'active' : ''}`}
-            onClick={() => setTab('preset')}
-          >
-            <Layers size={14} aria-hidden="true" />
-            补全预设 ({presets.length})
-          </button>
-          <button
-            id="llm-tab-worldbook"
-            type="button"
-            role="tab"
-            aria-selected={tab === 'worldbook'}
-            className={`modal-tab-btn ${tab === 'worldbook' ? 'active' : ''}`}
-            onClick={() => setTab('worldbook')}
-          >
-            <BookOpen size={14} aria-hidden="true" />
-            世界书 ({worldbook.length})
-          </button>
-          <button
             id="llm-tab-prompt"
             type="button"
             role="tab"
@@ -226,113 +170,6 @@ export default function LlmTerminalModal({
                     checked={draft.drivePokerActions}
                     onChange={(e) =>
                       setDraft((p) => ({ ...p, drivePokerActions: e.target.checked }))
-                    }
-                  />
-                </div>
-
-                <div className="form-field-row">
-                  <div>
-                    <label htmlFor="llm-switch-hacker" style={{ fontWeight: 700 }}>
-                      允许 LLM 使用黑客技能与扫描协议
-                    </label>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      关闭后合法动作清单里不再出现篡改与扫描，模型只会换牌、翻牌、加注与弃牌
-                    </div>
-                  </div>
-                  <input
-                    id="llm-switch-hacker"
-                    type="checkbox"
-                    checked={draft.useHackerSkills}
-                    onChange={(e) => setDraft((p) => ({ ...p, useHackerSkills: e.target.checked }))}
-                  />
-                </div>
-
-                <div className="form-field-row">
-                  <div>
-                    <label htmlFor="llm-switch-proactive" style={{ fontWeight: 700 }}>
-                      关键事件由模型主动开口
-                    </label>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      摊牌、扫描、技能封印、重注压迫等事件触发时由模型生成台词；关闭则使用内置语料模板
-                    </div>
-                  </div>
-                  <input
-                    id="llm-switch-proactive"
-                    type="checkbox"
-                    checked={draft.proactiveChat}
-                    onChange={(e) => setDraft((p) => ({ ...p, proactiveChat: e.target.checked }))}
-                  />
-                </div>
-
-                <div className="form-field-row">
-                  <div>
-                    <label htmlFor="llm-switch-worldbook" style={{ fontWeight: 700 }}>
-                      注入世界书命中词条
-                    </label>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      关闭后只发送预设正文，不再按关键词注入世界观与规则词条
-                    </div>
-                  </div>
-                  <input
-                    id="llm-switch-worldbook"
-                    type="checkbox"
-                    checked={draft.worldbookEnabled}
-                    onChange={(e) => setDraft((p) => ({ ...p, worldbookEnabled: e.target.checked }))}
-                  />
-                </div>
-
-                <div className="form-field-row">
-                  <label htmlFor="llm-select-active-preset">绑定的补全预设</label>
-                  <select
-                    id="llm-select-active-preset"
-                    className="cyber-select"
-                    value={draft.presetId}
-                    onChange={(e) => setDraft((p) => ({ ...p, presetId: e.target.value }))}
-                  >
-                    {presets.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-field-row">
-                  <label htmlFor="llm-input-timeout">单次请求超时（毫秒）</label>
-                  <input
-                    id="llm-input-timeout"
-                    type="number"
-                    min={4000}
-                    max={60000}
-                    step={1000}
-                    className="cyber-text-input llm-num-input"
-                    value={draft.requestTimeoutMs}
-                    onChange={(e) =>
-                      setDraft((p) => ({ ...p, requestTimeoutMs: Number(e.target.value) }))
-                    }
-                  />
-                  <label htmlFor="llm-input-retries">非法动作重试次数</label>
-                  <input
-                    id="llm-input-retries"
-                    type="number"
-                    min={0}
-                    max={3}
-                    step={1}
-                    className="cyber-text-input llm-num-input"
-                    value={draft.maxRetries}
-                    onChange={(e) => setDraft((p) => ({ ...p, maxRetries: Number(e.target.value) }))}
-                  />
-                  <label htmlFor="llm-input-wb-budget">世界书预算（字符）</label>
-                  <input
-                    id="llm-input-wb-budget"
-                    type="number"
-                    min={200}
-                    max={6000}
-                    step={100}
-                    className="cyber-text-input llm-num-input"
-                    value={draft.worldbookBudget}
-                    onChange={(e) =>
-                      setDraft((p) => ({ ...p, worldbookBudget: Number(e.target.value) }))
                     }
                   />
                 </div>
@@ -454,71 +291,8 @@ export default function LlmTerminalModal({
             </>
           )}
 
-          {tab === 'preset' && (
-            <LlmPresetEditor
-              presets={presets}
-              presetId={draft.presetId}
-              onChange={patchPresets}
-              onSelect={(id) => {
-                const next = { ...draft, presetId: id };
-                setDraft(next);
-                onSaveConfig(next);
-              }}
-              onNotify={onNotify}
-            />
-          )}
-
-          {tab === 'worldbook' && (
-            <WorldbookEditor
-              entries={worldbook}
-              budget={draft.worldbookBudget}
-              onChange={patchWorldbook}
-              onNotify={onNotify}
-            />
-          )}
-
           {tab === 'prompt' && (
             <>
-              <div className="cyber-panel-box">
-                <div className="form-field-row">
-                  <label htmlFor="llm-select-preview-scope">按场景预览最终 System Prompt</label>
-                  <select
-                    id="llm-select-preview-scope"
-                    className="cyber-select"
-                    value={previewScope}
-                    onChange={(e) => setPreviewScope(e.target.value as PromptScope)}
-                  >
-                    {PROMPT_SCOPES.map((scope) => (
-                      <option key={scope.id} value={scope.id}>
-                        {scope.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="llm-editor-preview-stats">
-                  <span>预设 {composedPreview.preset.name}</span>
-                  <span>世界书命中 {composedPreview.worldbook.hits.length} 条</span>
-                  <span>共 {composedPreview.chars} 字符</span>
-                  <span>未解析宏 {composedPreview.missing.length}</span>
-                </div>
-                <pre
-                  style={{
-                    margin: 0,
-                    padding: 10,
-                    borderRadius: 6,
-                    background: 'rgba(6, 9, 18, 0.9)',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 11.5,
-                    whiteSpace: 'pre-wrap',
-                    maxHeight: 260,
-                    overflow: 'auto',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  {composedPreview.system || '（当前场景没有任何启用中的词条）'}
-                </pre>
-              </div>
-
               <div className="cyber-panel-box">
                 <label htmlFor="llm-textarea-custom-prompt" style={{ fontWeight: 700, fontSize: 13 }}>
                   附加导演/扮演指令（可选，实时注入 System Prompt）
