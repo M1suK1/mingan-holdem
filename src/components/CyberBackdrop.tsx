@@ -2,107 +2,137 @@ import { memo } from 'react';
 import type { BattleSituation } from '../engine/types.ts';
 
 interface CyberBackdropProps {
-  situation: BattleSituation;
-  pot: number;
+  situation?: BattleSituation;
+  pot?: number;
 }
 
 export const SITUATION_META: Record<
   BattleSituation,
   { label: string; code: string; firewallPct: number }
 > = {
-  recon: { label: '侦察潜伏', code: 'SEC_LEVEL_01 // RECON', firewallPct: 94 },
-  intrusion: { label: '协议交锋', code: 'SEC_LEVEL_02 // INTRUSION', firewallPct: 68 },
-  overclock: { label: '算力过载', code: 'SEC_LEVEL_03 // OVERCLOCK', firewallPct: 36 },
-  breach: { label: '核心熔断', code: 'CRITICAL // ALL_IN_BREACH', firewallPct: 8 },
-  victory: { label: '破译接管', code: 'ROOT_ACCESS // GRANTED', firewallPct: 100 },
-  disconnect: { label: '链路受阻', code: 'ICE_COUNTER // BLOCKED', firewallPct: 20 },
+  recon: { label: '侦察潜伏', code: 'CODE : RECON', firewallPct: 94 },
+  intrusion: { label: '协议交锋', code: 'CODE : INTRUSION', firewallPct: 68 },
+  overclock: { label: '算力过载', code: 'CODE : OVERCLOCK', firewallPct: 36 },
+  breach: { label: '核心熔断', code: 'CODE : BREACH', firewallPct: 8 },
+  victory: { label: '破译接管', code: 'CODE : ROOT', firewallPct: 100 },
+  disconnect: { label: '链路受阻', code: 'CODE : BLOCKED', firewallPct: 20 },
 };
 
-const HEX_COLUMNS = [
-  '0x7F A4 19 C2 8E FF 01 4B',
-  'PKT::SYNC 99 2E 88 D0 41',
-  'ICE::NODE 00 F0 FF 7A 13',
-  'HASH::4C 9B E2 10 77 C8',
-  'PORT::5178 ACK 3D 9F 02',
-  'CIPHER::B0 P1 14 0E 6A',
+const DATA_STREAMS = [
+  { left: '4%', tokens: '01001101  0x7F  SYN::ACK  B_08', speed: '14s', delay: '-2s', tone: 'cyan' },
+  { left: '11%', tokens: 'PKT::PINK  110101  NODE_01  CRC', speed: '18s', delay: '-7s', tone: 'pink' },
+  { left: '19%', tokens: '0xA4  HASH::0040  ICE::LINK  101', speed: '16s', delay: '-4s', tone: 'dim' },
+  { left: '31%', tokens: '00110101  NET::BUS  0x1C  PORT', speed: '22s', delay: '-11s', tone: 'dim' },
+  { left: '69%', tokens: '10101100  MEM::ALLOC  0x9E  ACK', speed: '21s', delay: '-6s', tone: 'dim' },
+  { left: '80%', tokens: '0xFF  STREAM::P12  010110  SYNC', speed: '15s', delay: '-3s', tone: 'cyan' },
+  { left: '88%', tokens: 'HEX::2E88  110010  OVR::04  BIT', speed: '17s', delay: '-9s', tone: 'pink' },
+  { left: '95%', tokens: '01110010  ROOT::SYS  0x00  END', speed: '13s', delay: '-5s', tone: 'cyan' },
 ];
 
+const PIXEL_MOTES = [
+  { left: '8%', top: '28%', delay: '0s', cyan: true },
+  { left: '16%', top: '68%', delay: '-2.1s', cyan: false },
+  { left: '24%', top: '18%', delay: '-3.5s', cyan: true },
+  { left: '76%', top: '22%', delay: '-1.4s', cyan: false },
+  { left: '84%', top: '62%', delay: '-3.6s', cyan: true },
+  { left: '92%', top: '42%', delay: '-0.8s', cyan: false },
+];
+
+/**
+ * Dynamic Pixel Data-Stream Backdrop (Last-Command Pitch-Black Aesthetic):
+ * - Pitch-black void + faint dark monochrome pixel monolith silhouettes
+ * - Scrolling vertical hex/binary pixel data streams
+ * - Animated stepped SVG data-bus traces with traveling packet pulses
+ */
 export const CyberBackdrop = memo(function CyberBackdrop({
-  situation,
-  pot,
+  situation = 'recon',
+  pot = 60,
 }: CyberBackdropProps) {
+  const speedBoost = Math.min(4, Math.floor(pot / 80));
+
   return (
-    <div
-      className={`cyber-backdrop situation-${situation}`}
-      data-situation={situation}
-      aria-hidden="true"
-    >
-      {/* Dynamic radial aura responding to situation */}
-      <div className="cyber-aura-layer" />
-
-      {/* 3D perspective cyberspace matrix floor */}
-      <div className="cyber-grid-horizon">
-        <div className="cyber-grid-plane" />
-      </div>
-
-      {/* Vertical flowing packet telemetry columns */}
-      <div className="cyber-data-streams">
-        {HEX_COLUMNS.map((text, idx) => (
-          <div
-            key={idx}
-            className={`data-stream-col col-${idx + 1}`}
-            style={{ animationDuration: `${14 - Math.min(7, Math.floor(pot / 45)) + idx * 1.7}s` }}
-          >
-            <span>{text}</span>
-            <span>{text}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Dynamic Battleground Signal Waveform */}
+    <div className={`lc-backdrop situation-${situation}`} aria-hidden="true">
+      {/* Deep dark monochrome silhouettes + stepped pixel circuit bus traces */}
       <svg
-        viewBox="0 0 1440 160"
-        preserveAspectRatio="none"
-        style={{
-          position: 'absolute',
-          top: '18%',
-          left: 0,
-          width: '100%',
-          height: '140px',
-          opacity: situation === 'breach' || situation === 'overclock' ? 0.34 : 0.16,
-          transition: 'opacity 0.6s ease',
-        }}
+        viewBox="0 0 1280 720"
+        preserveAspectRatio="xMidYMid slice"
+        shapeRendering="crispEdges"
+        className="lc-banners-svg"
       >
+        {/* Subtle dark pixel monolith silhouettes on outer edges */}
+        <g fill="#0a0c12">
+          <rect x="34" y="190" width="56" height="330" />
+          <rect x="28" y="182" width="68" height="8" fill="#121620" />
+          <rect x="1190" y="190" width="56" height="330" />
+          <rect x="1184" y="182" width="68" height="8" fill="#121620" />
+        </g>
+
+        {/* Orthogonal pixel data-bus guide rails */}
+        <g fill="none" stroke="#131926" strokeWidth="2">
+          <path d="M0,148 H260 L292,180 H988 L1020,148 H1280" />
+          <path d="M0,360 H220 M1060,360 H1280" />
+          <path d="M0,564 H250 L282,532 H998 L1030,564 H1280" />
+        </g>
+
+        {/* Traveling glowing pixel data-bus pulses */}
         <path
-          d={
-            situation === 'breach'
-              ? 'M0,80 L180,80 L220,18 L260,142 L310,30 L360,130 L420,80 L720,80 L760,12 L810,148 L860,26 L920,80 L1440,80'
-              : situation === 'overclock'
-                ? 'M0,80 Q180,10 360,80 T720,80 T1080,80 T1440,80'
-                : situation === 'intrusion'
-                  ? 'M0,80 Q240,42 480,80 T960,80 T1440,80'
-                  : 'M0,80 Q360,66 720,80 T1440,80'
-          }
+          d="M0,148 H260 L292,180 H988 L1020,148 H1280"
           fill="none"
-          stroke={
-            situation === 'breach'
-              ? '#FF4757'
-              : situation === 'overclock' || situation === 'intrusion'
-                ? '#FF2E88'
-                : situation === 'victory'
-                  ? '#10F5A0'
-                  : '#00F0FF'
-          }
-          strokeWidth="1.6"
+          stroke="#00F0FF"
+          strokeWidth="2"
+          className="lc-bus-pulse cyan"
+        />
+        <path
+          d="M1280,564 H1030 L998,532 H282 L250,564 H0"
+          fill="none"
+          stroke="#FF2E88"
+          strokeWidth="2"
+          className="lc-bus-pulse pink"
+        />
+
+        {/* Stepped 8-bit square-wave telemetry horizon */}
+        <path
+          d="M0,360 H140 V344 H176 V376 H212 V360 H1068 V344 H1104 V376 H1140 V360 H1280"
+          fill="none"
+          stroke="#1f3147"
+          strokeWidth="2"
         />
       </svg>
 
-      {/* Subtle CRT / Tactical HUD scanlines & corner brackets */}
-      <div className="cyber-scanlines" />
-      <div className="hud-corner corner-tl" />
-      <div className="hud-corner corner-tr" />
-      <div className="hud-corner corner-bl" />
-      <div className="hud-corner corner-br" />
+      {/* Scrolling vertical pixel data streams */}
+      <div className="lc-data-rain">
+        {DATA_STREAMS.map((stream, idx) => {
+          const duration = Math.max(8, parseInt(stream.speed, 10) - speedBoost);
+          return (
+            <div
+              key={idx}
+              className={`lc-rain-col tone-${stream.tone}`}
+              style={{
+                left: stream.left,
+                animationDuration: `${duration}s`,
+                animationDelay: stream.delay,
+              }}
+            >
+              <span>{stream.tokens}</span>
+              <span>{stream.tokens}</span>
+              <span>{stream.tokens}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Floating crisp 4px pixel motes */}
+      <div className="lc-pixel-motes">
+        {PIXEL_MOTES.map((m, idx) => (
+          <span
+            key={idx}
+            className={`lc-mote ${m.cyan ? 'cyan' : ''}`}
+            style={{ left: m.left, top: m.top, animationDelay: m.delay }}
+          />
+        ))}
+      </div>
+
+      <div className="lc-scanlines" />
     </div>
   );
 });

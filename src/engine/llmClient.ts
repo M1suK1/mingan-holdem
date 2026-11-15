@@ -14,6 +14,8 @@ import {
   getHiddenBoardCount,
   getLegalRaiseRange,
   getNextSwapFee,
+  getVisibleBoardCard,
+  getVisibleHandCard,
   isActionLegal,
 } from './gameEngine.ts';
 
@@ -92,13 +94,19 @@ export function serializeStateForLlm(state: GameState): string {
   const ai = state.players.ai;
   const human = state.players.human;
   const boardSummary = state.board
-    .map((b, i) => `槽#${i + 1}:${b.isOpen ? formatCardShort(b.card) : '加密暗牌'}`)
+    .map((b, i) => `槽#${i + 1}:${b.isOpen ? formatCardShort(getVisibleBoardCard(b, 'ai', false)) : '加密暗牌'}`)
     .join(' | ');
   const aiHand = ai.hand
     .map((h, i) => `手牌#${i + 1}:${formatCardShort(h.card)}(${h.visibility === 'open' ? '公开' : '私有加密'})`)
     .join(' ');
   const humanHand = human.hand
-    .map((h, i) => `手牌#${i + 1}:${h.visibility === 'open' ? `${formatCardShort(h.card)}(公开)` : '未知加密暗牌'}`)
+    .map((h, i) =>
+      `手牌#${i + 1}:${
+        h.visibility === 'open'
+          ? `${formatCardShort(getVisibleHandCard(h, 'ai', 'human', false))}(公开)`
+          : '未知加密暗牌'
+      }`
+    )
     .join(' ');
 
   return [
@@ -139,6 +147,7 @@ export function buildCharacterSystemPrompt(
   return [
     `你正在赛博空间黑客牌桌游戏中扮演「${character.name}」（称号：${character.title}，代号：${character.codename}）。`,
     `你们正在进行《明暗博弈德州（黑/粉双花色52张版）》1v1单挑。全过程请用贴合角色的自然中文回答，严禁输出任何Emoji表情符号。`,
+    `【双花色精确概率重排牌型大小】四条 > 同花顺 > 葫芦 > 顺子 > 三条 > 两对 > 同花 > 一对 > 高牌。`,
     `【代表台词】「${character.quote}」`,
     personaText,
     traitsLine,

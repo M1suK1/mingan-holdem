@@ -6,6 +6,8 @@ import {
   type GameAction,
   type GameConfig,
   type GameState,
+  type HackSkillId,
+  type HandCard,
   type Phase,
   type PlayerId,
   type PlayerState,
@@ -104,6 +106,51 @@ export function getMaxRaisesAllowed(state: GameState): number {
     : state.config.maxRaisesPerSubPhase;
 }
 
+export function getHackSkillCost(state: Pick<GameState, 'config'>, skill: HackSkillId): number {
+  switch (skill) {
+    case 'plus-one':
+      return state.config.hackPlusCost;
+    case 'minus-one':
+      return state.config.hackMinusCost;
+    case 'flip-suit':
+      return state.config.hackFlipSuitCost;
+  }
+}
+
+export function getHalfStackRaiseAmount(state: GameState, actorId: PlayerId): number {
+  if (state.phase === 'showdown') return 0;
+  if (state.raisesInSubPhase >= getMaxRaisesAllowed(state)) return 0;
+  const actor = state.players[actorId];
+  const opp = state.players[otherPlayer(actorId)];
+  const diff = getBetDiff(state, actorId);
+  const paid = Math.min(diff, actor.chips);
+  const remaining = actor.chips - paid;
+  if (remaining <= 0 || opp.chips <= 0 || opp.allIn) return 0;
+
+  const half = diff === 0 ? Math.floor(actor.chips / 2) : Math.floor(remaining / 2);
+  const minAllowed = Math.min(state.config.minRaise, remaining);
+  return Math.min(remaining, Math.max(minAllowed, half));
+}
+
+export function getVisibleHandCard(
+  hc: HandCard,
+  viewerId: PlayerId,
+  ownerId: PlayerId,
+  revealAll = false
+): Card {
+  if (viewerId === ownerId || revealAll) return hc.card;
+  return hc.originalCard ?? hc.card;
+}
+
+export function getVisibleBoardCard(
+  slot: BoardSlot,
+  viewerId: PlayerId,
+  revealAll = false
+): Card {
+  if (!slot.originalCard || revealAll || slot.swappedBy === viewerId) return slot.card;
+  return slot.originalCard;
+}
+
 /**
  * Computes unseen Black vs Pink cards from a viewer's legal knowledge (52 total: 26 Black, 26 Pink).
  */
@@ -115,22 +162,23 @@ export function getRemainingSuitStats(state: GameState, viewerId: PlayerId = 'hu
     else seenPink += 1;
   };
 
+  const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
   // Viewer sees all 3 of their own cards
   for (const h of state.players[viewerId].hand) {
-    countCard(h.card);
+    countCard(getVisibleHandCard(h, viewerId, viewerId, revealAll));
   }
-  // Viewer sees opponent's open cards (or all if showdown/reveal debug)
-  const opp = state.players[otherPlayer(viewerId)];
-  const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+  // Viewer sees opponent's open cards (unmodified view unless revealed)
+  const oppId = otherPlayer(viewerId);
+  const opp = state.players[oppId];
   for (const h of opp.hand) {
     if (revealAll || h.visibility === 'open') {
-      countCard(h.card);
+      countCard(getVisibleHandCard(h, viewerId, oppId, revealAll));
     }
   }
   // Viewer sees open board cards
   for (const slot of state.board) {
     if (revealAll || slot.isOpen) {
-      countCard(slot.card);
+      countCard(getVisibleBoardCard(slot, viewerId, revealAll));
     }
   }
 
@@ -191,6 +239,7 @@ export interface CreateStateOptions {
   handNumber?: number;
   tieStarter?: PlayerId;
   chips?: Record<PlayerId, number>;
+  sealedSkills?: Record<PlayerId, HackSkillId[]>;
   opponentName?: string;
   deckOverride?: Card[];
   rng?: () => number;
@@ -228,6 +277,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     swapCount: 0,
     folded: false,
     allIn: humanStarting - humanAnte === 0,
+    sealedSkills: [...(options.sealedSkills?.human ?? [])],
   };
 
   const ai: PlayerState = {
@@ -244,6 +294,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     swapCount: 0,
     folded: false,
     allIn: aiStarting - aiAnte === 0,
+    sealedSkills: [...(options.sealedSkills?.ai ?? [])],
   };
 
   const anteDiff = humanAnte - aiAnte;
@@ -281,6 +332,9 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     justCalledThisTurn: false,
     riverChecksInRow: 0,
     riverHasBet: false,
+    usedHackThisTurn: false,
+    usedScanThisTurn: false,
+    scannedKeys: [],
     lastAction: {
       id: makeEventId(),
       type: 'deal',
@@ -318,6 +372,10 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
       human: prev.players.human.chips,
       ai: prev.players.ai.chips,
     },
+    sealedSkills: {
+      human: [...prev.players.human.sealedSkills],
+      ai: [...prev.players.ai.sealedSkills],
+    },
   });
 }
 
@@ -348,17 +406,69 @@ export function getLegalRaiseRange(
   return { allowed: max > 0, min, max };
 }
 
+/**
+ * Generates up to 3 clean deduplicated integer raise choices (low / mid / max) without a slider.
+ */
+export function computeThreeRaisePresets(min: number, max: number): number[] {
+  if (max <= 0 || min <= 0 || max < min) return [];
+  if (min === max) return [min];
+  const span = max - min;
+  const rawMid = (min + max) / 2;
+  let mid: number;
+  if (span >= 60) {
+    mid = Math.floor(rawMid / 10) * 10;
+  } else if (span >= 10) {
+    mid = Math.round(rawMid / 5) * 5;
+  } else {
+    mid = Math.round(rawMid);
+  }
+  const clampedMid = Math.max(min, Math.min(max, mid));
+  return Array.from(new Set([min, clampedMid, max])).sort((a, b) => a - b);
+}
+
 export function isActionLegal(state: GameState, action: GameAction): boolean {
   if (state.phase === 'showdown') return false;
   const actorId = state.currentTurn;
+  const oppId = otherPlayer(actorId);
   const actor = state.players[actorId];
+  const opp = state.players[oppId];
   const diff = getBetDiff(state, actorId);
   const hiddenCount = getHiddenBoardCount(state);
 
   if (diff === 0) {
+    // Non-consuming Hacker Skills (requires diff === 0: must call raises first!)
+    if (action.type === 'hack') {
+      if (state.usedHackThisTurn) return false;
+      if (actor.sealedSkills.includes(action.skill)) return false;
+      const cost = getHackSkillCost(state, action.skill);
+      if (actor.chips < cost) return false;
+      const hCard = actor.hand[action.handIndex];
+      if (!hCard || hCard.visibility !== 'open') return false;
+      if (action.skill === 'plus-one' && hCard.card.rank >= 14) return false;
+      if (action.skill === 'minus-one' && hCard.card.rank <= 2) return false;
+      return true;
+    }
+
+    // Non-consuming Universal Scan Skill (requires diff === 0: must call raises first!)
+    if (action.type === 'scan') {
+      if (state.usedScanThisTurn) return false;
+      if (actor.chips < state.config.scanCost) return false;
+      const scanKey = `${actorId}:${action.targetKind}:${action.targetIndex}`;
+      if (state.scannedKeys.includes(scanKey)) return false;
+      if (action.targetKind === 'hand') {
+        return Boolean(opp.hand[action.targetIndex]);
+      }
+      const slot = state.board[action.targetIndex];
+      return Boolean(slot && slot.isOpen && slot.swappedBy === oppId);
+    }
+
     if (state.phase === 'river') {
       if (action.type === 'check') return true;
       if (action.type === 'raise') {
+        if (action.isHalfStack) {
+          const halfAmt = getHalfStackRaiseAmount(state, actorId);
+          return halfAmt > 0 && action.amount === halfAmt;
+        }
         const range = getLegalRaiseRange(state, actorId, 0);
         return range.allowed && action.amount >= range.min && action.amount <= range.max;
       }
@@ -387,6 +497,10 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       );
     }
     if (action.type === 'raise') {
+      if (action.isHalfStack) {
+        const halfAmt = getHalfStackRaiseAmount(state, actorId);
+        return halfAmt > 0 && action.amount === halfAmt;
+      }
       const range = getLegalRaiseRange(state, actorId, 0);
       return range.allowed && action.amount >= range.min && action.amount <= range.max;
     }
@@ -395,9 +509,12 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
 
   if (action.type === 'fold' || action.type === 'call') return true;
   if (action.type === 'raise') {
-    const opp = state.players[otherPlayer(actorId)];
     const paid = Math.min(diff, actor.chips);
     if (actor.chips - paid <= 0 || opp.allIn) return false;
+    if (action.isHalfStack) {
+      const halfAmt = getHalfStackRaiseAmount(state, actorId);
+      return halfAmt > 0 && action.amount === halfAmt;
+    }
     const range = getLegalRaiseRange(state, actorId, paid);
     return range.allowed && action.amount >= range.min && action.amount <= range.max;
   }
@@ -412,17 +529,35 @@ function cloneState(state: GameState): GameState {
       escalatingSwapFees: [...state.config.escalatingSwapFees] as [number, number, number],
     },
     deck: [...state.deck],
-    board: state.board.map((b) => ({ ...b })),
+    board: state.board.map((b) => ({
+      ...b,
+      card: { ...b.card },
+      originalCard: b.originalCard ? { ...b.originalCard } : undefined,
+      tamperedBy: b.tamperedBy ? [...b.tamperedBy] : undefined,
+    })),
     players: {
       human: {
         ...state.players.human,
-        hand: state.players.human.hand.map((h) => ({ ...h })),
+        sealedSkills: [...state.players.human.sealedSkills],
+        hand: state.players.human.hand.map((h) => ({
+          ...h,
+          card: { ...h.card },
+          originalCard: h.originalCard ? { ...h.originalCard } : undefined,
+          tamperedBy: h.tamperedBy ? [...h.tamperedBy] : undefined,
+        })),
       },
       ai: {
         ...state.players.ai,
-        hand: state.players.ai.hand.map((h) => ({ ...h })),
+        sealedSkills: [...state.players.ai.sealedSkills],
+        hand: state.players.ai.hand.map((h) => ({
+          ...h,
+          card: { ...h.card },
+          originalCard: h.originalCard ? { ...h.originalCard } : undefined,
+          tamperedBy: h.tamperedBy ? [...h.tamperedBy] : undefined,
+        })),
       },
     },
+    scannedKeys: [...state.scannedKeys],
     actionHistory: [...state.actionHistory],
   };
 }
@@ -430,6 +565,8 @@ function cloneState(state: GameState): GameState {
 function resolveShowdown(state: GameState): GameState {
   const next = cloneState(state);
   next.justCalledThisTurn = false;
+  // At Showdown (when not caught by Scan), any hacked card that entered the public board
+  // takes real effect on the table for both hands.
   const boardCards = next.board.map((b) => b.card);
   const humanEval = evaluateSevenCards([
     ...next.players.human.hand.map((h) => h.card),
@@ -535,6 +672,8 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
   slot.source = 'flipped';
   next.raisesInSubPhase = 0;
   next.justCalledThisTurn = false;
+  next.usedHackThisTurn = false;
+  next.usedScanThisTurn = false;
 
   const hiddenAfter = getHiddenBoardCount(next);
   const actorLabel = actorId === 'human' ? '我方' : next.players.ai.name;
@@ -592,8 +731,11 @@ function performSwap(
   next.pot += fee;
   actor.swapCount += 1;
   next.justCalledThisTurn = false;
+  next.usedHackThisTurn = false;
+  next.usedScanThisTurn = false;
 
-  const discarded = actor.hand[handIndex].card;
+  const discardedHc = actor.hand[handIndex];
+  const discarded = discardedHc.card;
   const drawn = next.board[boardIndex].card;
 
   actor.hand[handIndex] = {
@@ -607,6 +749,8 @@ function performSwap(
     isOpen: true,
     source: 'swapped-in',
     swappedBy: actorId,
+    originalCard: discardedHc.originalCard,
+    tamperedBy: discardedHc.tamperedBy,
   };
 
   next.raisesInSubPhase = 0;
@@ -680,6 +824,159 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   const oppId = otherPlayer(actorId);
   const actorLabel = actorId === 'human' ? '我方' : state.players.ai.name;
 
+  if (action.type === 'hack') {
+    const next = cloneState(state);
+    const actor = next.players[actorId];
+    const cost = getHackSkillCost(next, action.skill);
+    const hc = actor.hand[action.handIndex];
+    const prevCard = { ...hc.card };
+
+    actor.chips -= cost;
+    actor.totalCommitted += cost;
+    next.pot += cost;
+    next.usedHackThisTurn = true;
+
+    if (!hc.originalCard) {
+      hc.originalCard = { ...prevCard };
+    }
+    const nextCard = { ...hc.card };
+    if (action.skill === 'plus-one') {
+      nextCard.rank = (nextCard.rank + 1) as Rank;
+    } else if (action.skill === 'minus-one') {
+      nextCard.rank = (nextCard.rank - 1) as Rank;
+    } else {
+      nextCard.suit = nextCard.suit === 'B' ? 'P' : 'B';
+    }
+    hc.card = nextCard;
+    hc.tamperedBy = Array.from(new Set([...(hc.tamperedBy ?? []), action.skill]));
+
+    const skillName =
+      action.skill === 'plus-one'
+        ? '点数+1'
+        : action.skill === 'minus-one'
+          ? '点数-1'
+          : '反转花色';
+    const summary = `${actorLabel} 预支 ${cost} 算力注入黑客协议（${skillName} · 仅己方可见）`;
+
+    next.lastAction = {
+      id: makeEventId(),
+      type: 'hack',
+      actor: actorId,
+      handIndex: action.handIndex,
+      amount: cost,
+      label: summary,
+    };
+    next.actionHistory.push({
+      id: makeEventId(),
+      handNumber: next.handNumber,
+      actor: actorId,
+      phase: next.phase,
+      summary: `${actorLabel} 预支 ${cost} 算力执行终端篡改（不占用回合）`,
+      timestamp: Date.now(),
+    });
+    return next;
+  }
+
+  if (action.type === 'scan') {
+    const next = cloneState(state);
+    const actor = next.players[actorId];
+    const opp = next.players[oppId];
+    const cost = next.config.scanCost;
+
+    actor.chips -= cost;
+    actor.totalCommitted += cost;
+    next.pot += cost;
+    next.usedScanThisTurn = true;
+    next.scannedKeys.push(`${actorId}:${action.targetKind}:${action.targetIndex}`);
+
+    let tampered = false;
+    let tamperedSkills: HackSkillId[] = [];
+    if (action.targetKind === 'hand') {
+      const targetHc = opp.hand[action.targetIndex];
+      if (
+        targetHc?.originalCard &&
+        targetHc.tamperedBy &&
+        targetHc.tamperedBy.length > 0 &&
+        (targetHc.card.rank !== targetHc.originalCard.rank ||
+          targetHc.card.suit !== targetHc.originalCard.suit)
+      ) {
+        tampered = true;
+        tamperedSkills = [...targetHc.tamperedBy];
+      }
+    } else {
+      const slot = next.board[action.targetIndex];
+      if (
+        slot?.originalCard &&
+        slot.tamperedBy &&
+        slot.tamperedBy.length > 0 &&
+        (slot.card.rank !== slot.originalCard.rank ||
+          slot.card.suit !== slot.originalCard.suit)
+      ) {
+        tampered = true;
+        tamperedSkills = [...slot.tamperedBy];
+      }
+    }
+
+    if (tampered) {
+      opp.sealedSkills = Array.from(new Set([...opp.sealedSkills, ...tamperedSkills]));
+      actor.chips += next.pot;
+      next.phase = 'showdown';
+      next.justCalledThisTurn = false;
+      next.result = {
+        winner: actorId,
+        reason: 'scan-caught',
+        potWon: next.pot,
+        payouts: {
+          human: actorId === 'human' ? next.pot : 0,
+          ai: actorId === 'ai' ? next.pot : 0,
+        },
+        sealedSkills: tamperedSkills,
+      };
+      const oppLabel = oppId === 'human' ? '我方' : next.players.ai.name;
+      const summary = `${actorLabel} 扫描抓获 ${oppLabel} 篡改底牌！直接夺取奖池 ${next.pot} 并封印技能`;
+      next.lastAction = {
+        id: makeEventId(),
+        type: 'scan',
+        actor: actorId,
+        targetKind: action.targetKind,
+        targetIndex: action.targetIndex,
+        amount: cost,
+        caught: true,
+        label: summary,
+      };
+      next.actionHistory.push({
+        id: makeEventId(),
+        handNumber: next.handNumber,
+        actor: actorId,
+        phase: 'showdown',
+        summary,
+        timestamp: Date.now(),
+      });
+      return next;
+    }
+
+    const summary = `${actorLabel} 预支 ${cost} 扫描对端节点：数据完整，未发现篡改`;
+    next.lastAction = {
+      id: makeEventId(),
+      type: 'scan',
+      actor: actorId,
+      targetKind: action.targetKind,
+      targetIndex: action.targetIndex,
+      amount: cost,
+      caught: false,
+      label: summary,
+    };
+    next.actionHistory.push({
+      id: makeEventId(),
+      handNumber: next.handNumber,
+      actor: actorId,
+      phase: next.phase,
+      summary,
+      timestamp: Date.now(),
+    });
+    return next;
+  }
+
   if (action.type === 'fold') {
     const next = cloneState(state);
     next.justCalledThisTurn = false;
@@ -718,6 +1015,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (action.type === 'end-turn') {
     const next = cloneState(state);
     next.justCalledThisTurn = false;
+    next.usedHackThisTurn = false;
+    next.usedScanThisTurn = false;
     next.currentTurn = oppId;
     const summary = `${actorLabel} 保持平注状态，移交回合控制权`;
     next.lastAction = {
@@ -740,6 +1039,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (action.type === 'check') {
     const next = cloneState(state);
     next.justCalledThisTurn = false;
+    next.usedHackThisTurn = false;
+    next.usedScanThisTurn = false;
     next.riverChecksInRow += 1;
     const summary = `${actorLabel} 静默过牌`;
     next.lastAction = {
@@ -776,6 +1077,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     if (actor.chips === 0) actor.allIn = true;
 
     next.justCalledThisTurn = false;
+    next.usedHackThisTurn = false;
+    next.usedScanThisTurn = false;
     next.raisesInSubPhase += 1;
     if (next.phase === 'river') {
       next.riverHasBet = true;
@@ -783,7 +1086,13 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     }
     next.currentTurn = oppId;
 
-    const verb = diff > 0 ? '同步并反加' : actor.allIn ? '全下过载加注' : '加注施压';
+    const verb = action.isHalfStack
+      ? '长按半数重注'
+      : diff > 0
+        ? '同步并反加'
+        : actor.allIn
+          ? '全下过载加注'
+          : '加注施压';
     const summary = `${actorLabel} ${verb} +${action.amount}`;
     const vfx: VfxEvent = {
       id: makeEventId(),

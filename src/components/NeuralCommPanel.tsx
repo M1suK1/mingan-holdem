@@ -3,6 +3,7 @@ import { Activity, Bot, MessageSquareCode, Radar, Send, Settings2 } from 'lucide
 import type { SuitStats } from '../engine/types.ts';
 import type { ChatMessage } from '../engine/llmClient.ts';
 import { CyberSuitEmblem } from './CyberIcons.tsx';
+import { PixelWindow } from './PixelWindow.tsx';
 
 interface NeuralCommPanelProps {
   suitStats: SuitStats;
@@ -16,9 +17,9 @@ interface NeuralCommPanelProps {
 }
 
 const QUICK_PROBES = [
-  { id: 'probe-hand', label: '试探底牌', text: '你刚才换进去的那张私有暗牌，该不会凑齐同花了吧？' },
-  { id: 'probe-bluff', label: '心理施压', text: '底池已经在升温了，现在认输断开连接还来得及。' },
-  { id: 'probe-lore', label: '询问来历', text: '报上你在夜糖事务所的契约代号和拿手绝活吧。' },
+  { id: 'probe-hand', label: '试探底牌', text: '你刚才换进去的那张私有暗牌，该不会凑齐两对以上了吧？' },
+  { id: 'probe-bluff', label: '心理施压', text: '算力池已经在持续充能了，现在断连认输还来得及。' },
+  { id: 'probe-lore', label: '询问档案', text: '报上你在夜糖事务所的契约代号和拿手绝活吧。' },
   { id: 'probe-taunt', label: '挑衅节奏', text: '你的下注频率已经被我逆向看穿了，下一手准备接招。' },
 ];
 
@@ -49,63 +50,66 @@ export function NeuralCommPanel({
   };
 
   return (
-    <aside className="right-comm-column" aria-label="脉冲概率雷达与神经通讯面板">
-      {/* Dual-Suit (Black / Pink) Probability Telemetry */}
+    <aside className="right-comm-column" aria-label="脉冲雷达与神经通讯窗口组">
       {showDeckTracker && (
-        <div className="cyber-window suit-radar-card" role="region" aria-label="双花色同花概率测算仪">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700 }}>
-              <Radar size={14} color="var(--accent-telemetry)" aria-hidden="true" />
-              黑/粉未知脉冲分布（共 {suitStats.totalUnknown} 张未见）
-            </span>
-            <span className="win-pid">FLUSH_BOOST</span>
-          </div>
-
+        <PixelWindow
+          title={`双色脉冲雷达 (${suitStats.totalUnknown}未见)`}
+          code="RADAR.SYS"
+          accentColor="#19384a"
+          icon={<Radar size={13} color="var(--accent-telemetry)" aria-hidden="true" />}
+        >
           <div className="suit-meter-track" aria-hidden="true">
             <div className="suit-meter-black" style={{ width: `${suitStats.blackPct}%` }} />
             <div className="suit-meter-pink" style={{ width: `${suitStats.pinkPct}%` }} />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11.5 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginTop: 6,
+              fontSize: 11,
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <CyberSuitEmblem suit="B" size={13} />
-              黑曜剩余 {suitStats.blackLeft} ({suitStats.blackPct}%)
+              黑曜 {suitStats.blackLeft} ({suitStats.blackPct}%)
             </span>
             <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 5,
-                fontFamily: 'var(--font-mono)',
+                gap: 4,
                 color: 'var(--neon-pink-300)',
               }}
             >
               <CyberSuitEmblem suit="P" size={13} />
-              绯霓剩余 {suitStats.pinkLeft} ({suitStats.pinkPct}%)
+              绯霓 {suitStats.pinkLeft} ({suitStats.pinkPct}%)
             </span>
           </div>
-        </div>
+        </PixelWindow>
       )}
 
-      {/* Live Neural Comm & LLM Psychological Chat Window */}
-      <div className="cyber-window comm-chat-window">
-        <div className="window-titlebar">
-          <div className="window-title-left">
-            <MessageSquareCode size={14} color="var(--accent-telemetry)" aria-hidden="true" />
-            <span>神经通讯频道 · {opponentName}</span>
-          </div>
+      <PixelWindow
+        title={`神经通讯 · ${opponentName}`}
+        accentColor="#2d1d4c"
+        icon={<MessageSquareCode size={13} color="var(--accent-telemetry)" aria-hidden="true" />}
+        className="comm-chat-window"
+        headerRight={
           <button
             id="comm-btn-open-llm-settings"
             type="button"
             className={`cyber-badge ${llmEnabled ? 'cyan' : 'pink'}`}
+            style={{ padding: '1px 6px', fontSize: 10 }}
             onClick={onOpenLlmModal}
-            title="配置 LLM 模型网关与角色提示词"
           >
-            <Settings2 size={11} aria-hidden="true" />
-            {llmEnabled ? 'LLM实时驱动' : '接入LLM配置'}
+            <Settings2 size={10} aria-hidden="true" />
+            {llmEnabled ? 'LLM在线' : 'LLM设置'}
           </button>
-        </div>
-
+        }
+      >
         <div ref={scrollRef} className="chat-messages-scroll" role="log" aria-live="polite">
           {messages.map((m) => (
             <article key={m.id} className={`chat-bubble ${m.sender}`}>
@@ -119,8 +123,8 @@ export function NeuralCommPanel({
                   >
                     {m.speakerName}
                   </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-subtle)' }}>
-                    {m.fromLlm ? 'LLM' : m.tag === 'action' ? 'TACTIC' : 'SYNC'}
+                  <span style={{ fontFamily: 'var(--font-pixel)', fontSize: 9.5, color: 'var(--text-subtle)' }}>
+                    {m.fromLlm ? 'LLM' : m.tag === 'action' ? 'ACT' : 'MSG'}
                   </span>
                 </div>
               )}
@@ -131,12 +135,11 @@ export function NeuralCommPanel({
           {isSendingChat && (
             <div className="chat-bubble system" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Activity size={13} color="var(--accent-primary)" aria-hidden="true" />
-              <span>{opponentName} 正在编解码神经信号...</span>
+              <span>{opponentName} 正在编解码通讯回复...</span>
             </div>
           )}
         </div>
 
-        {/* Tactical Quick Probes */}
         <div className="quick-probe-row" role="group" aria-label="快捷心理战话术">
           {QUICK_PROBES.map((p) => (
             <button
@@ -152,7 +155,6 @@ export function NeuralCommPanel({
           ))}
         </div>
 
-        {/* Chat Input Form */}
         <form
           className="chat-input-bar"
           onSubmit={(e) => {
@@ -160,14 +162,23 @@ export function NeuralCommPanel({
             submitChat();
           }}
         >
-          <label htmlFor="chat-input-message" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
+          <label
+            htmlFor="chat-input-message"
+            style={{
+              position: 'absolute',
+              width: 1,
+              height: 1,
+              overflow: 'hidden',
+              clip: 'rect(0,0,0,0)',
+            }}
+          >
             向对手发送心理战对话
           </label>
           <input
             id="chat-input-message"
             type="text"
             className="cyber-text-input"
-            placeholder={`向 ${opponentName} 发送通讯或试探话术...`}
+            placeholder={`向 ${opponentName} 发送指令或话术...`}
             value={draft}
             maxLength={160}
             onChange={(e) => setDraft(e.target.value)}
@@ -185,11 +196,11 @@ export function NeuralCommPanel({
             disabled={!draft.trim() || isSendingChat}
             aria-label="发送对话消息"
           >
-            {llmEnabled ? <Bot size={15} aria-hidden="true" /> : <Send size={15} aria-hidden="true" />}
+            {llmEnabled ? <Bot size={14} aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}
             发送
           </button>
         </form>
-      </div>
+      </PixelWindow>
     </aside>
   );
 }
