@@ -135,8 +135,9 @@ export class WebRtcP2pTransport {
     await waitForIceGathering(pc);
 
     const localSdp = pc.localDescription?.sdp ?? offer.sdp ?? '';
-    this.callbacks.onStatusChange('waiting-answer', '邀请码已就绪，等待好友回传应答码');
-    return encodeP2pSignalToken({ kind: 'offer', sdp: localSdp });
+    const token = await encodeP2pSignalToken({ kind: 'offer', sdp: localSdp });
+    this.callbacks.onStatusChange('waiting-answer', '邀请码已就绪，请点击下方按钮复制 Offer 邀请码发给好友');
+    return token;
   }
 
   async acceptHostOffer(offerToken: string): Promise<string> {
@@ -153,8 +154,9 @@ export class WebRtcP2pTransport {
     await waitForIceGathering(pc);
 
     const localSdp = pc.localDescription?.sdp ?? answer.sdp ?? '';
-    this.callbacks.onStatusChange('connecting', '应答码已生成，等待房主确认建立直连');
-    return encodeP2pSignalToken({ kind: 'answer', sdp: localSdp });
+    const token = await encodeP2pSignalToken({ kind: 'answer', sdp: localSdp });
+    this.callbacks.onStatusChange('connecting', '应答码已生成，请点击下方按钮复制并回传给房主');
+    return token;
   }
 
   async completeHostAnswer(answerToken: string): Promise<void> {

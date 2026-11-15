@@ -118,12 +118,27 @@ describe('P2P Protocol: strict anti-sniff sanitization & guest perspective mirro
     assert.equal(guestShowdown.players.ai.hand[1].originalCard?.rank, 7);
   });
 
-  it('round-trips compact P2P signal invite tokens cleanly', async () => {
+  it('round-trips compact P2P signal invite tokens cleanly (including multi-KB SDP)', async () => {
     const sample = { kind: 'offer' as const, sdp: 'v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\n' };
     const encoded = await encodeP2pSignalToken(sample);
     assert.ok(encoded.startsWith('MGP2P:'));
     const decoded = await decodeP2pSignalToken(encoded);
     assert.deepEqual(decoded, sample);
+
+    // Multi-KB realistic WebRTC SDP with many ICE candidates
+    const iceBlock = Array.from({ length: 40 }, (_, i) =>
+      `a=candidate:${i} 1 udp 2122260223 192.168.1.${10 + i} ${50000 + i} typ host generation 0`
+    ).join('\r\n');
+    const largeSample = {
+      kind: 'answer' as const,
+      sdp: `v=0\r\no=- 998877 2 IN IP4 127.0.0.1\r\ns=-\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n${iceBlock}\r\n`,
+    };
+    const encodedLarge = await encodeP2pSignalToken(largeSample);
+    assert.ok(encodedLarge.startsWith('MGP2P:'));
+    const body = encodedLarge.slice('MGP2P:Z:'.length);
+    assert.equal(/[+/=]/.test(body), false);
+    const decodedLarge = await decodeP2pSignalToken(encodedLarge);
+    assert.deepEqual(decodedLarge, largeSample);
   });
 
   it('chunks large payloads (>16KB) and reassembles them without data loss', () => {

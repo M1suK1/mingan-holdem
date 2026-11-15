@@ -209,29 +209,50 @@ function base64UrlToBytes(str: string): Uint8Array {
 
 async function compressDeflate(bytes: Uint8Array): Promise<Uint8Array | null> {
   if (typeof CompressionStream === 'undefined') return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const cs = new CompressionStream('deflate-raw');
-    const writer = cs.writable.getWriter();
-    await writer.write(new Uint8Array(bytes));
-    await writer.close();
-    const buf = await new Response(cs.readable).arrayBuffer();
-    return new Uint8Array(buf);
+    const work = (async () => {
+      const cs = new CompressionStream('deflate-raw');
+      // Drain readable concurrently BEFORE writing/closing so Chromium WebStreams never backpressure-deadlock.
+      const readPromise = new Response(cs.readable).arrayBuffer();
+      const writer = cs.writable.getWriter();
+      await writer.write(new Uint8Array(bytes));
+      await writer.close();
+      const buf = await readPromise;
+      return new Uint8Array(buf);
+    })();
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 1200);
+    });
+    return await Promise.race([work, timeout]);
   } catch {
     return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
 async function decompressDeflate(bytes: Uint8Array): Promise<Uint8Array | null> {
   if (typeof DecompressionStream === 'undefined') return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const ds = new DecompressionStream('deflate-raw');
-    const writer = ds.writable.getWriter();
-    await writer.write(new Uint8Array(bytes));
-    await writer.close();
-    const buf = await new Response(ds.readable).arrayBuffer();
-    return new Uint8Array(buf);
+    const work = (async () => {
+      const ds = new DecompressionStream('deflate-raw');
+      const readPromise = new Response(ds.readable).arrayBuffer();
+      const writer = ds.writable.getWriter();
+      await writer.write(new Uint8Array(bytes));
+      await writer.close();
+      const buf = await readPromise;
+      return new Uint8Array(buf);
+    })();
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 1500);
+    });
+    return await Promise.race([work, timeout]);
   } catch {
     return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

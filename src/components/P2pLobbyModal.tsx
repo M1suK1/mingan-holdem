@@ -82,11 +82,32 @@ export default function P2pLobbyModal({
   const copyText = async (txt: string, label: string) => {
     if (!txt) return;
     try {
-      await navigator.clipboard.writeText(txt);
-      onNotify('success', `已复制${label}`, '请发送给好友粘贴使用');
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(txt);
+        onNotify('success', `已复制${label}`, '请发送给好友粘贴使用');
+        return;
+      }
     } catch {
-      onNotify('warn', '无法访问系统剪贴板', '请手动全选文本框内容复制');
+      /* fallback to execCommand below */
     }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.setAttribute('readonly', 'true');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        onNotify('success', `已复制${label}`, '请发送给好友粘贴使用');
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    onNotify('warn', '无法访问系统剪贴板', '请点击上方文本框全选（Ctrl+A）后手动复制');
   };
 
   const isConnected = status === 'connected';
@@ -185,29 +206,33 @@ export default function P2pLobbyModal({
                       disabled={isBusy}
                       onClick={onHostCreateManualOffer}
                     >
-                      1. 生成房间邀请码 (Offer)
+                      {status === 'gathering' && role === 'host'
+                        ? '正在收集网络地址并生成邀请码...'
+                        : '1. 生成房间邀请码 (Offer)'}
                     </button>
-                    {offerToken && (
-                      <>
-                        <textarea
-                          id="p2p-textarea-offer-out"
-                          rows={3}
-                          readOnly
-                          className="cyber-text-input"
-                          style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
-                          value={offerToken}
-                        />
-                        <button
-                          id="p2p-btn-copy-offer"
-                          type="button"
-                          className="os-nav-btn highlight"
-                          onClick={() => void copyText(offerToken, 'Offer 邀请码')}
-                        >
-                          <Copy size={13} aria-hidden="true" />
-                          复制邀请码发给好友
-                        </button>
-                      </>
-                    )}
+                    <label htmlFor="p2p-textarea-offer-out" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      2. 复制生成的 Offer 邀请码发给好友：
+                    </label>
+                    <textarea
+                      id="p2p-textarea-offer-out"
+                      rows={3}
+                      readOnly
+                      className="cyber-text-input"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
+                      placeholder="点击上方「1. 生成房间邀请码」后，此处将显示 MGP2P:... 邀请码"
+                      value={offerToken}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                    <button
+                      id="p2p-btn-copy-offer"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={!offerToken}
+                      onClick={() => void copyText(offerToken, 'Offer 邀请码')}
+                    >
+                      <Copy size={13} aria-hidden="true" />
+                      {offerToken ? '复制邀请码发给好友' : '生成后可点击此处一键复制'}
+                    </button>
                     <label htmlFor="p2p-textarea-answer-in" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                       3. 粘贴好友发回的 Answer 应答码：
                     </label>
@@ -254,29 +279,33 @@ export default function P2pLobbyModal({
                       disabled={!guestOfferInput.trim() || isBusy}
                       onClick={() => onGuestAcceptManualOffer(guestOfferInput)}
                     >
-                      2. 生成我的 Answer 应答码
+                      {status === 'gathering' && role === 'guest'
+                        ? '正在生成应答码...'
+                        : '2. 生成我的 Answer 应答码'}
                     </button>
-                    {answerToken && (
-                      <>
-                        <textarea
-                          id="p2p-textarea-answer-out"
-                          rows={3}
-                          readOnly
-                          className="cyber-text-input"
-                          style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
-                          value={answerToken}
-                        />
-                        <button
-                          id="p2p-btn-copy-answer"
-                          type="button"
-                          className="os-nav-btn highlight"
-                          onClick={() => void copyText(answerToken, 'Answer 应答码')}
-                        >
-                          <Copy size={13} aria-hidden="true" />
-                          复制应答码发回给房主
-                        </button>
-                      </>
-                    )}
+                    <label htmlFor="p2p-textarea-answer-out" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      3. 复制生成的 Answer 应答码发回给房主：
+                    </label>
+                    <textarea
+                      id="p2p-textarea-answer-out"
+                      rows={3}
+                      readOnly
+                      className="cyber-text-input"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
+                      placeholder="点击上方「2. 生成我的 Answer 应答码」后，此处将显示 MGP2P:... 应答码"
+                      value={answerToken}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                    <button
+                      id="p2p-btn-copy-answer"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={!answerToken}
+                      onClick={() => void copyText(answerToken, 'Answer 应答码')}
+                    >
+                      <Copy size={13} aria-hidden="true" />
+                      {answerToken ? '复制应答码发回给房主' : '生成后可点击此处一键复制'}
+                    </button>
                   </div>
                 </div>
               </div>

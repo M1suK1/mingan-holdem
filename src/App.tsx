@@ -598,7 +598,10 @@ export function App() {
       const tr = initP2pTransport('host');
       const offer = await tr.createHostOffer();
       setP2pOfferToken(offer);
+      pushToast('success', 'Offer 邀请码已生成', '请点击「复制邀请码发给好友」');
     } catch (err) {
+      setP2pStatus('error');
+      setP2pDetail('生成邀请码失败');
       pushToast('error', '生成邀请码失败', err instanceof Error ? err.message : '未知错误');
     }
   };
@@ -608,7 +611,10 @@ export function App() {
       const tr = initP2pTransport('guest');
       const answer = await tr.acceptHostOffer(offer);
       setP2pAnswerToken(answer);
+      pushToast('success', 'Answer 应答码已生成', '请点击「复制应答码发回给房主」');
     } catch (err) {
+      setP2pStatus('error');
+      setP2pDetail('解析邀请码失败');
       pushToast('error', '解析邀请码失败', err instanceof Error ? err.message : '请确认完整粘贴 MGP2P 邀请码');
     }
   };
