@@ -322,9 +322,41 @@ export function extractJsonPayload(rawText: string): Record<string, unknown> | n
   }
 }
 
-function sanitizeExpression(val: unknown, fallback: ContractExpression = 'calm'): ContractExpression {
-  if (typeof val === 'string' && (CONTRACT_EXPRESSIONS as string[]).includes(val)) {
-    return val as ContractExpression;
+export function sanitizeExpression(
+  val: unknown,
+  fallback: ContractExpression = 'calm'
+): ContractExpression {
+  if (typeof val === 'string') {
+    const norm = val.trim().toLowerCase();
+    if ((CONTRACT_EXPRESSIONS as string[]).includes(norm)) {
+      return norm as ContractExpression;
+    }
+    const aliasMap: Record<string, ContractExpression> = {
+      surprised: 'surprise',
+      shock: 'surprise',
+      shocked: 'surprise',
+      amazed: 'surprise',
+      anger: 'angry',
+      mad: 'angry',
+      furious: 'angry',
+      tense: 'angry',
+      happy: 'smile',
+      smirk: 'smile',
+      grin: 'smile',
+      confident: 'smile',
+      joy: 'smile',
+      nervous: 'shy',
+      blush: 'shy',
+      embarrassed: 'shy',
+      flustered: 'shy',
+      upset: 'sad',
+      disappointed: 'sad',
+      grief: 'sad',
+      down: 'sad',
+      neutral: 'calm',
+      relaxed: 'calm',
+    };
+    if (aliasMap[norm]) return aliasMap[norm];
   }
   return fallback;
 }

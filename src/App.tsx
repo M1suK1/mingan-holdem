@@ -42,6 +42,7 @@ import {
 } from './engine/gameEngine.ts';
 import { evaluateVisibleHandSummary } from './engine/evaluator.ts';
 import {
+  EXPRESSION_META,
   FALLBACK_CONTRACT_CHARACTER,
   deriveAiStyleFromCharacter,
   resolveVirtualEntityPortrait,
@@ -1612,7 +1613,9 @@ export function App() {
               </span>
             </div>
             <span className="lc-opp-codename">
-              {isAiThinking ? 'THINKING...' : `R${campaign.roundIndex} · T${dossier.threatLevel}`}
+              {isAiThinking
+                ? 'THINKING...'
+                : `${EXPRESSION_META[activeExpression].label} · R${campaign.roundIndex} · T${dossier.threatLevel}`}
             </span>
           </header>
 

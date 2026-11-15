@@ -87,6 +87,9 @@ export const PROMPT_MACRO_HINTS: Array<{ key: string; label: string; hint: strin
   { key: 'user', label: '玩家代号', hint: '玩家黑客代号' },
 ];
 
+const EXPRESSION_GUIDE =
+  'expression 字段会实时切换你的虚拟实体立绘神态，请根据当前情绪与局势积极变化（禁止一直填 calm）：calm=冷静审视；smile=自信得意/占优/挑衅；surprise=惊愕意外/遇奇袭/诱饵脱逃；sad=失落挫败/丢池/被抓获；angry=警觉强硬/主动扫描或大额加注对峙；shy=动摇窘迫/偷鸡被识破/心防松动。';
+
 export const CONTRACT_PROMPTS: PromptEntry[] = [
   {
     id: 'contract-chat',
@@ -97,9 +100,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）。${EXPRESSION_GUIDE}\n格式：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
     defaultContent:
-      '请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）。${EXPRESSION_GUIDE}\n格式：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
   },
   {
     id: 'contract-decision',
@@ -110,9 +113,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）。${EXPRESSION_GUIDE}\n格式：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
     defaultContent:
-      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）。${EXPRESSION_GUIDE}\n格式：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
   },
   {
     id: 'contract-encounter',
@@ -123,9 +126,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji），严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji）。${EXPRESSION_GUIDE}\n严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
     defaultContent:
-      '请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji），严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
+      `请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji）。${EXPRESSION_GUIDE}\n严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}`,
   },
 ];
 
@@ -521,7 +524,11 @@ export function loadPresets(): ChatPreset[] {
             : p.settings?.maxTokens ?? 0;
         const nextPrompts = p.prompts.map((entry) => {
           const latestContract = contractById.get(entry.id);
-          if (latestContract && entry.contract && /不超过(85|65|75)字/.test(entry.content)) {
+          if (
+            latestContract &&
+            entry.contract &&
+            (/不超过(85|65|75)字/.test(entry.content) || !entry.content.includes('立绘神态'))
+          ) {
             return { ...entry, content: latestContract.content, defaultContent: latestContract.content };
           }
           return entry;

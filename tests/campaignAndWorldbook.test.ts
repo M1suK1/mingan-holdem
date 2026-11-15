@@ -43,6 +43,7 @@ import {
   generateLocalPersonaReply,
   parseDialogueSegments,
   requestEncounterDialogue,
+  sanitizeExpression,
   serializeStateForLlm,
 } from '../src/engine/llmClient.ts';
 import { applyAction, createInitialState, getEffectiveHackCost, getEffectiveScanCost, getNextSwapFee, isActionLegal, startNextHand } from '../src/engine/gameEngine.ts';
@@ -490,5 +491,15 @@ describe('Thinking effort tuning & round-settled LLM感想', () => {
       compactMode: true,
     });
     assert.ok(fastComposed.system.length < fullComposed.system.length);
+  });
+
+  it('includes expression switching guidance in contracts and normalizes expression aliases', () => {
+    const preset = builtinPresets()[0];
+    const chatContract = preset.prompts.find((p) => p.id === 'contract-chat');
+    assert.ok(chatContract?.content.includes('立绘神态'));
+    assert.equal(sanitizeExpression('Surprised'), 'surprise');
+    assert.equal(sanitizeExpression('confident'), 'smile');
+    assert.equal(sanitizeExpression('nervous'), 'shy');
+    assert.equal(sanitizeExpression('anger'), 'angry');
   });
 });
