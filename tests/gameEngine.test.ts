@@ -262,15 +262,15 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     assert.equal(state.result?.winner, 'human');
   });
 
-  it('blocks scan and hack while facing a raise (diff > 0) until caller matches the bet', () => {
+  it('blocks scan and hack while facing a raise (diff > 0) in pre-river, but allows pre-call scan on river', () => {
     let state = setupDeterministicState();
     assert.equal(state.currentTurn, 'human');
 
-    // Human raises +20 -> AI faces diff = 20
+    // Human raises +20 -> AI faces diff = 20 in early phase
     state = applyAction(state, { type: 'raise', amount: 20 });
     assert.equal(state.currentTurn, 'ai');
 
-    // While diff > 0, AI cannot scan or hack before calling!
+    // While diff > 0 in pre-river, AI cannot scan or hack before calling!
     assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 }), false);
     assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'plus-one' }), false);
 
@@ -279,5 +279,20 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     assert.equal(state.currentTurn, 'ai');
     assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 }), true);
     assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'flip-suit' }), true);
+
+    // Flip all remaining board cards to reach river (all community cards open)
+    for (let i = 0; i < 4; i += 1) {
+      if (!state.board[i].isOpen) {
+        state = applyAction(state, { type: 'flip', boardIndex: i });
+      }
+    }
+    assert.equal(state.phase, 'river');
+    const bettor = state.currentTurn;
+    state = applyAction(state, { type: 'raise', amount: 40 });
+    assert.notEqual(state.currentTurn, bettor);
+
+    // On river facing a raise (diff = 40), defender CAN scan before deciding whether to call/fold!
+    assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 }), true);
+    assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'plus-one' }), false);
   });
 });

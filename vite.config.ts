@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { nightSugarCardsPlugin } from './scripts/night-sugar-cards.mjs';
+import { p2pSignalingPlugin } from './scripts/p2p-signaling.mjs';
 
 export default defineConfig({
-  plugins: [react(), nightSugarCardsPlugin()],
+  base: './',
+  plugins: [react(), nightSugarCardsPlugin(), p2pSignalingPlugin()],
   server: {
     host: '127.0.0.1',
     port: 5178,

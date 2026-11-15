@@ -32,9 +32,9 @@ export async function fetchContractCatalog(): Promise<{
     // Fall through to static bundle
   }
 
-  // 2. Try static bundle /cards/index.json
+  // 2. Try static bundle ./cards/index.json
   try {
-    const res = await fetch('/cards/index.json');
+    const res = await fetch('./cards/index.json');
     if (res.ok) {
       const payload = (await res.json()) as { ok?: boolean; cards?: ContractCardSummary[] };
       if (payload.ok && Array.isArray(payload.cards) && payload.cards.length > 0) {
@@ -69,9 +69,9 @@ export async function loadContractCharacterByFile(fileName: string): Promise<Con
     // Fall through
   }
 
-  // Try static /cards/<fileName>
+  // Try static ./cards/<fileName>
   try {
-    const res = await fetch(`/cards/${encodeURIComponent(fileName)}`);
+    const res = await fetch(`./cards/${encodeURIComponent(fileName)}`);
     if (res.ok) {
       const raw = await res.text();
       const parsed = parseNightSugarCard(raw, fileName);

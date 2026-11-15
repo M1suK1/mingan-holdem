@@ -31,7 +31,7 @@ export default function ContractArchiveModal({
   const [tab, setTab] = useState<'roster' | 'dossier'>('roster');
   const [query, setQuery] = useState('');
   const [previewExpr, setPreviewExpr] = useState<ContractExpression>('calm');
-  const [previewOverload, setPreviewOverload] = useState(false);
+  const [previewOverload, setPreviewOverload] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
@@ -252,7 +252,7 @@ export default function ContractArchiveModal({
                     </button>
                   ))}
                 </div>
-                {activeCharacter.witchPersonality && (
+                {(activeCharacter.witchPersonality || activeCharacter.witchPortrait || Object.keys(activeCharacter.variants).some((k) => k.startsWith('witchform:'))) && (
                   <button
                     id="dossier-btn-toggle-overload-preview"
                     type="button"
@@ -260,7 +260,7 @@ export default function ContractArchiveModal({
                     style={{ justifyContent: 'center' }}
                     onClick={() => setPreviewOverload((p) => !p)}
                   >
-                    {previewOverload ? '当前预览：深层过载态' : '预览深层过载态档案'}
+                    {previewOverload ? '当前：虚拟实体形象（魔女化）' : '当前：现实形象（契约礼装）'}
                   </button>
                 )}
               </div>

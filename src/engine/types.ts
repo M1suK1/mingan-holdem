@@ -44,6 +44,9 @@ export interface BoardSlot {
 
 export type SwapFeeMode = 'escalating' | 'fixed';
 export type AiStyle = 'balanced' | 'aggressive' | 'cautious';
+export type AiDifficulty = 'auto' | 'rookie' | 'standard' | 'master';
+export type AiPlayStyle = 'auto' | 'pressure' | 'trap' | 'sculptor' | 'conservative';
+export type AiCheatProfile = 'auto' | 'auditor' | 'phantom-hacker' | 'opportunist' | 'disruptor';
 
 /** Dynamic battleground environment state driven by match tension */
 export type BattleSituation =
@@ -67,6 +70,9 @@ export interface GameConfig {
   maxRaisesPerSubPhase: number;
   maxRiverRaises: number;
   aiStyle: AiStyle;
+  aiDifficulty: AiDifficulty;
+  aiPlayStyle: AiPlayStyle;
+  aiCheatProfile: AiCheatProfile;
   aiDelayMs: number;
   revealOpponentHidden: boolean;
   showDeckTracker: boolean;
@@ -90,6 +96,9 @@ export const DEFAULT_CONFIG: GameConfig = {
   maxRaisesPerSubPhase: 2,
   maxRiverRaises: 3,
   aiStyle: 'balanced',
+  aiDifficulty: 'auto',
+  aiPlayStyle: 'auto',
+  aiCheatProfile: 'auto',
   aiDelayMs: 680,
   revealOpponentHidden: false,
   showDeckTracker: true,
@@ -113,6 +122,7 @@ export interface PlayerState {
   folded: boolean;
   allIn: boolean;
   sealedSkills: HackSkillId[];
+  ghostShield?: boolean;
 }
 
 export type GameAction =
@@ -124,7 +134,8 @@ export type GameAction =
   | { type: 'call' }
   | { type: 'end-turn' }
   | { type: 'hack'; handIndex: number; skill: HackSkillId }
-  | { type: 'scan'; targetKind: 'hand' | 'board'; targetIndex: number };
+  | { type: 'scan'; targetKind: 'hand' | 'board'; targetIndex: number }
+  | { type: 'use-skill'; skillId: string; targetIndex?: number };
 
 export interface HandEvaluation {
   category: number; // 0..8
@@ -180,6 +191,7 @@ export interface VfxEvent {
     | 'end-turn'
     | 'hack'
     | 'scan'
+    | 'use-skill'
     | 'allin-reveal'
     | 'showdown';
   actor: PlayerId;
@@ -213,6 +225,22 @@ export interface ShowdownResult {
   sealedSkills?: HackSkillId[];
 }
 
+export interface HandRoundSummary {
+  handNumber: number;
+  winner: PlayerId | 'tie';
+  reason: 'fold' | 'showdown' | 'scan-caught';
+  potWon: number;
+  committedByHuman: number;
+  committedByAi: number;
+  humanEndChips: number;
+  aiEndChips: number;
+  humanHandCategory?: string;
+  aiHandCategory?: string;
+  humanHadTamper: boolean;
+  aiHadTamper: boolean;
+  sealedSkills?: HackSkillId[];
+}
+
 export interface GameState {
   handNumber: number;
   config: GameConfig;
@@ -231,8 +259,13 @@ export interface GameState {
   usedHackThisTurn: boolean;
   usedScanThisTurn: boolean;
   scannedKeys: string[];
+  playerAcquiredSkills: string[];
+  usedProtocolSkillThisHand: boolean;
+  peekedBoardIndices: number[];
+  frozenBoardIndices: number[];
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
+  pastHands: HandRoundSummary[];
   result?: ShowdownResult;
 }
 
@@ -264,4 +297,78 @@ export interface OpponentAgent {
     action: GameAction;
     dialogue: OpponentDialogue;
   }>;
+}
+
+export interface SkillPoolEntry {
+  id: string;
+  name: string;
+  category: 'hack' | 'recon' | 'protocol' | 'passive';
+  summary: string;
+  costHint?: number;
+  targetMode?: 'instant' | 'human-open-hand' | 'human-locked-hand' | 'hidden-board' | 'passive';
+  implemented: boolean;
+  tags: string[];
+}
+
+export interface VirtualEntity {
+  id: string;
+  name: string;
+  codename: string;
+  isCore: boolean;
+  sourceCharacterFile?: string;
+  sourceCharacterName?: string;
+  pursuerRole?: string;
+  virtualPortrait: string;
+  realityPortrait?: string;
+  accentColor: string;
+  capturedAtHand?: number;
+  capturedAtRound?: number;
+}
+
+export interface PursuerDossier {
+  identityTitle: string;
+  faction: string;
+  motive: string;
+  virtualEntityName: string;
+  threatLevel: number;
+  skillPoolIds: string[];
+}
+
+export interface CampaignState {
+  playerCodename: string;
+  wantedLevel: number;
+  bounty: number;
+  roundIndex: number;
+  coreEntity: VirtualEntity;
+  capturedEntities: VirtualEntity[];
+  activeDisguiseId: string;
+  acquiredSkills: string[];
+  defeatedPursuers: Array<{
+    name: string;
+    identityTitle: string;
+    entityName: string;
+    lootedSkillId?: string;
+    roundIndex: number;
+  }>;
+  pendingLoot?: {
+    pursuerName: string;
+    pursuerIdentity: string;
+    seizedEntity: VirtualEntity;
+    skillChoices: string[];
+  } | null;
+  lastEscapeLog?: {
+    sacrificedEntityName: string;
+    pursuerName: string;
+    roundIndex: number;
+  } | null;
+  status: 'disguise-select' | 'active' | 'loot-select' | 'escaped' | 'failed-ending';
+  failureEnding?: {
+    takenByName: string;
+    takenByIdentity: string;
+    finalWantedLevel: number;
+    roundsSurvived: number;
+    defeatedCount: number;
+    acquiredSkillsCount: number;
+    timestamp: number;
+  } | null;
 }
