@@ -1041,9 +1041,9 @@ export function App() {
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
     if (!scanMode || state.currentTurn !== 'human' || state.phase === 'showdown') return;
-    if (getBetDiff(state, 'human') > 0) {
+    if (getBetDiff(state, 'human') > 0 && state.phase !== 'river') {
       setScanMode(false);
-      pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能进行扫描');
+      pushToast('warn', '遭遇加注，请先跟注', '公共牌未全明前必须先补齐跟注差额，才能进行扫描');
       return;
     }
     const action: GameAction = { type: 'scan', targetKind, targetIndex };
@@ -1657,7 +1657,10 @@ export function App() {
                 );
                 const alreadyScanned = state.scannedKeys.includes(`human:hand:${idx}`);
                 const canScanCard =
-                  scanMode && isHumanTurn && !alreadyScanned && human.chips >= state.config.scanCost;
+                  scanMode &&
+                  isHumanTurn &&
+                  !alreadyScanned &&
+                  human.chips >= getEffectiveScanCost(state, 'human');
 
                 const aiTamperLabel =
                   revealAllAi &&
@@ -1688,7 +1691,14 @@ export function App() {
                     isWinner={
                       isShowdown && state.result?.winner === 'ai' && aiWinIds.has(hc.card.id)
                     }
-                    actionHint={canScanCard ? `点击扫描 ${character.name} 手牌 #${idx + 1}（预支 ${state.config.scanCost}）` : undefined}
+                    actionHint={
+                      canScanCard
+                        ? `点击扫描 ${character.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
+                            state,
+                            'human'
+                          )}）`
+                        : undefined
+                    }
                     onClick={canScanCard ? () => handleExecuteScan('hand', idx) : undefined}
                   />
                 );
@@ -1727,7 +1737,7 @@ export function App() {
                 slot.isOpen &&
                 slot.swappedBy === 'ai' &&
                 !alreadyScannedBoard &&
-                human.chips >= state.config.scanCost;
+                human.chips >= getEffectiveScanCost(state, 'human');
 
               const boardTamperLabel =
                 (slot.swappedBy === 'human' || revealAllAi) &&
@@ -2002,7 +2012,7 @@ export function App() {
                   className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
                   disabled={
                     !isHumanTurn ||
-                    diff > 0 ||
+                    (diff > 0 && state.phase !== 'river') ||
                     state.usedScanThisTurn ||
                     human.chips < getEffectiveScanCost(state, 'human')
                   }
@@ -2011,14 +2021,14 @@ export function App() {
                     setScanMode((s) => !s);
                   }}
                   title={
-                    diff > 0
-                      ? '遭遇加注，请先在右侧跟注后再进行扫描'
+                    diff > 0 && state.phase !== 'river'
+                      ? '公共牌未全明时遭遇加注，请先在右侧跟注后再进行扫描'
                       : state.usedScanThisTurn
                         ? '扫描技能每回合限用 1 次'
                         : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${getEffectiveScanCost(
                             state,
                             'human'
-                          )}，每回合限 1 次）`
+                          )}，公共牌全明时可先扫描再决定是否跟注）`
                   }
                 >
                   <PixelScanIcon size={12} />

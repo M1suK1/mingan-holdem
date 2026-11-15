@@ -857,6 +857,9 @@ export function enumerateLegalActionHints(state: GameState): string[] {
     if (raiseRange.allowed) {
       hints.push(`{"type":"raise","amount":${raiseRange.min}..${raiseRange.max}}`);
     }
+    if (state.phase === 'river' && !state.usedScanThisTurn && ai.chips >= state.config.scanCost) {
+      hints.push('{"type":"scan","targetKind":"hand|board","targetIndex":0..3}');
+    }
     return hints;
   }
 

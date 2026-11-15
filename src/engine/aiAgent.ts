@@ -168,11 +168,11 @@ export class LocalAiAgent implements OpponentAgent {
     const speaker = this.displayName;
     const telemetry = serializeStateForLlm(state);
 
-    // Opportunistic non-consuming Scan or Hacker skill (only when diff === 0; must call raises first!)
+    // Opportunistic non-consuming Scan (allowed when diff === 0 OR on river before calling) or Hacker skill (diff === 0 only)
     const lastType = state.lastAction?.type;
-    if (diff === 0 && lastType !== 'hack' && lastType !== 'scan') {
+    if ((diff === 0 || state.phase === 'river') && lastType !== 'hack' && lastType !== 'scan') {
       // Non-omniscient Scan when opponent is betting aggressively or in late board
-      const scanChance = diff >= 20 ? 0.16 : state.phase !== 'early' ? 0.08 : 0.03;
+      const scanChance = state.phase === 'river' && diff > 0 ? 0.22 : state.phase !== 'early' ? 0.08 : 0.03;
       if (actor.chips >= state.config.scanCost + 180 && roll < scanChance) {
         const oppOpenIdx = opp.hand.findIndex(
           (h, idx) =>
@@ -200,9 +200,9 @@ export class LocalAiAgent implements OpponentAgent {
         }
       }
 
-      // Opportunistic Hacker tamper on an unmodified open hand card
+      // Opportunistic Hacker tamper on an unmodified open hand card (only when diff === 0)
       const hackChance = this.style === 'aggressive' ? 0.14 : this.style === 'balanced' ? 0.09 : 0.04;
-      if (actor.chips >= 280 && roll > 1 - hackChance) {
+      if (diff === 0 && actor.chips >= 280 && roll > 1 - hackChance) {
         const openIdx = actor.hand.findIndex(
           (h) => h.visibility === 'open' && (!h.tamperedBy || h.tamperedBy.length === 0)
         );

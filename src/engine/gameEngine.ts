@@ -502,6 +502,19 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
   const diff = getBetDiff(state, actorId);
   const hiddenCount = getHiddenBoardCount(state);
 
+  // 通用扫描技能：平注阶段可用；当公共牌区全明（river）只能加注/跟注/弃牌时，也允许先扫描再决定是否跟注
+  if (action.type === 'scan' && (diff === 0 || state.phase === 'river')) {
+    if (state.usedScanThisTurn) return false;
+    if (actor.chips < getEffectiveScanCost(state, actorId)) return false;
+    const scanKey = `${actorId}:${action.targetKind}:${action.targetIndex}`;
+    if (state.scannedKeys.includes(scanKey)) return false;
+    if (action.targetKind === 'hand') {
+      return Boolean(opp.hand[action.targetIndex]);
+    }
+    const slot = state.board[action.targetIndex];
+    return Boolean(slot && slot.isOpen && slot.swappedBy === oppId);
+  }
+
   if (diff === 0) {
     // Non-consuming Hacker Skills (requires diff === 0: must call raises first!)
     if (action.type === 'hack') {
@@ -514,19 +527,6 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       if (action.skill === 'plus-one' && hCard.card.rank >= 14) return false;
       if (action.skill === 'minus-one' && hCard.card.rank <= 2) return false;
       return true;
-    }
-
-    // Non-consuming Universal Scan Skill (requires diff === 0: must call raises first!)
-    if (action.type === 'scan') {
-      if (state.usedScanThisTurn) return false;
-      if (actor.chips < getEffectiveScanCost(state, actorId)) return false;
-      const scanKey = `${actorId}:${action.targetKind}:${action.targetIndex}`;
-      if (state.scannedKeys.includes(scanKey)) return false;
-      if (action.targetKind === 'hand') {
-        return Boolean(opp.hand[action.targetIndex]);
-      }
-      const slot = state.board[action.targetIndex];
-      return Boolean(slot && slot.isOpen && slot.swappedBy === oppId);
     }
 
     // Acquired Protocol Skills (once per hand, human player)
