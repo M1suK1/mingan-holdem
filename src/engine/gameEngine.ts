@@ -325,6 +325,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     board,
     players: { human, ai },
     pot,
+    hackEscrowPot: 0,
     phase: 'early',
     currentTurn: firstTurn,
     tieStarter,
@@ -565,6 +566,11 @@ function cloneState(state: GameState): GameState {
 function resolveShowdown(state: GameState): GameState {
   const next = cloneState(state);
   next.justCalledThisTurn = false;
+  // Merge prepaid hacker skill escrow into final settled pot at Showdown
+  if (next.hackEscrowPot > 0) {
+    next.pot += next.hackEscrowPot;
+    next.hackEscrowPot = 0;
+  }
   // At Showdown (when not caught by Scan), any hacked card that entered the public board
   // takes real effect on the table for both hands.
   const boardCards = next.board.map((b) => b.card);
@@ -833,7 +839,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
 
     actor.chips -= cost;
     actor.totalCommitted += cost;
-    next.pot += cost;
+    next.hackEscrowPot += cost;
     next.usedHackThisTurn = true;
 
     if (!hc.originalCard) {
@@ -919,6 +925,10 @@ export function applyAction(state: GameState, action: GameAction): GameState {
 
     if (tampered) {
       opp.sealedSkills = Array.from(new Set([...opp.sealedSkills, ...tamperedSkills]));
+      if (next.hackEscrowPot > 0) {
+        next.pot += next.hackEscrowPot;
+        next.hackEscrowPot = 0;
+      }
       actor.chips += next.pot;
       next.phase = 'showdown';
       next.justCalledThisTurn = false;
@@ -980,6 +990,10 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (action.type === 'fold') {
     const next = cloneState(state);
     next.justCalledThisTurn = false;
+    if (next.hackEscrowPot > 0) {
+      next.pot += next.hackEscrowPot;
+      next.hackEscrowPot = 0;
+    }
     next.players[actorId].folded = true;
     next.players[oppId].chips += next.pot;
     next.phase = 'showdown';

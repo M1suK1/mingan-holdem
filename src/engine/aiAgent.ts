@@ -222,10 +222,10 @@ export class LocalAiAgent implements OpponentAgent {
               action: hackAct,
               dialogue: buildDialogue(
                 speaker,
-                'confident',
-                '稍微改写了一点底层参数……反正你也看不出区别，继续吧。',
+                'idle',
+                '让我整理一下这一轮的牌面节奏。',
                 telemetry,
-                'smile'
+                'calm'
               ),
             };
           }

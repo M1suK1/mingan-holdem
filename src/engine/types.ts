@@ -220,6 +220,7 @@ export interface GameState {
   board: BoardSlot[];
   players: Record<PlayerId, PlayerState>;
   pot: number;
+  hackEscrowPot: number;
   phase: Phase;
   currentTurn: PlayerId;
   tieStarter: PlayerId;

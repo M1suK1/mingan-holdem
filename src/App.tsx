@@ -547,10 +547,14 @@ export function App() {
     const handRect = handEl.getBoundingClientRect();
     const boardRect = boardEl.getBoundingClientRect();
 
-    const boardCard = state.board[evt.boardIndex]?.card;
-    const handCard = state.players[evt.actor].hand[evt.handIndex]?.card;
-    const hideHandFace =
-      evt.actor === 'ai' && state.phase !== 'showdown' && !state.config.revealOpponentHidden;
+    const boardSlot = state.board[evt.boardIndex];
+    const handHc = state.players[evt.actor].hand[evt.handIndex];
+    const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+    const boardCard = boardSlot ? getVisibleBoardCard(boardSlot, 'human', revealAll) : undefined;
+    const hideHandFace = evt.actor === 'ai' && !revealAll;
+    const handCard = handHc
+      ? getVisibleHandCard(handHc, 'human', evt.actor, revealAll)
+      : undefined;
 
     setSwapFlight({
       id: evt.id,
@@ -632,11 +636,13 @@ export function App() {
         const decision = await agentRef.current.decide(snapshot);
         if (cancelled) return;
         setActiveExpression(decision.dialogue.expression);
-        enqueueTask({
-          kind: 'opponent',
-          speaker: char.name,
-          text: decision.dialogue.text,
-        });
+        if (decision.action.type !== 'hack') {
+          enqueueTask({
+            kind: 'opponent',
+            speaker: char.name,
+            text: decision.dialogue.text,
+          });
+        }
         setState((prev) => {
           if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
           return applyAction(prev, decision.action);

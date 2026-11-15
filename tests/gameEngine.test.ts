@@ -165,10 +165,13 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     let state = setupDeterministicState();
     const origRank = state.players.human.hand[0].card.rank;
 
-    // Human hacks open card #0 (+1) without consuming turn
+    // Human hacks open card #0 (+1) without consuming turn; prepaid cost sits in hackEscrowPot, NOT pot!
+    const potBeforeHack = state.pot;
     state = applyAction(state, { type: 'hack', handIndex: 0, skill: 'plus-one' });
     assert.equal(state.currentTurn, 'human');
     assert.equal(state.players.human.chips, 990 - 40);
+    assert.equal(state.pot, potBeforeHack);
+    assert.equal(state.hackEscrowPot, 40);
     assert.equal(state.players.human.hand[0].card.rank, origRank + 1);
     assert.equal(getVisibleHandCard(state.players.human.hand[0], 'ai', 'human', false).rank, origRank);
 
@@ -203,6 +206,10 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     assert.equal(state.result?.reason, 'scan-caught');
     assert.equal(state.lastAction?.targetKind, 'board');
     assert.equal(state.lastAction?.targetIndex, 0);
+    // At settlement, hackEscrowPot merges into final potWon and total chips remain 2000
+    assert.equal(state.hackEscrowPot, 0);
+    assert.equal(state.pot, state.result?.potWon);
+    assert.equal(state.players.human.chips + state.players.ai.chips, 2000);
     assert.ok(state.players.human.sealedSkills.includes('plus-one'));
 
     let nextHand = startNextHand(state);
