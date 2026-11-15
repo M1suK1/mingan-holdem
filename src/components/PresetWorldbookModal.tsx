@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { CampaignState, PursuerDossier } from '../engine/types.ts';
 import type { ContractCharacter } from '../engine/contractCards.ts';
+import type { ThinkingEffort } from '../engine/vertexClient.ts';
 import {
   CONTRACT_PROMPTS,
   PROMPT_MACRO_HINTS,
@@ -504,20 +505,35 @@ export default function PresetWorldbookModal({
                       }
                     />
                   </label>
-                  <label className="lc-pwb-param inline">
-                    <input
-                      id="pwb-check-thinking"
-                      type="checkbox"
+                  <label className="lc-pwb-param">
+                    <span>预设默认思考强度</span>
+                    <select
+                      id="pwb-select-thinking-effort"
+                      className="cyber-select"
                       disabled={!isEditable}
-                      checked={activePreset.settings.thinking}
-                      onChange={(e) =>
+                      value={
+                        activePreset.settings.thinkingEffort ??
+                        (activePreset.settings.thinking ? 'unlimited' : 'off')
+                      }
+                      onChange={(e) => {
+                        const effort = e.target.value as ThinkingEffort;
                         replacePreset({
                           ...activePreset,
-                          settings: { ...activePreset.settings, thinking: e.target.checked },
-                        })
-                      }
-                    />
-                    <span>启用 Vertex 思维链回传</span>
+                          settings: {
+                            ...activePreset.settings,
+                            thinkingEffort: effort,
+                            thinking: effort !== 'off',
+                          },
+                        });
+                      }}
+                    >
+                      <option value="off">关闭 (off)</option>
+                      <option value="minimal">极简 (minimal)</option>
+                      <option value="low">轻度 (low)</option>
+                      <option value="medium">中度 (medium)</option>
+                      <option value="high">深度 (high)</option>
+                      <option value="unlimited">无限制 (unlimited)</option>
+                    </select>
                   </label>
                 </div>
               </div>

@@ -858,6 +858,47 @@ export function App() {
             ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
             : `完全同分平局？一人一半回收算力池，下一局再见真章。`;
 
+    // 普通小局结束（双方筹码均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
+    if (state.players.ai.chips > 0 && state.players.human.chips > 0) {
+      const cfg = latestLlmRef.current;
+      if (cfg.enabled && cfg.reactAfterEachRound !== false) {
+        const currChar = latestCharRef.current;
+        const winTxt =
+          res.winner === 'human'
+            ? '玩家胜出'
+            : res.winner === 'ai'
+              ? `${currChar.name}胜出`
+              : '平局分池';
+        const reasonTxt =
+          res.reason === 'scan-caught'
+            ? '扫描抓获篡改直接判胜'
+            : res.reason === 'fold'
+              ? '对手弃牌'
+              : `摊牌比牌（我方[${res.aiEval?.categoryName ?? '未知'}] vs 玩家[${res.humanEval?.categoryName ?? '未知'}]）`;
+        const roundResultSummary = `第#${state.handNumber}局${winTxt}（${reasonTxt}），奖池 ${res.potWon}；我方本局投入 ${state.players.ai.totalCommitted}（余 ${state.players.ai.chips}），玩家投入 ${state.players.human.totalCommitted}（余 ${state.players.human.chips}）。`;
+
+        void requestEncounterDialogue({
+          eventKind: 'round-settled',
+          character: currChar,
+          state,
+          llmConfig: cfg,
+          campaign: latestCampaignRef.current,
+          dossier: latestDossierRef.current,
+          chatHistory: buildChatHistorySnapshot(),
+          preset: latestPresetRef.current,
+          worldbook: latestWorldbookRef.current,
+          roundResultSummary,
+        }).then((enc) => {
+          if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
+          setActiveExpression(enc.expression);
+          enqueueOpponentSegments(currChar.name, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
+        });
+      } else {
+        enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+      }
+      return;
+    }
+
     enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
 
     // 整场算力归零：触发黑域协议虚拟实体夺取 / 诱饵逃脱 / 失败结局

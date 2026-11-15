@@ -33,7 +33,7 @@ import {
   syncDynamicWorldbookEntries,
   type WorldbookEntry,
 } from './worldbook.ts';
-import { vertexChat } from './vertexClient.ts';
+import { vertexChat, type ThinkingEffort } from './vertexClient.ts';
 
 export const LLM_STORAGE_KEY = 'mingan-cyber-holdem:llm-config:v1';
 
@@ -55,6 +55,11 @@ export interface LlmConfig {
   topP?: number;
   maxTokens?: number;
   thinking?: boolean;
+  thinkingEffort?: ThinkingEffort;
+  decisionThinkingEffort?: ThinkingEffort;
+  decisionModel?: string;
+  fastDecisionMode?: boolean;
+  reactAfterEachRound?: boolean;
   overloadPersona: boolean;
   customSystemPrompt: string;
 }
@@ -74,6 +79,11 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
   topP: 0.95,
   maxTokens: 0,
   thinking: true,
+  thinkingEffort: 'high',
+  decisionThinkingEffort: 'low',
+  decisionModel: '',
+  fastDecisionMode: true,
+  reactAfterEachRound: true,
   overloadPersona: true,
   customSystemPrompt: '',
 };
@@ -446,7 +456,9 @@ function buildEndpointUrl(endpoint: string): string {
 export async function callOpenAiCompatible(
   config: LlmConfig,
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-  presetSettings?: ChatPreset['settings']
+  presetSettings?: ChatPreset['settings'],
+  effortOverride?: ThinkingEffort,
+  timeoutMs = 45000
 ): Promise<{ content: string; durationMs: number }> {
   const t0 = Date.now();
   const url = buildEndpointUrl(config.endpoint);
@@ -465,8 +477,13 @@ export async function callOpenAiCompatible(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
-  const thinkingEnabled = presetSettings?.thinking ?? config.thinking ?? true;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const effort: ThinkingEffort =
+    effortOverride ??
+    presetSettings?.thinkingEffort ??
+    config.thinkingEffort ??
+    ((presetSettings?.thinking ?? config.thinking ?? true) ? 'unlimited' : 'off');
+  const thinkingEnabled = effort !== 'off';
   const configuredMax = presetSettings?.maxTokens ?? config.maxTokens ?? 0;
 
   const sendOnce = async (maxTok: number) => {
@@ -476,6 +493,11 @@ export async function callOpenAiCompatible(
       top_p: presetSettings?.topP ?? config.topP ?? 0.95,
       messages,
     };
+    if (effort === 'low' || effort === 'medium' || effort === 'high') {
+      payload.reasoning_effort = effort;
+    } else if (effort === 'minimal') {
+      payload.reasoning_effort = 'low';
+    }
     // 思维链开启或设为 0（不限制）时，不发送 max_tokens，避免推理代理/思维链被长度截断
     if (!thinkingEnabled && maxTok > 0) {
       payload.max_tokens = maxTok;
@@ -544,6 +566,9 @@ export async function dispatchModelCall(params: {
   config: LlmConfig;
   preset?: ChatPreset;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  effortOverride?: ThinkingEffort;
+  modelOverride?: string;
+  timeoutMs?: number;
 }): Promise<{
   content: string;
   reasoning?: string;
@@ -551,12 +576,20 @@ export async function dispatchModelCall(params: {
   provider: LlmProvider;
   model: string;
 }> {
-  const { config, preset, messages } = params;
+  const { config, preset, messages, effortOverride, modelOverride, timeoutMs } = params;
   const useOverride = Boolean(preset?.api?.enabled);
   const provider: LlmProvider = useOverride
     ? preset?.api?.provider ?? config.provider
     : config.provider;
-  const model = (useOverride && preset?.api?.model?.trim()) || config.model;
+  const model =
+    (modelOverride && modelOverride.trim()) ||
+    (useOverride && preset?.api?.model?.trim()) ||
+    config.model;
+  const effectiveEffort: ThinkingEffort =
+    effortOverride ??
+    preset?.settings.thinkingEffort ??
+    config.thinkingEffort ??
+    ((preset?.settings.thinking ?? config.thinking ?? true) ? 'unlimited' : 'off');
 
   const t0 = Date.now();
   if (provider === 'vertex') {
@@ -566,13 +599,14 @@ export async function dispatchModelCall(params: {
       (useOverride && preset?.api?.location?.trim()) || config.vertexLocation || 'us-central1';
 
     const res = await vertexChat(
-      { model: model || 'gemini-2.5-flash', location, secret },
+      { model: model || 'gemini-2.5-flash', location, secret, timeoutMs },
       messages,
       {
         temperature: preset?.settings.temperature ?? config.temperature,
         topP: preset?.settings.topP ?? config.topP ?? 0.95,
         maxTokens: preset?.settings.maxTokens ?? config.maxTokens ?? 0,
-        thinking: preset?.settings.thinking ?? config.thinking ?? true,
+        thinking: effectiveEffort !== 'off',
+        thinkingEffort: effectiveEffort,
       }
     );
     if (!res.ok) {
@@ -597,7 +631,13 @@ export async function dispatchModelCall(params: {
         }
       : { ...config, model };
 
-  const out = await callOpenAiCompatible(effectiveConfig, messages, preset?.settings);
+  const out = await callOpenAiCompatible(
+    effectiveConfig,
+    messages,
+    preset?.settings,
+    effectiveEffort,
+    timeoutMs
+  );
   return {
     content: out.content,
     durationMs: out.durationMs,
@@ -735,7 +775,7 @@ export async function requestOpponentChatReply(params: {
 }
 
 export async function requestEncounterDialogue(params: {
-  eventKind: 'pursuer-arrive' | 'pursuer-defeated' | 'decoy-escape' | 'core-seized';
+  eventKind: 'pursuer-arrive' | 'pursuer-defeated' | 'decoy-escape' | 'core-seized' | 'round-settled';
   character: ContractCharacter;
   state: GameState;
   llmConfig: LlmConfig;
@@ -745,6 +785,7 @@ export async function requestEncounterDialogue(params: {
   preset?: ChatPreset;
   worldbook?: WorldbookEntry[];
   detailNote?: string;
+  roundResultSummary?: string;
 }): Promise<{
   reply: string;
   segments: ChatDialogueSegment[];
@@ -752,7 +793,18 @@ export async function requestEncounterDialogue(params: {
   fromLlm: boolean;
   logEntry?: LlmCallLog;
 }> {
-  const { eventKind, character, state, llmConfig, campaign, dossier, detailNote } = params;
+  const { eventKind, character, state, llmConfig, campaign, dossier, detailNote, roundResultSummary } = params;
+
+  const fallbackWinner = state.result?.winner;
+  const fallbackRoundExpr: ContractExpression =
+    fallbackWinner === 'ai' ? 'smile' : fallbackWinner === 'human' ? 'sad' : 'surprise';
+  const fallbackRoundReply =
+    roundResultSummary ??
+    (fallbackWinner === 'ai'
+      ? `算力池 ${state.result?.potWon ?? 0} 已被我接管。下一局还要继续接入吗？`
+      : fallbackWinner === 'human'
+        ? `漂亮的牌序博弈……这 ${state.result?.potWon ?? 0} 算力归你了，下一把我会改写策略。`
+        : '完全同分平局？一人一半回收算力池，下一局再见真章。');
 
   const fallbackMap: Record<typeof eventKind, { reply: string; thought?: string; expression: ContractExpression }> = {
     'pursuer-arrive': {
@@ -773,6 +825,10 @@ export async function requestEncounterDialogue(params: {
       reply: `伪装耗尽了？你的本体虚拟实体已由我正式接管。本次通缉追捕任务完成，断开连接吧。`,
       expression: 'smile',
     },
+    'round-settled': {
+      reply: fallbackRoundReply,
+      expression: fallbackRoundExpr,
+    },
   };
 
   if (!llmConfig.enabled) {
@@ -788,6 +844,7 @@ export async function requestEncounterDialogue(params: {
     'pursuer-defeated': `【事件：追捕者败北】你的算力已归零，你的虚拟实体即将被玩家按黑域协议夺取，发表不甘或认可的败北台词。`,
     'decoy-escape': `【事件：玩家牺牲伪装诱饵逃脱】你打穿了对手的算力，却发现对方出战的只是一具俘获来的伪装诱饵（${detailNote ?? '诱饵实体'}），让玩家本体成功逃脱，表达震惊或警告。`,
     'core-seized': `【事件：剥离玩家本体实体（失败结局）】玩家以本体虚拟实体出战且算力归零，你成功夺走了玩家本体，宣告这场通缉猎杀圆满收网。`,
+    'round-settled': `【事件：单局结算感想】第 #${state.handNumber} 局刚刚结束：${roundResultSummary ?? fallbackRoundReply}。请结合本局摊牌情况、双方算力押注和筹码余量，用 1 至 3 段对话或心理想法发表你的真实感想或心理反应（对下一局保持张力）。`,
   };
 
   const rt = resolveRuntimeContext({ character, campaign, dossier, preset: params.preset, worldbook: params.worldbook });
@@ -934,9 +991,13 @@ export async function requestLlmPokerDecision(params: {
 
   const rt = resolveRuntimeContext(params);
   const legalHints = enumerateLegalActionHints(state);
+  // 若仅剩唯一强制动作（例如跟注后的 end-turn），跳过网络请求直接交由本地即时完成
+  if (legalHints.length <= 1) return null;
+
   const extraNote = llmConfig.customSystemPrompt.trim()
     ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
     : '';
+  const fastMode = llmConfig.fastDecisionMode !== false;
 
   const composed = composePresetPrompt({
     preset: rt.preset,
@@ -950,6 +1011,7 @@ export async function requestLlmPokerDecision(params: {
     taskContext: `可选合法动作（请择一输出）：${legalHints.join(' 或 ')}${extraNote}`,
     historyMessages: formatChatHistoryForLlm(params.chatHistory),
     overloadPersona: llmConfig.overloadPersona,
+    compactMode: fastMode,
   });
 
   try {
@@ -957,6 +1019,9 @@ export async function requestLlmPokerDecision(params: {
       config: llmConfig,
       preset: rt.preset,
       messages: composed.messages,
+      effortOverride: llmConfig.decisionThinkingEffort ?? (fastMode ? 'low' : undefined),
+      modelOverride: llmConfig.decisionModel,
+      timeoutMs: fastMode ? 18000 : 45000,
     });
     const cleaned = applyRegexScripts(out.content, rt.preset.regex, 'output');
     const parsed = extractJsonPayload(cleaned);

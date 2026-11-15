@@ -27,6 +27,7 @@ import {
 import {
   describeVertexCredential,
   normalizeServiceAccountText,
+  type ThinkingEffort,
 } from '../engine/vertexClient.ts';
 import {
   dispatchModelCall,
@@ -284,6 +285,44 @@ export default function LlmTerminalModal({
                     }
                   />
                 </div>
+
+                <div className="form-field-row">
+                  <div>
+                    <label htmlFor="llm-switch-round-react" style={{ fontWeight: 700 }}>
+                      每局结算后由 LLM 发表本轮结果感想
+                    </label>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      每小局摊牌或弃牌结算后，结合胜负与双方筹码变动由追捕者发表针对性感想与心理独白
+                    </div>
+                  </div>
+                  <input
+                    id="llm-switch-round-react"
+                    type="checkbox"
+                    checked={draft.reactAfterEachRound !== false}
+                    onChange={(e) =>
+                      setDraft((p) => ({ ...p, reactAfterEachRound: e.target.checked }))
+                    }
+                  />
+                </div>
+
+                <div className="form-field-row">
+                  <div>
+                    <label htmlFor="llm-switch-fast-decision" style={{ fontWeight: 700 }}>
+                      开启极速出牌优化（精简决策上下文 + 跳过单一强制动作）
+                    </label>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      出牌时自动裁剪冗长世界书并限制近期历史条数，遇唯一合法动作（如跟注后结束回合）直接秒执行
+                    </div>
+                  </div>
+                  <input
+                    id="llm-switch-fast-decision"
+                    type="checkbox"
+                    checked={draft.fastDecisionMode !== false}
+                    onChange={(e) =>
+                      setDraft((p) => ({ ...p, fastDecisionMode: e.target.checked }))
+                    }
+                  />
+                </div>
               </div>
 
               <div className="cyber-panel-box">
@@ -456,7 +495,7 @@ export default function LlmTerminalModal({
                 )}
 
                 <div className="form-field-row">
-                  <label htmlFor="llm-input-model">模型标识 (Model ID)</label>
+                  <label htmlFor="llm-input-model">主模型标识 (对话 / 感想 / 演出)</label>
                   <input
                     id="llm-input-model"
                     type="text"
@@ -466,6 +505,64 @@ export default function LlmTerminalModal({
                     placeholder={draft.provider === 'vertex' ? 'gemini-2.5-flash' : 'deepseek-chat'}
                     onChange={(e) => setDraft((p) => ({ ...p, model: e.target.value }))}
                   />
+                </div>
+
+                <div className="form-field-row">
+                  <label htmlFor="llm-input-decision-model">出牌专用快速模型（可选，留空则同主模型）</label>
+                  <input
+                    id="llm-input-decision-model"
+                    type="text"
+                    className="cyber-text-input"
+                    style={{ maxWidth: 280 }}
+                    value={draft.decisionModel ?? ''}
+                    placeholder="如 gemini-2.5-flash / deepseek-chat"
+                    onChange={(e) => setDraft((p) => ({ ...p, decisionModel: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-field-row">
+                  <label htmlFor="llm-select-thinking-effort">对话与感想思考强度</label>
+                  <select
+                    id="llm-select-thinking-effort"
+                    className="cyber-select"
+                    value={draft.thinkingEffort ?? 'high'}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        thinkingEffort: e.target.value as ThinkingEffort,
+                        thinking: e.target.value !== 'off',
+                      }))
+                    }
+                  >
+                    <option value="off">关闭思考 (off · 极速直出)</option>
+                    <option value="minimal">极简思考 (minimal)</option>
+                    <option value="low">轻度思考 (low · 1024)</option>
+                    <option value="medium">中度思考 (medium · 4096)</option>
+                    <option value="high">深度思考 (high · 12288)</option>
+                    <option value="unlimited">无限制思维链 (unlimited / 动态 -1)</option>
+                  </select>
+                </div>
+
+                <div className="form-field-row">
+                  <label htmlFor="llm-select-decision-effort">出牌决策思考强度（建议 off 或 low 提速）</label>
+                  <select
+                    id="llm-select-decision-effort"
+                    className="cyber-select"
+                    value={draft.decisionThinkingEffort ?? 'low'}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        decisionThinkingEffort: e.target.value as ThinkingEffort,
+                      }))
+                    }
+                  >
+                    <option value="off">关闭思考 (off · 最快)</option>
+                    <option value="minimal">极简思考 (minimal)</option>
+                    <option value="low">轻度思考 (low · 推荐)</option>
+                    <option value="medium">中度思考 (medium)</option>
+                    <option value="high">深度思考 (high)</option>
+                    <option value="unlimited">无限制思维链 (unlimited)</option>
+                  </select>
                 </div>
               </div>
 

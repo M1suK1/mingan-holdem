@@ -2,6 +2,7 @@ import type { ContractCharacter } from './contractCards.ts';
 import { getActiveDisguiseEntity } from './campaign.ts';
 import { getSkillById } from './skillPool.ts';
 import type { CampaignState, PursuerDossier } from './types.ts';
+import type { ThinkingEffort } from './vertexClient.ts';
 import { worldbookContext, WORLDBOOK_BUDGET, type WorldbookEntry } from './worldbook.ts';
 
 export type PromptRole = 'system' | 'user' | 'assistant';
@@ -52,6 +53,7 @@ export interface ChatPreset {
     frequencyPenalty: number;
     maxContext: number;
     thinking: boolean;
+    thinkingEffort?: ThinkingEffort;
     worldbookBudget?: number;
   };
   prompts: PromptEntry[];
@@ -393,6 +395,7 @@ export function composePresetPrompt(params: {
   taskContext: string;
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   overloadPersona?: boolean;
+  compactMode?: boolean;
 }): ComposedPresetResult {
   const {
     preset,
@@ -406,15 +409,19 @@ export function composePresetPrompt(params: {
     taskContext,
     historyMessages = [],
     overloadPersona,
+    compactMode = false,
   } = params;
 
-  const wbRes = worldbookContext(
-    `${triggerText}\n${tableSummary}\n${character.name}\n${dossier.faction}`,
-    worldbook,
-    preset.settings.worldbookBudget ?? WORLDBOOK_BUDGET
-  );
+  const wbRes = compactMode
+    ? { text: '', hits: [], tokens: 0, dropped: 0 }
+    : worldbookContext(
+        `${triggerText}\n${tableSummary}\n${character.name}\n${dossier.faction}`,
+        worldbook,
+        preset.settings.worldbookBudget ?? WORLDBOOK_BUDGET
+      );
 
-  const historyText = historyMessages
+  const effectiveHistory = compactMode ? historyMessages.slice(-3) : historyMessages;
+  const historyText = effectiveHistory
     .map((h) => (h.role === 'user' ? `玩家：${h.content}` : h.content))
     .join('\n');
 
@@ -433,7 +440,8 @@ export function composePresetPrompt(params: {
     (entry) =>
       entry.enabled &&
       !entry.marker &&
-      (entry.scope === 'shared' || entry.scope === scope)
+      (entry.scope === 'shared' || entry.scope === scope) &&
+      !(compactMode && (entry.id === 'entry-world-core' || entry.id === 'entry-worldbook-inject'))
   );
 
   const normalEntries = activeEntries.filter((e) => !e.contract);

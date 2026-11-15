@@ -35,12 +35,14 @@ import {
   describeVertexCredential,
   normalizeVertexModel,
   parseVertexServiceAccount,
+  thinkingConfigOf,
   vertexChat,
   vertexTarget,
 } from '../src/engine/vertexClient.ts';
 import {
   generateLocalPersonaReply,
   parseDialogueSegments,
+  requestEncounterDialogue,
   serializeStateForLlm,
 } from '../src/engine/llmClient.ts';
 import { applyAction, createInitialState, getEffectiveHackCost, getEffectiveScanCost, getNextSwapFee, isActionLegal, startNextHand } from '../src/engine/gameEngine.ts';
@@ -412,5 +414,81 @@ describe('Protocol Skill Pool mechanics (passive & active skills)', () => {
     assert.notEqual(state.phase, 'showdown');
     assert.equal(state.players.human.ghostShield, false);
     assert.equal(state.lastAction?.caught, false);
+  });
+});
+
+describe('Thinking effort tuning & round-settled LLM感想', () => {
+  it('maps thinkingEffort levels (off/low/medium/high/unlimited) to Vertex thinkingConfig accurately', () => {
+    assert.equal(thinkingConfigOf('plain', 'off'), undefined);
+    assert.deepEqual(thinkingConfigOf('level', 'low'), { includeThoughts: true, thinkingLevel: 'low' });
+    assert.deepEqual(thinkingConfigOf('budget', 'medium'), { includeThoughts: true, thinkingBudget: 4096 });
+    assert.deepEqual(thinkingConfigOf('budget', 'unlimited'), { includeThoughts: true, thinkingBudget: -1 });
+  });
+
+  it('supports round-settled encounter reflection with ShowdownResult details and fastDecisionMode context compaction', async () => {
+    const camp = createInitialCampaign('GHOST-7');
+    const dossier = buildPursuerDossier(FALLBACK_CONTRACT_CHARACTER, 1);
+    const state = createInitialState({ config: DEFAULT_CONFIG, opponentName: FALLBACK_CONTRACT_CHARACTER.name });
+    state.phase = 'showdown';
+    state.result = {
+      winner: 'human',
+      reason: 'showdown',
+      potWon: 240,
+      payouts: { human: 240, ai: 0 },
+    };
+
+    const res = await requestEncounterDialogue({
+      eventKind: 'round-settled',
+      character: FALLBACK_CONTRACT_CHARACTER,
+      state,
+      llmConfig: {
+        enabled: false,
+        drivePokerActions: false,
+        provider: 'openai',
+        endpoint: '',
+        apiKey: '',
+        authMode: 'bearer',
+        model: 'deepseek-chat',
+        temperature: 0.75,
+        thinkingEffort: 'medium',
+        decisionThinkingEffort: 'low',
+        fastDecisionMode: true,
+        overloadPersona: true,
+        customSystemPrompt: '',
+      },
+      campaign: camp,
+      dossier,
+      roundResultSummary: '第#1局摊牌：玩家以[两对]击败银狼[一对]，赢得奖池 240',
+    });
+    assert.ok(res.segments.length >= 1);
+    assert.ok(res.reply.length > 0);
+
+    const preset = builtinPresets()[0];
+    const wb = syncDynamicWorldbookEntries(builtinWorldbook(), camp, FALLBACK_CONTRACT_CHARACTER, dossier);
+    const fullComposed = composePresetPrompt({
+      preset,
+      scope: 'decision',
+      worldbook: wb,
+      character: FALLBACK_CONTRACT_CHARACTER,
+      dossier,
+      campaign: camp,
+      triggerText: '黑域协议 虚拟实体',
+      tableSummary: '[牌桌]',
+      taskContext: '选动作',
+      compactMode: false,
+    });
+    const fastComposed = composePresetPrompt({
+      preset,
+      scope: 'decision',
+      worldbook: wb,
+      character: FALLBACK_CONTRACT_CHARACTER,
+      dossier,
+      campaign: camp,
+      triggerText: '黑域协议 虚拟实体',
+      tableSummary: '[牌桌]',
+      taskContext: '选动作',
+      compactMode: true,
+    });
+    assert.ok(fastComposed.system.length < fullComposed.system.length);
   });
 });

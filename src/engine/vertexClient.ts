@@ -17,11 +17,14 @@ export type VertexMessage = {
   content: string;
 };
 
+export type ThinkingEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'unlimited';
+
 export interface VertexParams {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
   thinking?: boolean;
+  thinkingEffort?: ThinkingEffort;
 }
 
 export type ThinkingVariant = 'plain' | 'level' | 'budget' | 'off';
@@ -296,17 +299,34 @@ interface VertexResponseBody {
   error?: { code?: number; message?: string };
 }
 
-function thinkingConfigOf(variant: ThinkingVariant): Record<string, unknown> | undefined {
+export function thinkingConfigOf(
+  variant: ThinkingVariant,
+  effort: ThinkingEffort = 'unlimited'
+): Record<string, unknown> | undefined {
+  if (variant === 'off' || effort === 'off') return undefined;
   if (variant === 'plain') return { includeThoughts: true };
-  if (variant === 'level') return { includeThoughts: true, thinkingLevel: 'high' };
-  if (variant === 'budget') return { includeThoughts: true, thinkingBudget: -1 };
+  if (variant === 'level') {
+    const lvl = effort === 'unlimited' ? 'high' : effort;
+    return { includeThoughts: true, thinkingLevel: lvl };
+  }
+  if (variant === 'budget') {
+    const budgetMap: Record<Exclude<ThinkingEffort, 'off'>, number> = {
+      minimal: 512,
+      low: 1024,
+      medium: 4096,
+      high: 12288,
+      unlimited: -1,
+    };
+    return { includeThoughts: true, thinkingBudget: budgetMap[effort] };
+  }
   return undefined;
 }
 
-function thinkingLadder(model: string, enabled = true): ThinkingVariant[] {
-  if (!enabled) return ['off'];
+function thinkingLadder(model: string, effort: ThinkingEffort = 'unlimited'): ThinkingVariant[] {
+  if (effort === 'off') return ['off'];
   const modern = /gemini-(?:[3-9]|\d{2,})/i.test(model);
-  return modern ? ['level', 'plain', 'budget', 'off'] : ['plain', 'budget', 'off'];
+  if (modern) return ['level', 'budget', 'plain', 'off'];
+  return effort === 'unlimited' ? ['plain', 'budget', 'off'] : ['budget', 'plain', 'off'];
 }
 
 const workingVariant = new Map<string, ThinkingVariant>();
@@ -353,19 +373,22 @@ export async function vertexChat(
   const systemText = systemParts.join('\n\n');
   const model = normalizeVertexModel(input.model);
 
+  const effectiveEffort: ThinkingEffort =
+    params.thinkingEffort ?? (params.thinking === false ? 'off' : 'unlimited');
+
   const buildPayload = (variant: ThinkingVariant, capMax?: number) => {
     const generationConfig: Record<string, unknown> = {};
     if (params.temperature !== undefined) generationConfig.temperature = params.temperature;
     if (params.topP !== undefined) generationConfig.topP = params.topP;
     if (capMax !== undefined) {
       if (capMax > 0) generationConfig.maxOutputTokens = capMax;
-    } else if (variant !== 'off') {
+    } else if (variant !== 'off' && effectiveEffort !== 'off') {
       // 开启思维链时不人为压低上限，直接使用 Vertex 最大 65536 额度避免 MAX_TOKENS 截断思考
       generationConfig.maxOutputTokens = MAX_OUTPUT_TOKENS;
     } else if (params.maxTokens && params.maxTokens > 0) {
       generationConfig.maxOutputTokens = Math.max(4096, params.maxTokens);
     }
-    const tc = thinkingConfigOf(variant);
+    const tc = thinkingConfigOf(variant, effectiveEffort);
     if (tc) generationConfig.thinkingConfig = tc;
     const body: Record<string, unknown> = { contents };
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
@@ -416,7 +439,7 @@ export async function vertexChat(
     return { ok: true as const, body };
   };
 
-  const baseLadder = thinkingLadder(model, params.thinking !== false);
+  const baseLadder = thinkingLadder(model, effectiveEffort);
   const cachedVar = workingVariant.get(model);
   const ladder =
     cachedVar && baseLadder.includes(cachedVar)
