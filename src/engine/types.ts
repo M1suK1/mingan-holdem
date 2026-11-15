@@ -45,6 +45,8 @@ export interface BoardSlot {
 export type SwapFeeMode = 'escalating' | 'fixed';
 export type AiStyle = 'balanced' | 'aggressive' | 'cautious';
 export type AiDifficulty = 'auto' | 'rookie' | 'standard' | 'master';
+export type AiPlayStyle = 'auto' | 'pressure' | 'trap' | 'sculptor' | 'conservative';
+export type AiCheatProfile = 'auto' | 'auditor' | 'phantom-hacker' | 'opportunist' | 'disruptor';
 
 /** Dynamic battleground environment state driven by match tension */
 export type BattleSituation =
@@ -69,6 +71,8 @@ export interface GameConfig {
   maxRiverRaises: number;
   aiStyle: AiStyle;
   aiDifficulty: AiDifficulty;
+  aiPlayStyle: AiPlayStyle;
+  aiCheatProfile: AiCheatProfile;
   aiDelayMs: number;
   revealOpponentHidden: boolean;
   showDeckTracker: boolean;
@@ -93,6 +97,8 @@ export const DEFAULT_CONFIG: GameConfig = {
   maxRiverRaises: 3,
   aiStyle: 'balanced',
   aiDifficulty: 'auto',
+  aiPlayStyle: 'auto',
+  aiCheatProfile: 'auto',
   aiDelayMs: 680,
   revealOpponentHidden: false,
   showDeckTracker: true,

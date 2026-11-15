@@ -64,7 +64,13 @@ import {
   selectMatchDisguise,
   claimVictoryLoot,
 } from './engine/campaign.ts';
-import { buildPursuerDossier, getSkillById } from './engine/skillPool.ts';
+import {
+  PLAY_STYLE_META,
+  CHEAT_PROFILE_META,
+  buildPursuerDossier,
+  getSkillById,
+  resolvePursuerStrategyProfile,
+} from './engine/skillPool.ts';
 import {
   loadActivePresetId,
   loadPresets,
@@ -399,12 +405,23 @@ export function App() {
     () => resolveEffectiveAiDifficulty(state.config.aiDifficulty, dossier.threatLevel),
     [state.config.aiDifficulty, dossier.threatLevel]
   );
+  const effectiveStrategy = useMemo(
+    () =>
+      resolvePursuerStrategyProfile(
+        state.config.aiPlayStyle,
+        state.config.aiCheatProfile,
+        character,
+        dossier
+      ),
+    [state.config.aiPlayStyle, state.config.aiCheatProfile, character, dossier]
+  );
 
   useEffect(() => {
     agentRef.current.setStyle(state.config.aiStyle);
     agentRef.current.setDifficulty(effectiveAiDifficulty);
+    agentRef.current.setStrategy(effectiveStrategy.playStyle, effectiveStrategy.cheatProfile);
     agentRef.current.setCharacter(character);
-  }, [state.config.aiStyle, effectiveAiDifficulty, character]);
+  }, [state.config.aiStyle, effectiveAiDifficulty, effectiveStrategy, character]);
 
   // Load Night-Sugar-Office Contract Catalog & Default Character
   useEffect(() => {
@@ -1692,7 +1709,9 @@ export function App() {
                       : effectiveAiDifficulty === 'standard'
                         ? '标准'
                         : '新兵'
-                  } · R${campaign.roundIndex}/T${dossier.threatLevel}`}
+                  } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
+                    CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
+                  }`}
             </span>
           </header>
 

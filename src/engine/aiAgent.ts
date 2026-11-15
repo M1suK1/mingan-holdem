@@ -33,6 +33,7 @@ import {
   moodToExpression,
   type ContractCharacter,
 } from './contractCards.ts';
+import type { EffectiveCheatProfile, EffectivePlayStyle } from './skillPool.ts';
 import { serializeStateForLlm } from './llmClient.ts';
 
 export { serializeStateForLlm };
@@ -217,14 +218,15 @@ function scoreCardPotential(hand: Card[], openBoard: Card[]): number {
 }
 
 /**
- * 枚举所有合法改牌组合，只在实际明显拔高成牌/听牌结构时选择最优改牌。
+ * 枚举所有合法改牌组合，结合不同作弊倾向决定改牌阈值与收益筛选。
  */
 export function pickBestHackAction(
   state: GameState,
   actorId: PlayerId,
-  difficulty: EffectiveAiDifficulty
+  difficulty: EffectiveAiDifficulty,
+  cheatProfile: EffectiveCheatProfile = 'opportunist'
 ): GameAction | null {
-  if (difficulty === 'rookie') return null;
+  if (difficulty === 'rookie' || cheatProfile === 'auditor') return null;
   if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
 
   const actor = state.players[actorId];
@@ -236,7 +238,10 @@ export function pickBestHackAction(
 
   let bestAct: GameAction | null = null;
   let bestGain = 0;
-  const minGain = difficulty === 'master' ? 55 : 100;
+  let minGain = difficulty === 'master' ? 55 : 100;
+  if (cheatProfile === 'phantom-hacker') minGain = difficulty === 'master' ? 25 : 55;
+  else if (cheatProfile === 'opportunist') minGain = 110;
+  else if (cheatProfile === 'disruptor') minGain = 45;
 
   const skills: HackSkillId[] = ['plus-one', 'minus-one', 'flip-suit'];
   for (let idx = 0; idx < actor.hand.length; idx += 1) {
@@ -268,12 +273,21 @@ export function pickBestHackAction(
 function pickBestSwappableHandIndex(
   state: GameState,
   actorId: PlayerId,
-  difficulty: EffectiveAiDifficulty
+  difficulty: EffectiveAiDifficulty,
+  cheatProfile: EffectiveCheatProfile = 'opportunist'
 ): number | null {
   const actor = state.players[actorId];
   const openBoard = state.board
     .filter((b) => b.isOpen)
     .map((b) => getVisibleBoardCard(b, actorId, false));
+
+  // 潜行改牌流派：若手上已有改过的明牌且仍有未锁定槽位，优先将其换入公共牌池以欺骗玩家视线
+  if (cheatProfile === 'phantom-hacker') {
+    const tamperedIdx = actor.hand.findIndex(
+      (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
+    );
+    if (tamperedIdx >= 0) return tamperedIdx;
+  }
 
   if (difficulty === 'rookie') {
     let bestIdx: number | null = null;
@@ -308,6 +322,7 @@ function pickSmartScanAction(
   state: GameState,
   actorId: PlayerId,
   difficulty: EffectiveAiDifficulty,
+  cheatProfile: EffectiveCheatProfile,
   equity: number,
   rng: () => number
 ): GameAction | null {
@@ -319,41 +334,49 @@ function pickSmartScanAction(
   const oppId = otherPlayer(actorId);
   const opp = state.players[oppId];
   const scanCost = getEffectiveScanCost(state, actorId);
-  if (actor.chips < scanCost + (difficulty === 'master' ? 60 : 160)) return null;
+  const chipBuffer = cheatProfile === 'auditor' ? 20 : difficulty === 'master' ? 60 : 160;
+  if (actor.chips < scanCost + chipBuffer) return null;
 
   const targets: Array<{ targetKind: 'hand' | 'board'; targetIndex: number; weight: number }> = [];
 
   opp.hand.forEach((h, idx) => {
     if (state.scannedKeys.includes(`${actorId}:hand:${idx}`)) return;
-    // Open cards or swapped-in private cards that look suspicious
     let weight = h.visibility === 'open' ? 1.2 : 1.0;
-    if (h.visibility === 'private' && state.phase === 'river') weight += 0.6;
+    if (cheatProfile === 'disruptor' && h.visibility === 'private') weight += 1.5;
+    else if (h.visibility === 'private' && state.phase === 'river') weight += 0.6;
     targets.push({ targetKind: 'hand', targetIndex: idx, weight });
   });
 
   state.board.forEach((slot) => {
     if (!slot.isOpen || slot.swappedBy !== oppId) return;
     if (state.scannedKeys.includes(`${actorId}:board:${slot.index}`)) return;
-    // Player actively swapped this card into the community board -> higher suspicion!
-    targets.push({ targetKind: 'board', targetIndex: slot.index, weight: 2.1 });
+    targets.push({
+      targetKind: 'board',
+      targetIndex: slot.index,
+      weight: cheatProfile === 'auditor' ? 2.6 : 2.1,
+    });
   });
 
   if (targets.length === 0) return null;
 
   let suspicion = 0;
-  if (diff >= 30) suspicion += 0.14;
+  if (diff >= 30) suspicion += 0.16;
   if (state.phase === 'river' && diff > 0 && equity >= 0.35 && equity <= 0.65) suspicion += 0.18;
-  if (state.pastHands?.some((p) => p.humanHadTamper)) suspicion += 0.12;
-  if (state.board.some((b) => b.isOpen && b.swappedBy === oppId)) suspicion += 0.1;
+  if (state.pastHands?.some((p) => p.humanHadTamper)) suspicion += 0.14;
+  if (state.board.some((b) => b.isOpen && b.swappedBy === oppId)) suspicion += 0.12;
 
-  const baseChance =
+  let baseChance =
     difficulty === 'rookie'
       ? 0.02
       : difficulty === 'standard'
         ? 0.06 + suspicion * 0.65
         : 0.1 + suspicion * 1.1;
 
-  if (rng() >= Math.min(0.55, baseChance)) return null;
+  if (cheatProfile === 'auditor') baseChance = Math.max(0.18, baseChance + 0.24);
+  else if (cheatProfile === 'phantom-hacker') baseChance *= 0.55;
+  else if (cheatProfile === 'opportunist') baseChance = diff >= 30 ? baseChance * 1.1 : baseChance * 0.5;
+
+  if (rng() >= Math.min(0.76, baseChance)) return null;
 
   targets.sort((a, b) => b.weight - a.weight);
   const pick = difficulty === 'rookie'
@@ -397,6 +420,8 @@ export class LocalAiAgent implements OpponentAgent {
   private readonly playerId: PlayerId;
   private style: AiStyle;
   private difficulty: EffectiveAiDifficulty;
+  private playStyle: EffectivePlayStyle;
+  private cheatProfile: EffectiveCheatProfile;
   private character: ContractCharacter;
   private readonly rng: () => number;
 
@@ -405,12 +430,16 @@ export class LocalAiAgent implements OpponentAgent {
     style: AiStyle = 'balanced',
     character: ContractCharacter = FALLBACK_CONTRACT_CHARACTER,
     rng: () => number = Math.random,
-    difficulty: EffectiveAiDifficulty = 'standard'
+    difficulty: EffectiveAiDifficulty = 'standard',
+    playStyle: EffectivePlayStyle = 'pressure',
+    cheatProfile: EffectiveCheatProfile = 'opportunist'
   ) {
     this.id = `local-ai-${style}-${difficulty}`;
     this.playerId = playerId;
     this.style = style;
     this.difficulty = difficulty;
+    this.playStyle = playStyle;
+    this.cheatProfile = cheatProfile;
     this.character = character;
     this.rng = rng;
   }
@@ -427,6 +456,11 @@ export class LocalAiAgent implements OpponentAgent {
     this.difficulty = difficulty;
   }
 
+  setStrategy(playStyle: EffectivePlayStyle, cheatProfile: EffectiveCheatProfile): void {
+    this.playStyle = playStyle;
+    this.cheatProfile = cheatProfile;
+  }
+
   setCharacter(character: ContractCharacter): void {
     this.character = character;
   }
@@ -439,9 +473,17 @@ export class LocalAiAgent implements OpponentAgent {
     const opp = state.players[otherPlayer(this.playerId)];
     const equity = estimateHandEquity(state, this.playerId, this.difficulty, this.rng);
 
-    const aggroBias =
-      this.style === 'aggressive' ? 0.1 : this.style === 'cautious' ? -0.08 : 0;
-    const effectiveStrength = Math.max(0.04, Math.min(0.99, equity + aggroBias));
+    const styleBias =
+      this.playStyle === 'pressure'
+        ? 0.09
+        : this.playStyle === 'conservative'
+          ? -0.07
+          : this.style === 'aggressive'
+            ? 0.07
+            : this.style === 'cautious'
+              ? -0.06
+              : 0;
+    const effectiveStrength = Math.max(0.04, Math.min(0.99, equity + styleBias));
 
     const diff = getBetDiff(state, this.playerId);
     const hiddenCount = getHiddenBoardCount(state);
@@ -450,9 +492,16 @@ export class LocalAiAgent implements OpponentAgent {
     const telemetry = serializeStateForLlm(state);
     const lastType = state.lastAction?.type;
 
-    // 1. Smart Scan & Value-Gated Hacker Skill (non-consuming)
+    // 1. Smart Scan & Profile-Driven Hacker Skill (non-consuming)
     if (lastType !== 'hack' && lastType !== 'scan') {
-      const smartScan = pickSmartScanAction(state, this.playerId, this.difficulty, equity, this.rng);
+      const smartScan = pickSmartScanAction(
+        state,
+        this.playerId,
+        this.difficulty,
+        this.cheatProfile,
+        equity,
+        this.rng
+      );
       if (smartScan) {
         return {
           action: smartScan,
@@ -466,12 +515,60 @@ export class LocalAiAgent implements OpponentAgent {
         };
       }
 
-      if (diff === 0 && actor.chips >= 220) {
-        const smartHack = pickBestHackAction(state, this.playerId, this.difficulty);
-        const hackGate = this.difficulty === 'master' ? 0.72 : 0.45;
+      // 潜行改牌流派：如果手上已有篡改过的明牌且仍有未翻开公共槽，优先将其换入公共牌池制造视野陷阱！
+      if (
+        this.cheatProfile === 'phantom-hacker' &&
+        diff === 0 &&
+        state.phase !== 'river' &&
+        hiddenCount > 0 &&
+        actor.swapCount < 2
+      ) {
+        const tamperedHandIdx = actor.hand.findIndex(
+          (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
+        );
+        const boardIdx = pickRandomHiddenBoardIndex(state, this.rng);
+        const swapFee = getNextSwapFee(state, this.playerId);
+        if (tamperedHandIdx >= 0 && boardIdx !== null && actor.chips >= swapFee + 40) {
+          const trapSwap: GameAction = {
+            type: 'swap',
+            handIndex: tamperedHandIdx,
+            boardIndex: boardIdx,
+          };
+          if (isActionLegal(state, trapSwap)) {
+            return {
+              action: trapSwap,
+              dialogue: buildDialogue(
+                speaker,
+                'thinking',
+                `投入 ${swapFee} 算力重构节点 #${boardIdx + 1}——真正的好牌该藏在私有扇区里。`,
+                telemetry,
+                'smile'
+              ),
+            };
+          }
+        }
+      }
+
+      if (diff === 0 && actor.chips >= 200) {
+        const smartHack = pickBestHackAction(
+          state,
+          this.playerId,
+          this.difficulty,
+          this.cheatProfile
+        );
+        const hackGate =
+          this.cheatProfile === 'phantom-hacker'
+            ? 0.9
+            : this.cheatProfile === 'disruptor'
+              ? 0.8
+              : this.cheatProfile === 'opportunist'
+                ? state.phase === 'mid' || hiddenCount <= 1
+                  ? 0.85
+                  : 0.35
+                : 0;
         if (smartHack && smartHack.type === 'hack') {
           const cost = getEffectiveHackCost(state, this.playerId, smartHack.skill);
-          if (actor.chips >= cost + 120 && roll < hackGate) {
+          if (actor.chips >= cost + 100 && roll < hackGate) {
             return {
               action: smartHack,
               dialogue: buildDialogue(
@@ -490,7 +587,9 @@ export class LocalAiAgent implements OpponentAgent {
     // 2. River Phase Decisions (all community cards open)
     if (state.phase === 'river') {
       if (diff === 0) {
-        if (this.difficulty === 'master' && effectiveStrength >= 0.82 && actor.chips >= 240 && roll < 0.35) {
+        const halfThreshold = this.playStyle === 'pressure' ? 0.76 : 0.82;
+        const halfProb = this.playStyle === 'pressure' ? 0.45 : this.playStyle === 'trap' ? 0.4 : 0.25;
+        if (this.difficulty === 'master' && effectiveStrength >= halfThreshold && actor.chips >= 240 && roll < halfProb) {
           const halfAmt = getHalfStackRaiseAmount(state, this.playerId);
           if (halfAmt > 0 && isActionLegal(state, { type: 'raise', amount: halfAmt, isHalfStack: true })) {
             return {
@@ -507,10 +606,18 @@ export class LocalAiAgent implements OpponentAgent {
         }
 
         const raiseRange = getLegalRaiseRange(state, this.playerId, 0);
-        const bluffChance = this.difficulty === 'master' ? 0.14 : this.style === 'aggressive' ? 0.24 : 0.06;
+        const bluffChance =
+          this.playStyle === 'pressure'
+            ? 0.3
+            : this.cheatProfile === 'disruptor'
+              ? 0.24
+              : this.playStyle === 'conservative'
+                ? 0.02
+                : 0.1;
+        const valueThreshold = this.playStyle === 'trap' ? 0.48 : 0.56;
         if (
           raiseRange.allowed &&
-          (effectiveStrength > 0.56 || roll < bluffChance)
+          (effectiveStrength > valueThreshold || roll < bluffChance)
         ) {
           const step = Math.max(
             raiseRange.min,
@@ -544,7 +651,14 @@ export class LocalAiAgent implements OpponentAgent {
 
       const paid = Math.min(diff, actor.chips);
       const potOdds = paid / Math.max(1, state.pot + paid);
-      const foldMultiplier = this.difficulty === 'master' ? 0.94 : this.difficulty === 'standard' ? 0.85 : 0.65;
+      const foldMultiplier =
+        this.playStyle === 'conservative'
+          ? 0.98
+          : this.playStyle === 'pressure'
+            ? 0.78
+            : this.difficulty === 'master'
+              ? 0.92
+              : 0.82;
       if (effectiveStrength < potOdds * foldMultiplier && paid >= 25 && roll > (this.difficulty === 'master' ? 0.08 : 0.2)) {
         return {
           action: { type: 'fold' },
@@ -559,13 +673,14 @@ export class LocalAiAgent implements OpponentAgent {
       }
 
       const raiseRange = getLegalRaiseRange(state, this.playerId, paid);
-      if (raiseRange.allowed && effectiveStrength > 0.76 && roll < (this.difficulty === 'master' ? 0.55 : 0.4)) {
+      const reraiseProb = this.playStyle === 'trap' ? 0.72 : this.playStyle === 'pressure' ? 0.6 : 0.42;
+      if (raiseRange.allowed && effectiveStrength > 0.74 && roll < reraiseProb) {
         return {
           action: { type: 'raise', amount: raiseRange.max },
           dialogue: buildDialogue(
             speaker,
             'confident',
-            `同步差额后再反加 +${raiseRange.max}！概率分布可站在我这边。`,
+            `同步差额后再反加 +${raiseRange.max}！这一步陷阱已经合拢了。`,
             telemetry,
             'smile'
           ),
@@ -589,7 +704,8 @@ export class LocalAiAgent implements OpponentAgent {
       const paid = Math.min(diff, actor.chips);
       const willBeAllIn = actor.chips - paid === 0 || opp.allIn;
       const potOdds = paid / Math.max(1, state.pot + paid);
-      const preRiverFoldMult = this.difficulty === 'master' ? 0.84 : 0.72;
+      const preRiverFoldMult =
+        this.playStyle === 'conservative' ? 0.92 : this.playStyle === 'pressure' ? 0.68 : 0.82;
 
       if (effectiveStrength < potOdds * preRiverFoldMult && paid >= 20 && roll > 0.18) {
         return {
@@ -631,7 +747,12 @@ export class LocalAiAgent implements OpponentAgent {
 
     // 4. Flat Turn in Early / Mid Phase (Swap, Raise, Flip, End-Turn)
     const raiseRange = getLegalRaiseRange(state, this.playerId, 0);
-    const swapIdx = pickBestSwappableHandIndex(state, this.playerId, this.difficulty);
+    const swapIdx = pickBestSwappableHandIndex(
+      state,
+      this.playerId,
+      this.difficulty,
+      this.cheatProfile
+    );
     const boardIdx = pickRandomHiddenBoardIndex(state, this.rng);
     const swapFee = getNextSwapFee(state, this.playerId);
     const canSwap =
@@ -641,7 +762,7 @@ export class LocalAiAgent implements OpponentAgent {
       actor.chips >= swapFee &&
       actor.chips - swapFee > state.config.minRaise;
 
-    if (state.justCalledThisTurn && roll < (this.difficulty === 'master' ? 0.25 : 0.35) && isActionLegal(state, { type: 'end-turn' })) {
+    if (state.justCalledThisTurn && roll < (this.playStyle === 'trap' ? 0.45 : 0.25) && isActionLegal(state, { type: 'end-turn' })) {
       return {
         action: { type: 'end-turn' },
         dialogue: buildDialogue(
@@ -654,8 +775,15 @@ export class LocalAiAgent implements OpponentAgent {
       };
     }
 
-    const swapThreshold = this.difficulty === 'master' ? 0.56 : 0.62;
-    const swapProb = this.difficulty === 'rookie' ? 0.45 : this.difficulty === 'standard' ? 0.68 : 0.84;
+    const swapThreshold = this.playStyle === 'sculptor' ? 0.72 : 0.56;
+    const swapProb =
+      this.playStyle === 'sculptor'
+        ? 0.92
+        : this.difficulty === 'rookie'
+          ? 0.45
+          : this.difficulty === 'standard'
+            ? 0.68
+            : 0.8;
     if (canSwap && effectiveStrength < swapThreshold && actor.swapCount < 2 && roll < swapProb) {
       const action: GameAction = { type: 'swap', handIndex: swapIdx!, boardIndex: boardIdx! };
       if (isActionLegal(state, action)) {
@@ -672,9 +800,22 @@ export class LocalAiAgent implements OpponentAgent {
       }
     }
 
+    // 控池陷阱流派：早期拿到高胜率强牌时故意慢打不加注，引诱玩家往底池投算力
+    const trapSlowPlay =
+      this.playStyle === 'trap' && effectiveStrength >= 0.7 && roll < 0.78;
+    const earlyRaiseChance =
+      this.playStyle === 'pressure'
+        ? 0.4
+        : this.cheatProfile === 'disruptor'
+          ? 0.3
+          : this.playStyle === 'conservative'
+            ? 0.05
+            : 0.16;
+
     if (
+      !trapSlowPlay &&
       raiseRange.allowed &&
-      (effectiveStrength > 0.57 || roll < (this.style === 'aggressive' ? 0.32 : this.difficulty === 'master' ? 0.18 : 0.12))
+      (effectiveStrength > 0.57 || roll < earlyRaiseChance)
     ) {
       const amt =
         effectiveStrength > 0.74

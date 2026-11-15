@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { RotateCcw, Sliders, X } from 'lucide-react';
 import {
   DEFAULT_CONFIG,
+  type AiCheatProfile,
   type AiDifficulty,
+  type AiPlayStyle,
   type AiStyle,
   type BattleSituation,
   type GameConfig,
@@ -161,7 +163,47 @@ export default function SandboxTuningModal({
             </div>
 
             <div className="form-field-row">
-              <label htmlFor="tuning-select-aistyle">本地 AI 战术倾向</label>
+              <label htmlFor="tuning-select-playstyle">本地 AI 出牌流派</label>
+              <select
+                id="tuning-select-playstyle"
+                className="cyber-select"
+                value={draft.aiPlayStyle ?? 'auto'}
+                onChange={(e) => {
+                  const aiPlayStyle = e.target.value as AiPlayStyle;
+                  setDraft((p) => ({ ...p, aiPlayStyle }));
+                  onApplyLive({ aiPlayStyle });
+                }}
+              >
+                <option value="auto">自动随追捕者派系与属性匹配</option>
+                <option value="pressure">强攻掠夺（高频加注 · 半池压迫 · 敢半诈唬）</option>
+                <option value="trap">控池陷阱（早段强牌慢打 · 河牌重注收割）</option>
+                <option value="sculptor">换牌重组（重度明暗换牌 · 锁死私有核心）</option>
+                <option value="conservative">稳健精算（严守胜率赔率 · 逆风果断弃牌）</option>
+              </select>
+            </div>
+
+            <div className="form-field-row">
+              <label htmlFor="tuning-select-cheatprofile">本地 AI 作弊与扫描倾向</label>
+              <select
+                id="tuning-select-cheatprofile"
+                className="cyber-select"
+                value={draft.aiCheatProfile ?? 'auto'}
+                onChange={(e) => {
+                  const aiCheatProfile = e.target.value as AiCheatProfile;
+                  setDraft((p) => ({ ...p, aiCheatProfile }));
+                  onApplyLive({ aiCheatProfile });
+                }}
+              >
+                <option value="auto">自动随追捕者派系与特性匹配</option>
+                <option value="auditor">守序审计（零改牌作弊 · 极敏高频扫描抓包）</option>
+                <option value="phantom-hacker">潜行改牌（高改牌率 · 改后主动换入公共池设陷）</option>
+                <option value="opportunist">精准机会（平常隐忍 · 关键质变节点突袭改牌）</option>
+                <option value="disruptor">乱序施压（改牌+加注扰频 · 专盯私有暗牌反扫）</option>
+              </select>
+            </div>
+
+            <div className="form-field-row">
+              <label htmlFor="tuning-select-aistyle">基础激进偏置</label>
               <select
                 id="tuning-select-aistyle"
                 className="cyber-select"

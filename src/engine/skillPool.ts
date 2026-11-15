@@ -1,5 +1,62 @@
 import type { ContractCharacter } from './contractCards.ts';
-import type { PursuerDossier, SkillPoolEntry } from './types.ts';
+import type {
+  AiCheatProfile,
+  AiPlayStyle,
+  PursuerDossier,
+  SkillPoolEntry,
+} from './types.ts';
+
+export type EffectivePlayStyle = Exclude<AiPlayStyle, 'auto'>;
+export type EffectiveCheatProfile = Exclude<AiCheatProfile, 'auto'>;
+
+export const PLAY_STYLE_META: Record<EffectivePlayStyle, { label: string; desc: string }> = {
+  pressure: { label: '强攻掠夺', desc: '高频主动加注、敢半诈唬与半池超频压迫' },
+  trap: { label: '控池陷阱', desc: '早中段拿强牌故意示弱慢打，河牌圈突然重注收割' },
+  sculptor: { label: '换牌重组', desc: '重度依赖明暗换牌重构协同牌型，抢占私有暗槽' },
+  conservative: { label: '稳健精算', desc: '严守蒙特卡洛胜率与底池赔率，极少诈唬，逆风果断止损' },
+};
+
+export const CHEAT_PROFILE_META: Record<EffectiveCheatProfile, { label: string; desc: string }> = {
+  auditor: { label: '守序审计', desc: '绝不主动改牌，省下算力高频扫描抓捕玩家作弊' },
+  'phantom-hacker': { label: '潜行改牌', desc: '善用改牌并将篡改牌换入公共池误导对手判断' },
+  opportunist: { label: '精准机会', desc: '平常隐忍不动，仅在关键成牌跃迁节点突袭改牌' },
+  disruptor: { label: '乱序施压', desc: '改牌与加注同步扰频，并专盯玩家私有暗牌反扫' },
+};
+
+export function resolvePursuerStrategyProfile(
+  playSetting: AiPlayStyle | undefined,
+  cheatSetting: AiCheatProfile | undefined,
+  character: ContractCharacter,
+  dossier: PursuerDossier
+): { playStyle: EffectivePlayStyle; cheatProfile: EffectiveCheatProfile } {
+  let playStyle: EffectivePlayStyle;
+  if (playSetting && playSetting !== 'auto') {
+    playStyle = playSetting;
+  } else if (dossier.faction === '星穹财团安全部' || character.stats.magic >= 76) {
+    playStyle = 'pressure';
+  } else if (dossier.faction === '黑域仲裁局' || character.stats.insight >= 82) {
+    playStyle = 'trap';
+  } else if (dossier.faction === '零号暗巷' || dossier.faction === '自由猎网' || character.stats.agility >= 75) {
+    playStyle = 'sculptor';
+  } else {
+    playStyle = 'conservative';
+  }
+
+  let cheatProfile: EffectiveCheatProfile;
+  if (cheatSetting && cheatSetting !== 'auto') {
+    cheatProfile = cheatSetting;
+  } else if (dossier.faction === '深网审计署' || dossier.faction === '黑域仲裁局' || character.stats.empathy >= 75) {
+    cheatProfile = 'auditor';
+  } else if (dossier.faction === '零号暗巷' || character.archetype.includes('控制') || character.traits.some((t) => t.tags.includes('骇客'))) {
+    cheatProfile = 'phantom-hacker';
+  } else if (character.archetype.includes('强袭') || character.stats.magic >= 80) {
+    cheatProfile = 'disruptor';
+  } else {
+    cheatProfile = 'opportunist';
+  }
+
+  return { playStyle, cheatProfile };
+}
 
 /**
  * 黑域协议技能池（已实装 9 项可掠夺协议技能：6 项主动每局限1次 + 3 项永久被动，后续仍可继续扩展）。

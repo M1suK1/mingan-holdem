@@ -1,6 +1,11 @@
 import type { ContractCharacter } from './contractCards.ts';
 import { getActiveDisguiseEntity } from './campaign.ts';
-import { getSkillById } from './skillPool.ts';
+import {
+  CHEAT_PROFILE_META,
+  PLAY_STYLE_META,
+  getSkillById,
+  resolvePursuerStrategyProfile,
+} from './skillPool.ts';
 import type { CampaignState, PursuerDossier } from './types.ts';
 
 export interface WorldbookEntry {
@@ -152,6 +157,7 @@ export function syncDynamicWorldbookEntries(
     generated: true,
   };
 
+  const strat = resolvePursuerStrategyProfile('auto', 'auto', character, dossier);
   const pursuerEntry: WorldbookEntry = {
     id: DYNAMIC_PURSUER_WB_ID,
     name: '当前追捕者档案（实时同步）',
@@ -160,6 +166,7 @@ export function syncDynamicWorldbookEntries(
       `追捕者：${character.name}（代号 ${character.codename}）`,
       `追捕身份：${dossier.identityTitle}（所属：${dossier.faction} · 威胁等级 T${dossier.threatLevel}）`,
       `虚拟实体形态：${dossier.virtualEntityName}`,
+      `博弈流派与暗手习惯：${PLAY_STYLE_META[strat.playStyle].label}（${PLAY_STYLE_META[strat.playStyle].desc}）× ${CHEAT_PROFILE_META[strat.cheatProfile].label}（${CHEAT_PROFILE_META[strat.cheatProfile].desc}）`,
       `追捕动机：${dossier.motive}`,
     ].join('\n'),
     enabled: true,
