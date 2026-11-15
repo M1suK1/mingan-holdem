@@ -1,0 +1,120 @@
+{
+  "ok": true,
+  "source": "static-bundle",
+  "cards": [
+    {
+      "fileName": "夜糖事务所-契约卡-银狼.json",
+      "name": "银狼",
+      "codename": "Silver Wolf",
+      "title": "虚数骇入者",
+      "element": "月影系",
+      "archetype": "控制",
+      "color": "#4353A4",
+      "quote": "现实也不过是个写满漏洞的底层程序，只要找对后门，改写它只要三秒钟。",
+      "stats": {
+        "magic": 74,
+        "insight": 87,
+        "agility": 54,
+        "empathy": 45
+      },
+      "expressionCount": 12,
+      "hasVoice": false,
+      "bytes": 2059179
+    },
+    {
+      "fileName": "夜糖事务所-契约卡-伊冯.json",
+      "name": "伊冯",
+      "codename": "青鳞频谱",
+      "title": "私改设备的龙角测绘员",
+      "element": "月影系",
+      "archetype": "控制",
+      "color": "#2E8696",
+      "quote": "数据板上的波形可比你的承诺诚实多了，要不要看看你现在的心跳有多吵？",
+      "stats": {
+        "magic": 69,
+        "insight": 87,
+        "agility": 52,
+        "empathy": 52
+      },
+      "expressionCount": 11,
+      "hasVoice": true,
+      "bytes": 2109593
+    },
+    {
+      "fileName": "夜糖事务所-契约卡-凯伊.json",
+      "name": "凯伊",
+      "codename": "KEY-00",
+      "title": "冷频密钥",
+      "element": "月影系",
+      "archetype": "控制",
+      "color": "#4A75A8",
+      "quote": "判定：你的安全系数低得令人费解，暂且由我接管这处废墟的外围防线。",
+      "stats": {
+        "magic": 79,
+        "insight": 79,
+        "agility": 53,
+        "empathy": 49
+      },
+      "expressionCount": 11,
+      "hasVoice": true,
+      "bytes": 2500042
+    },
+    {
+      "fileName": "夜糖事务所-契约卡-龙华妃咲.json",
+      "name": "龙华妃咲",
+      "codename": "月螭",
+      "title": "暗市掌秤人",
+      "element": "月影系",
+      "archetype": "控制",
+      "color": "#222D40",
+      "quote": "茶凉了便换一盏，急着亮出底牌的人，往往活不到下一轮月相。",
+      "stats": {
+        "magic": 72,
+        "insight": 90,
+        "agility": 49,
+        "empathy": 49
+      },
+      "expressionCount": 11,
+      "hasVoice": true,
+      "bytes": 1563525
+    },
+    {
+      "fileName": "夜糖事务所-契约卡-古明地恋.json",
+      "name": "古明地恋",
+      "codename": "闭目游者",
+      "title": "潜意识心波",
+      "element": "梦境系",
+      "archetype": "控制",
+      "color": "#5A9367",
+      "quote": "不需要想太复杂的事哦，只要把心关上，噩梦就再也找不到你啦。",
+      "stats": {
+        "magic": 78,
+        "insight": 88,
+        "agility": 48,
+        "empathy": 46
+      },
+      "expressionCount": 12,
+      "hasVoice": true,
+      "bytes": 2042021
+    },
+    {
+      "fileName": "夜糖事务所-契约卡-千夏.json",
+      "name": "千夏",
+      "codename": "Sunna",
+      "title": "薄荷糖扩音",
+      "element": "糖霜系",
+      "archetype": "输出",
+      "color": "#88D49E",
+      "quote": "不被理解也没有关系……只要把我的旋律最大声地砸进耳朵里就行了！",
+      "stats": {
+        "magic": 88,
+        "insight": 54,
+        "agility": 72,
+        "empathy": 46
+      },
+      "expressionCount": 12,
+      "hasVoice": false,
+      "bytes": 1314226
+    }
+  ]
+}

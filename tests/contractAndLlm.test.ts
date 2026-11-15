@@ -19,11 +19,11 @@ describe('contractCards: reuse night-sugar-office girl-card JSON & expressions',
   it('parses real Silver Wolf & Yvonne contract cards from night-sugar-office with 6 expressions', async () => {
     const swPath = path.resolve(
       process.cwd(),
-      '../night-sugar-office/data/cards/夜糖事务所-契约卡-银狼.json'
+      'public/cards/夜糖事务所-契约卡-银狼.json'
     );
     const yvPath = path.resolve(
       process.cwd(),
-      '../night-sugar-office/data/cards/夜糖事务所-契约卡-伊冯.json'
+      'public/cards/夜糖事务所-契约卡-伊冯.json'
     );
 
     const swRaw = await fs.readFile(swPath, 'utf8');

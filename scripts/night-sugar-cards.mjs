@@ -51,15 +51,41 @@ function extractSummary(parsed, fileName, bytes) {
 }
 
 export function nightSugarCardsPlugin(projectRoot = process.cwd()) {
-  const sourceDir = path.resolve(projectRoot, '../night-sugar-office/data/cards');
+  const externalSourceDir = path.resolve(projectRoot, '../night-sugar-office/data/cards');
+  const bundledSourceDir = path.resolve(projectRoot, 'public/cards');
   let outDir = path.resolve(projectRoot, 'dist');
   let cachedIndex = null;
+  let resolvedSourceDir = null;
+
+  async function resolveSourceDir() {
+    if (resolvedSourceDir) return resolvedSourceDir;
+    for (const candidate of [externalSourceDir, bundledSourceDir]) {
+      try {
+        const st = await fs.stat(candidate);
+        if (st.isDirectory()) {
+          const entries = await fs.readdir(candidate);
+          if (entries.some((n) => n.toLowerCase().endsWith('.json') && n !== 'index.json')) {
+            resolvedSourceDir = candidate;
+            return resolvedSourceDir;
+          }
+        }
+      } catch {
+        // Try next candidate
+      }
+    }
+    return null;
+  }
 
   async function buildIndex() {
     if (cachedIndex) return cachedIndex;
+    const activeDir = await resolveSourceDir();
+    if (!activeDir) {
+      cachedIndex = [];
+      return cachedIndex;
+    }
     let names = [];
     try {
-      names = await fs.readdir(sourceDir);
+      names = await fs.readdir(activeDir);
     } catch {
       cachedIndex = [];
       return cachedIndex;
@@ -69,7 +95,7 @@ export function nightSugarCardsPlugin(projectRoot = process.cwd()) {
     for (const name of names) {
       if (!name.toLowerCase().endsWith('.json') || name === 'index.json') continue;
       try {
-        const full = path.join(sourceDir, name);
+        const full = path.join(activeDir, name);
         const stat = await fs.stat(full);
         if (!stat.isFile()) continue;
         const raw = await fs.readFile(full, 'utf8');
@@ -118,7 +144,9 @@ export function nightSugarCardsPlugin(projectRoot = process.cwd()) {
       }
 
       try {
-        const raw = await fs.readFile(path.join(sourceDir, safeFile), 'utf8');
+        const activeDir = await resolveSourceDir();
+        if (!activeDir) throw new Error('missing card directory');
+        const raw = await fs.readFile(path.join(activeDir, safeFile), 'utf8');
         res.end(raw);
       } catch {
         res.statusCode = 404;
@@ -142,6 +170,8 @@ export function nightSugarCardsPlugin(projectRoot = process.cwd()) {
     },
     async closeBundle() {
       // Emit featured static contract cards into dist/cards so pure static hosting works out-of-the-box
+      const activeDir = await resolveSourceDir();
+      if (!activeDir) return;
       const targetDir = path.join(outDir, 'cards');
       await fs.mkdir(targetDir, { recursive: true });
       const all = await buildIndex();
@@ -151,18 +181,20 @@ export function nightSugarCardsPlugin(projectRoot = process.cwd()) {
         const found = all.find((c) => c.fileName === fileName);
         if (!found) continue;
         try {
-          await fs.copyFile(path.join(sourceDir, fileName), path.join(targetDir, fileName));
+          await fs.copyFile(path.join(activeDir, fileName), path.join(targetDir, fileName));
           staticCards.push(found);
         } catch {
           // Ignore missing optional card
         }
       }
 
-      await fs.writeFile(
-        path.join(targetDir, 'index.json'),
-        JSON.stringify({ ok: true, source: 'static-bundle', cards: staticCards }, null, 2),
-        'utf8'
-      );
+      if (staticCards.length > 0) {
+        await fs.writeFile(
+          path.join(targetDir, 'index.json'),
+          JSON.stringify({ ok: true, source: 'static-bundle', cards: staticCards }, null, 2),
+          'utf8'
+        );
+      }
     },
   };
 }
