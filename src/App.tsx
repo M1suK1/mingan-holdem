@@ -95,6 +95,21 @@ import {
   type LlmConfig,
 } from './engine/llmClient.ts';
 import { LocalAiAgent, resolveEffectiveAiDifficulty } from './engine/aiAgent.ts';
+import {
+  mirrorStateForGuestView,
+  sanitizeStateForGuest,
+  type P2pPacket,
+  type P2pPeerProfile,
+} from './engine/p2pProtocol.ts';
+import {
+  WebRtcP2pTransport,
+  fetchRoomOffer,
+  pollRoomAnswer,
+  publishRoomAnswer,
+  publishRoomOffer,
+  type P2pConnectionStatus,
+  type P2pRole,
+} from './engine/p2pTransport.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
@@ -129,14 +144,16 @@ const PresetWorldbookModal = lazy(() => import('./components/PresetWorldbookModa
 const CampaignOutcomeModal = lazy(() => import('./components/CampaignOutcomeModal.tsx'));
 const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.tsx'));
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
+const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
+  keyName: 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
+  { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
   { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
   { id: 'menu-preset-wb', keyName: 'preset-wb', label: '预设与世界书', note: '编辑 SillyTavern 兼容预设词条与世界书注入', icon: 'rules' },
@@ -176,6 +193,7 @@ const FIXED_CRUSHED_DOCK_H = 28;
 type ActiveModal =
   | { type: 'none' }
   | { type: 'settings-menu' }
+  | { type: 'p2p' }
   | { type: 'contracts' }
   | { type: 'llm' }
   | { type: 'preset-wb'; section: 'preset' | 'worldbook' }
@@ -272,6 +290,24 @@ export function App() {
   const [activePresetId, setActivePresetId] = useState<string>(() => loadActivePresetId(loadPresets()));
   const [worldbook, setWorldbook] = useState<WorldbookEntry[]>(() => loadWorldbook());
   const [manualDisguiseOpen, setManualDisguiseOpen] = useState(false);
+
+  // P2P Multiplayer State
+  const [p2pStatus, setP2pStatus] = useState<P2pConnectionStatus>('idle');
+  const [p2pDetail, setP2pDetail] = useState('未连接');
+  const [p2pRole, setP2pRole] = useState<P2pRole | null>(null);
+  const [p2pLatency, setP2pLatency] = useState<number | null>(null);
+  const [remotePeer, setRemotePeer] = useState<P2pPeerProfile | null>(null);
+  const [localP2pName, setLocalP2pName] = useState('潜行黑客');
+  const [p2pOfferToken, setP2pOfferToken] = useState('');
+  const [p2pAnswerToken, setP2pAnswerToken] = useState('');
+  const [p2pRoomCode, setP2pRoomCode] = useState('');
+  const p2pTransportRef = useRef<WebRtcP2pTransport | null>(null);
+  const p2pSeqRef = useRef(0);
+  const p2pRoomPollRef = useRef<number | null>(null);
+  const isP2pConnected = p2pStatus === 'connected';
+  const isP2pHost = isP2pConnected && p2pRole === 'host';
+  const isP2pGuest = isP2pConnected && p2pRole === 'guest';
+
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
   const dossier = useMemo(
@@ -296,6 +332,280 @@ export function App() {
   latestPresetRef.current = activePreset;
   const latestWorldbookRef = useRef(worldbook);
   latestWorldbookRef.current = worldbook;
+  const p2pRoleRef = useRef(p2pRole);
+  p2pRoleRef.current = p2pRole;
+  const localP2pNameRef = useRef(localP2pName);
+  localP2pNameRef.current = localP2pName;
+  const remotePeerRef = useRef(remotePeer);
+  remotePeerRef.current = remotePeer;
+  const activeDisguiseRef = useRef(activeDisguise);
+  activeDisguiseRef.current = activeDisguise;
+
+  const pushToast = useCallback(
+    (tone: CyberToast['tone'], title: string, detail?: string) => {
+      const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((item) => item.id !== id));
+      }, 3600);
+    },
+    []
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(fn, ms);
+    timersRef.current.push(id);
+    return id;
+  }, []);
+
+  const stopP2pRoomPoll = useCallback(() => {
+    if (p2pRoomPollRef.current !== null) {
+      window.clearInterval(p2pRoomPollRef.current);
+      p2pRoomPollRef.current = null;
+    }
+  }, []);
+
+  const pushP2pStateToGuest = useCallback((hostState: GameState) => {
+    const tr = p2pTransportRef.current;
+    if (!tr || tr.role !== 'host') return;
+    p2pSeqRef.current += 1;
+    const guestState = mirrorStateForGuestView(sanitizeStateForGuest(hostState));
+    tr.send({ type: 'STATE_SYNC', seq: p2pSeqRef.current, state: guestState });
+  }, []);
+
+  const buildLocalPeerProfile = useCallback((): P2pPeerProfile => {
+    const char = latestCharRef.current;
+    const dis = activeDisguiseRef.current;
+    return {
+      name: localP2pNameRef.current.trim() || '潜行黑客',
+      codename: dis.codename || 'ZERO-BYTE',
+      title: dis.isCore ? '潜行黑客本体' : dis.name,
+      portrait: dis.virtualPortrait || resolveVirtualEntityPortrait(char, 'calm'),
+      accentColor: dis.accentColor || '#00F0FF',
+      characterFileName: char.fileName,
+    };
+  }, []);
+
+  const handleP2pPacketRef = useRef<(pkt: P2pPacket) => void>(() => {});
+  const onP2pStatusChangeRef = useRef<(status: P2pConnectionStatus, detail?: string) => void>(() => {});
+
+  const disconnectP2p = useCallback(() => {
+    stopP2pRoomPoll();
+    p2pTransportRef.current?.close();
+    p2pTransportRef.current = null;
+    setP2pStatus('idle');
+    setP2pDetail('未连接');
+    setP2pRole(null);
+    setP2pLatency(null);
+    setRemotePeer(null);
+    setP2pOfferToken('');
+    setP2pAnswerToken('');
+    setP2pRoomCode('');
+    pushToast('info', '已断开 P2P 联机', '已切回单机模式');
+  }, [stopP2pRoomPoll, pushToast]);
+
+  const initP2pTransport = useCallback(
+    (role: P2pRole) => {
+      stopP2pRoomPoll();
+      p2pTransportRef.current?.close();
+      setP2pRole(role);
+      p2pRoleRef.current = role;
+      setP2pOfferToken('');
+      setP2pAnswerToken('');
+      const tr = new WebRtcP2pTransport(role, {
+        onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
+        onPacket: (pkt) => handleP2pPacketRef.current(pkt),
+        onLatency: (ms) => setP2pLatency(ms),
+      });
+      p2pTransportRef.current = tr;
+      return tr;
+    },
+    [stopP2pRoomPoll]
+  );
+
+  useEffect(() => {
+    return () => {
+      stopP2pRoomPoll();
+      p2pTransportRef.current?.close();
+    };
+  }, [stopP2pRoomPoll]);
+
+  onP2pStatusChangeRef.current = (nextStatus, detail) => {
+    setP2pStatus(nextStatus);
+    if (detail) setP2pDetail(detail);
+    if (nextStatus === 'connected') {
+      stopP2pRoomPoll();
+      const tr = p2pTransportRef.current;
+      const role = p2pRoleRef.current;
+      if (tr) {
+        tr.send({ type: 'HELLO', peer: buildLocalPeerProfile() });
+        if (role === 'host') {
+          const fresh = createInitialState({
+            config: { ...latestStateRef.current.config },
+            opponentName: remotePeerRef.current?.name ?? '联机好友',
+            playerAcquiredSkills: [],
+          });
+          setState(fresh);
+          setMessages([
+            {
+              id: `p2p-start-${Date.now()}`,
+              sender: 'opponent',
+              speaker: '系统信标',
+              text: 'P2P 直连牌桌已建立，双方信息严格隔离开局！',
+              crushed: false,
+            },
+          ]);
+          pushP2pStateToGuest(fresh);
+          pushToast('success', 'P2P 直连成功（房主）', '已向好友下发初始发牌');
+        } else {
+          pushToast('success', 'P2P 直连成功（客机）', '正在同步房主牌桌...');
+        }
+      }
+      setActiveModal({ type: 'none' });
+    } else if (nextStatus === 'closed' || nextStatus === 'error') {
+      pushToast('warn', 'P2P 连接状态提示', detail || '连接已关闭');
+    }
+  };
+
+  handleP2pPacketRef.current = (pkt) => {
+    const role = p2pRoleRef.current;
+    if (pkt.type === 'HELLO') {
+      setRemotePeer(pkt.peer);
+      setState((prev) => ({
+        ...prev,
+        players: {
+          ...prev.players,
+          ai: { ...prev.players.ai, name: pkt.peer.name },
+        },
+      }));
+      enqueueTask({
+        kind: 'opponent',
+        speaker: pkt.peer.name,
+        text: `已建立直连——我是「${pkt.peer.title}」${pkt.peer.name}。请出牌！`,
+      });
+      return;
+    }
+    if (pkt.type === 'STATE_SYNC' && role === 'guest') {
+      setState(pkt.state);
+      return;
+    }
+    if (pkt.type === 'ACTION_REQ' && role === 'host') {
+      const curr = latestStateRef.current;
+      if (curr.phase === 'showdown' || curr.currentTurn !== 'ai') return;
+      if (!isActionLegal(curr, pkt.action)) return;
+      const next = applyAction(curr, pkt.action);
+      setState(next);
+      pushP2pStateToGuest(next);
+      if (pkt.bundledSpeech) {
+        enqueueTask({
+          kind: 'opponent',
+          speaker: remotePeerRef.current?.name ?? next.players.ai.name,
+          text: pkt.bundledSpeech,
+        });
+      }
+      return;
+    }
+    if (pkt.type === 'CHAT_MSG') {
+      if (pkt.expression) setActiveExpression(pkt.expression);
+      enqueueTask({
+        kind: 'opponent',
+        speaker: pkt.speaker,
+        text: pkt.text,
+        msgKind: pkt.msgKind,
+      });
+      return;
+    }
+    if (pkt.type === 'EXPRESSION_SYNC') {
+      setActiveExpression(pkt.expression);
+      return;
+    }
+    if (pkt.type === 'NEXT_HAND_REQ' && role === 'host') {
+      const curr = latestStateRef.current;
+      if (curr.phase !== 'showdown') return;
+      const next = startNextHand(curr);
+      setState(next);
+      pushP2pStateToGuest(next);
+      return;
+    }
+    if (pkt.type === 'REMATCH_REQ' && role === 'host') {
+      const fresh = createInitialState({
+        config: latestStateRef.current.config,
+        opponentName: remotePeerRef.current?.name ?? '联机好友',
+        playerAcquiredSkills: [],
+      });
+      setState(fresh);
+      pushP2pStateToGuest(fresh);
+    }
+  };
+
+  const handleHostCreateRoomRelay = async (code: string) => {
+    try {
+      const tr = initP2pTransport('host');
+      setP2pRoomCode(code);
+      const offer = await tr.createHostOffer();
+      setP2pOfferToken(offer);
+      await publishRoomOffer(code, offer);
+      pushToast('info', `房间 ${code} 已创建`, '等待好友输入房间号加入');
+      p2pRoomPollRef.current = window.setInterval(async () => {
+        const answer = await pollRoomAnswer(code);
+        if (answer) {
+          stopP2pRoomPoll();
+          setP2pAnswerToken(answer);
+          await tr.completeHostAnswer(answer);
+        }
+      }, 1100);
+    } catch (err) {
+      pushToast('error', '房间建房失败', err instanceof Error ? err.message : '未知错误');
+    }
+  };
+
+  const handleGuestJoinRoomRelay = async (code: string) => {
+    try {
+      const tr = initP2pTransport('guest');
+      setP2pRoomCode(code);
+      const offer = await fetchRoomOffer(code);
+      const answer = await tr.acceptHostOffer(offer);
+      setP2pAnswerToken(answer);
+      await publishRoomAnswer(code, answer);
+      pushToast('info', `已提交房间 ${code} 应答`, '等待建立 P2P 直连...');
+    } catch (err) {
+      pushToast('error', '加入房间失败', err instanceof Error ? err.message : '请核对房间号');
+    }
+  };
+
+  const handleHostCreateManualOffer = async () => {
+    try {
+      const tr = initP2pTransport('host');
+      const offer = await tr.createHostOffer();
+      setP2pOfferToken(offer);
+    } catch (err) {
+      pushToast('error', '生成邀请码失败', err instanceof Error ? err.message : '未知错误');
+    }
+  };
+
+  const handleGuestAcceptManualOffer = async (offer: string) => {
+    try {
+      const tr = initP2pTransport('guest');
+      const answer = await tr.acceptHostOffer(offer);
+      setP2pAnswerToken(answer);
+    } catch (err) {
+      pushToast('error', '解析邀请码失败', err instanceof Error ? err.message : '请确认完整粘贴 MGP2P 邀请码');
+    }
+  };
+
+  const handleHostConfirmManualAnswer = async (answer: string) => {
+    try {
+      const tr = p2pTransportRef.current;
+      if (!tr) return;
+      await tr.completeHostAnswer(answer);
+    } catch (err) {
+      pushToast('error', '应答确认失败', err instanceof Error ? err.message : '请确认 Answer 应答码正确');
+    }
+  };
 
   const buildChatHistorySnapshot = useCallback((): ChatMessage[] => {
     const settled: ChatMessage[] = messagesRef.current.map((m, idx) => ({
@@ -379,27 +689,6 @@ export function App() {
   messagesRef.current = messages;
   const charNameRef = useRef(character.name);
   charNameRef.current = character.name;
-
-  const pushToast = useCallback(
-    (tone: CyberToast['tone'], title: string, detail?: string) => {
-      const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((item) => item.id !== id));
-      }, 3600);
-    },
-    []
-  );
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((item) => item.id !== id));
-  }, []);
-
-  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
-    const id = window.setTimeout(fn, ms);
-    timersRef.current.push(id);
-    return id;
-  }, []);
 
   const effectiveAiDifficulty = useMemo(
     () => resolveEffectiveAiDifficulty(state.config.aiDifficulty, dossier.threatLevel),
@@ -745,9 +1034,9 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
 
-  // AI Turn Scheduler
+  // AI Turn Scheduler (Skipped during P2P friend multiplayer!)
   useEffect(() => {
-    if (state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (isP2pConnected || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
 
     let cancelled = false;
     setIsAiThinking(true);
@@ -913,13 +1202,22 @@ export function App() {
     const line =
       res.reason === 'scan-caught'
         ? res.winner === 'human'
-          ? `切……居然被你扫出底层篡改了？算力池 ${res.potWon} 归你，这手技能也被封印了。`
-          : `抓到你偷偷改牌了哦！直接判负并封印技能，奖池 ${res.potWon} 我收下了。`
+          ? `居然扫出了对手底层篡改！算力池 ${res.potWon} 归我方。`
+          : `抓到我方改牌了……算力池 ${res.potWon} 归对端。`
         : res.winner === 'ai'
-          ? `算力池 ${res.potWon} 已被我全数接管。下一局还要继续接入吗？`
+          ? `算力池 ${res.potWon} 已被对手接管。`
           : res.winner === 'human'
-            ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
-            : `完全同分平局？一人一半回收算力池，下一局再见真章。`;
+            ? `漂亮的牌序博弈，本局算力池 ${res.potWon} 到手！`
+            : `完全同分平局，双方平分算力池 ${res.potWon}。`;
+
+    if (isP2pConnected) {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: remotePeerRef.current?.name ?? character.name,
+        text: line,
+      });
+      return;
+    }
 
     // 普通小局结束（双方筹码均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
     if (state.players.ai.chips > 0 && state.players.human.chips > 0) {
@@ -1041,16 +1339,53 @@ export function App() {
   }, []);
 
   const applyActionWithPreInputBundle = (action: GameAction) => {
+    const tr = p2pTransportRef.current;
+    const role = p2pRoleRef.current;
+    if (p2pStatus === 'connected' && tr && role === 'guest') {
+      const previewNext = applyAction(latestStateRef.current, action);
+      const buffered = chatDraftRef.current.trim();
+      const willBundle =
+        buffered.length > 0 &&
+        (previewNext.currentTurn === 'ai' || previewNext.phase === 'showdown');
+      if (willBundle) {
+        setChatDraft('');
+        enqueueTask({ kind: 'human', text: buffered });
+      }
+      p2pSeqRef.current += 1;
+      tr.send({
+        type: 'ACTION_REQ',
+        seq: p2pSeqRef.current,
+        action,
+        bundledSpeech: willBundle ? buffered : undefined,
+      });
+      return;
+    }
+
     const nextState = applyAction(latestStateRef.current, action);
     setState(nextState);
+    if (p2pStatus === 'connected' && tr && role === 'host') {
+      pushP2pStateToGuest(nextState);
+    }
+
     const buffered = chatDraftRef.current.trim();
     if (
       buffered.length > 0 &&
       (nextState.currentTurn === 'ai' || nextState.phase === 'showdown')
     ) {
       setChatDraft('');
-      pendingBundledChatRef.current = buffered;
-      enqueueTask({ kind: 'human', text: buffered });
+      if (p2pStatus === 'connected' && tr) {
+        enqueueTask({ kind: 'human', text: buffered });
+        tr.send({
+          type: 'CHAT_MSG',
+          id: `p2p-c-${Date.now()}`,
+          speaker: localP2pNameRef.current.trim() || '房主',
+          text: buffered,
+          msgKind: 'speech',
+        });
+      } else {
+        pendingBundledChatRef.current = buffered;
+        enqueueTask({ kind: 'human', text: buffered });
+      }
     }
   };
 
@@ -1327,10 +1662,19 @@ export function App() {
   };
 
   const handleNextHand = () => {
+    if (isP2pGuest) {
+      p2pTransportRef.current?.send({ type: 'NEXT_HAND_REQ' });
+      pushToast('info', '已向房主请求开启下一局');
+      return;
+    }
     setSelectedHandIndex(null);
     setShowRaiseTiers(false);
     setActiveExpression('calm');
-    setState((prev) => startNextHand(prev));
+    const next = startNextHand(latestStateRef.current);
+    setState(next);
+    if (isP2pHost) {
+      pushP2pStateToGuest(next);
+    }
   };
 
   const performFullReset = (
@@ -1338,6 +1682,12 @@ export function App() {
     nextCharacter?: ContractCharacter,
     overrideAcquiredSkills?: string[]
   ) => {
+    if (p2pStatus === 'connected' && p2pRoleRef.current === 'guest') {
+      p2pTransportRef.current?.send({ type: 'REMATCH_REQ' });
+      setActiveModal({ type: 'none' });
+      pushToast('info', '已向房主申请重置牌桌');
+      return latestStateRef.current;
+    }
     const targetChar = nextCharacter ?? character;
     const cfg = customConfig ?? state.config;
     for (const id of timersRef.current) {
@@ -1365,10 +1715,15 @@ export function App() {
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,
-      opponentName: targetChar.name,
-      playerAcquiredSkills: overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
+      opponentName: isP2pConnected ? remotePeerRef.current?.name ?? '联机好友' : targetChar.name,
+      playerAcquiredSkills: isP2pConnected
+        ? []
+        : overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
     });
     setState(freshState);
+    if (isP2pHost) {
+      pushP2pStateToGuest(freshState);
+    }
     setMessages([
       {
         id: `reset-${Date.now()}`,
@@ -1490,6 +1845,17 @@ export function App() {
     const historySnapshot = buildChatHistorySnapshot();
     enqueueTask({ kind: 'human', text: trimmed });
 
+    if (isP2pConnected && p2pTransportRef.current) {
+      p2pTransportRef.current.send({
+        type: 'CHAT_MSG',
+        id: `p2p-c-${Date.now()}`,
+        speaker: localP2pNameRef.current.trim() || '玩家',
+        text: trimmed,
+        msgKind: 'speech',
+      });
+      return;
+    }
+
     const res = await requestOpponentChatReply({
       character,
       state: latestStateRef.current,
@@ -1608,14 +1974,17 @@ export function App() {
     (vfxTestMode === 'low' || (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
   const isLowCompute = isAiLowCompute || isHumanLowCompute;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（无魔女化差分时平滑回退）
-  const portraitSrc = resolveVirtualEntityPortrait(
-    character,
-    activeExpression
-  );
-  const accentColor = llmConfig.overloadPersona
-    ? '#FF4757'
-    : character.color || '#FF2E88';
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（P2P 联机时展示好友立绘）
+  const portraitSrc =
+    isP2pConnected && remotePeer?.portrait
+      ? remotePeer.portrait
+      : resolveVirtualEntityPortrait(character, activeExpression);
+  const accentColor =
+    isP2pConnected && remotePeer?.accentColor
+      ? remotePeer.accentColor
+      : llmConfig.overloadPersona
+        ? '#FF4757'
+        : character.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -1675,13 +2044,21 @@ export function App() {
             id="hud-btn-switch-char"
             type="button"
             className="lc-stack-btn pink"
-            onClick={handleQuickSwitchOpponent}
+            onClick={() => {
+              if (isP2pConnected) {
+                setActiveModal({ type: 'p2p' });
+              } else {
+                void handleQuickSwitchOpponent();
+              }
+            }}
           >
             <span className="lc-btn-inline">
               <PixelSwitchUserIcon size={15} />
-              换人
+              {isP2pConnected ? '联机中' : '换人'}
             </span>
-            <span className="lc-stack-sub">切换对手</span>
+            <span className="lc-stack-sub">
+              {isP2pConnected ? `${p2pLatency ?? '--'}ms` : '切换对手'}
+            </span>
           </button>
         </div>
 
@@ -1697,21 +2074,25 @@ export function App() {
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
               <span>
-                {character.name} · {dossier.identityTitle}
+                {isP2pConnected && remotePeer
+                  ? `${remotePeer.name} · ${remotePeer.title}`
+                  : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
             <span className="lc-opp-codename">
-              {isAiThinking
-                ? 'THINKING...'
-                : `${EXPRESSION_META[activeExpression].label} · ${
-                    effectiveAiDifficulty === 'master'
-                      ? '大师'
-                      : effectiveAiDifficulty === 'standard'
-                        ? '标准'
-                        : '新兵'
-                  } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
-                    CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
-                  }`}
+              {isP2pConnected
+                ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
+                : isAiThinking
+                  ? 'THINKING...'
+                  : `${EXPRESSION_META[activeExpression].label} · ${
+                      effectiveAiDifficulty === 'master'
+                        ? '大师'
+                        : effectiveAiDifficulty === 'standard'
+                          ? '标准'
+                          : '新兵'
+                    } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
+                      CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
+                    }`}
             </span>
           </header>
 
@@ -2781,7 +3162,8 @@ export function App() {
                   className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
-                    if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
+                    if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
+                    else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
                     else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
                     else if (item.keyName === 'preset-wb')
                       setActiveModal({ type: 'preset-wb', section: 'preset' });
@@ -2874,6 +3256,29 @@ export function App() {
 
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
+        {activeModal.type === 'p2p' && (
+          <P2pLobbyModal
+            status={p2pStatus}
+            statusDetail={p2pDetail}
+            role={p2pRole}
+            latencyMs={p2pLatency}
+            remotePeer={remotePeer}
+            localPlayerName={localP2pName}
+            offerToken={p2pOfferToken}
+            answerToken={p2pAnswerToken}
+            roomCode={p2pRoomCode}
+            onChangeLocalName={setLocalP2pName}
+            onHostCreateRoomRelay={(c) => void handleHostCreateRoomRelay(c)}
+            onGuestJoinRoomRelay={(c) => void handleGuestJoinRoomRelay(c)}
+            onHostCreateManualOffer={() => void handleHostCreateManualOffer()}
+            onGuestAcceptManualOffer={(o) => void handleGuestAcceptManualOffer(o)}
+            onHostConfirmManualAnswer={(a) => void handleHostConfirmManualAnswer(a)}
+            onDisconnect={disconnectP2p}
+            onNotify={pushToast}
+            onClose={() => setActiveModal({ type: 'none' })}
+          />
+        )}
+
         {activeModal.type === 'contracts' && (
           <ContractArchiveModal
             catalog={catalog}
@@ -2935,11 +3340,12 @@ export function App() {
           />
         )}
 
-        {(campaign.status === 'loot-select' ||
-          campaign.status === 'escaped' ||
-          campaign.status === 'failed-ending' ||
-          campaign.status === 'disguise-select' ||
-          manualDisguiseOpen) && (
+        {!isP2pConnected &&
+          (campaign.status === 'loot-select' ||
+            campaign.status === 'escaped' ||
+            campaign.status === 'failed-ending' ||
+            campaign.status === 'disguise-select' ||
+            manualDisguiseOpen) && (
           <CampaignOutcomeModal
             campaign={campaign}
             onSelectDisguise={(entityId) => {
