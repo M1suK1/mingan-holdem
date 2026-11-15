@@ -1032,10 +1032,9 @@ export async function requestLlmPokerDecision(params: {
 
   const rt = resolveRuntimeContext(params);
   const legalHints = enumerateLegalActionHints(state);
-  // 若仅剩唯一强制动作（例如跟注后的 end-turn），跳过网络请求直接交由本地即时完成
-  if (legalHints.length <= 1) return null;
-
   const bundledSpeech = params.bundledUserText?.trim();
+  // 若仅剩唯一强制动作（例如跟注后的 end-turn）且无随操作附带发言，跳过网络请求直接交由本地即时完成
+  if (legalHints.length <= 1 && !bundledSpeech) return null;
   const bundledPrompt = bundledSpeech
     ? `\n【玩家随刚才的操作同时对你说】：「${bundledSpeech}」（请一次同时处理牌桌行动决策，并在 segments 中回应玩家这句话！）`
     : '';

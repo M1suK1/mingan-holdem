@@ -423,7 +423,7 @@ export function composePresetPrompt(params: {
         preset.settings.worldbookBudget ?? WORLDBOOK_BUDGET
       );
 
-  const effectiveHistory = compactMode ? historyMessages.slice(-3) : historyMessages;
+  const effectiveHistory = compactMode ? historyMessages.slice(-6) : historyMessages;
   const historyText = effectiveHistory
     .map((h) => (h.role === 'user' ? `玩家：${h.content}` : h.content))
     .join('\n');

@@ -300,25 +300,30 @@ export function App() {
       msgKind: m.msgKind,
       timestamp: idx,
     }));
-    const pending: ChatMessage[] = queueRef.current.map((q, idx) =>
-      q.kind === 'human'
+    const toChatMsg = (task: QueuedChatTask, idPrefix: string, idx: number): ChatMessage =>
+      task.kind === 'human'
         ? {
-            id: `q-h-${idx}`,
+            id: `${idPrefix}-h-${idx}`,
             sender: 'human',
             speakerName: '潜行黑客',
-            text: q.text,
+            text: task.text,
             timestamp: settled.length + idx,
           }
         : {
-            id: `q-o-${idx}`,
+            id: `${idPrefix}-o-${idx}`,
             sender: 'opponent',
-            speakerName: q.speaker,
-            text: q.text,
-            msgKind: q.msgKind,
+            speakerName: task.speaker,
+            text: task.text,
+            msgKind: task.msgKind,
             timestamp: settled.length + idx,
-          }
+          };
+    const inFlight = inFlightTaskRef.current
+      ? [toChatMsg(inFlightTaskRef.current, 'inflight', 0)]
+      : [];
+    const pending: ChatMessage[] = queueRef.current.map((q, idx) =>
+      toChatMsg(q, 'q', idx + 1)
     );
-    return [...settled, ...pending].slice(-16);
+    return [...settled, ...inFlight, ...pending].slice(-16);
   }, []);
 
   // Chat Stack & FIFO Bubble Queue
@@ -343,6 +348,7 @@ export function App() {
   const activeStackRef = useRef<HTMLDivElement | null>(null);
 
   const queueRef = useRef<QueuedChatTask[]>([]);
+  const inFlightTaskRef = useRef<QueuedChatTask | null>(null);
   const isAnimatingRef = useRef(false);
   const timersRef = useRef<number[]>([]);
   const wheelAccumRef = useRef(0);
@@ -350,6 +356,7 @@ export function App() {
   const lastHandledSwapIdRef = useRef<string | null>(null);
   const lastHandledShowdownHandRef = useRef<number>(0);
   const pendingBundledChatRef = useRef<string | null>(null);
+  const resetEpochRef = useRef(0);
   const chatDraftRef = useRef('');
   chatDraftRef.current = chatDraft;
 
@@ -480,6 +487,7 @@ export function App() {
     setQueuedCount(queueRef.current.length);
     if (!next) return;
 
+    inFlightTaskRef.current = next;
     isAnimatingRef.current = true;
     setHistoryOffset(0);
     setEnteringId(null);
@@ -508,6 +516,7 @@ export function App() {
         scheduleTimeout(() => {
           setFloatingBubble(null);
           setCrushingActive(false);
+          if (inFlightTaskRef.current === next) inFlightTaskRef.current = null;
           setMessages((prev) => {
             const base = willCrush ? prev.map((m) => (m.crushed ? m : { ...m, crushed: true })) : prev;
             return [
@@ -531,6 +540,7 @@ export function App() {
 
         const spawnHumanRise = (riseDy: number, crushPrev: boolean) => {
           setCrushingActive(false);
+          if (inFlightTaskRef.current === next) inFlightTaskRef.current = null;
           setMessages((prev) => {
             const base = crushPrev ? prev.map((m) => (m.crushed ? m : { ...m, crushed: true })) : prev;
             return [
@@ -726,14 +736,16 @@ export function App() {
 
         const cfg = latestLlmRef.current;
         const char = latestCharRef.current;
+        const epoch = resetEpochRef.current;
         const bundledUserText = pendingBundledChatRef.current ?? undefined;
         pendingBundledChatRef.current = null;
+        const historyBeforeAction = buildChatHistorySnapshot();
 
         const llmDecision = await requestLlmPokerDecision({
           character: char,
           state: snapshot,
           llmConfig: cfg,
-          chatHistory: buildChatHistorySnapshot(),
+          chatHistory: historyBeforeAction,
           campaign: latestCampaignRef.current,
           dossier: latestDossierRef.current,
           preset: latestPresetRef.current,
@@ -741,7 +753,7 @@ export function App() {
           bundledUserText,
         });
 
-        if (cancelled) return;
+        if (cancelled || resetEpochRef.current !== epoch) return;
 
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
@@ -755,7 +767,7 @@ export function App() {
         }
 
         const decision = await agentRef.current.decide(snapshot);
-        if (cancelled) return;
+        if (cancelled || resetEpochRef.current !== epoch) return;
         const nextAfterAi = applyAction(snapshot, decision.action);
         setState((prev) => {
           if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
@@ -767,7 +779,7 @@ export function App() {
             character: char,
             state: nextAfterAi,
             llmConfig: cfg,
-            chatHistory: buildChatHistorySnapshot(),
+            chatHistory: historyBeforeAction,
             userText: bundledUserText,
             actionContextNote: `你刚才已执行牌桌操作：${nextAfterAi.lastAction?.label ?? decision.action.type}`,
             campaign: latestCampaignRef.current,
@@ -775,7 +787,7 @@ export function App() {
             preset: latestPresetRef.current,
             worldbook: latestWorldbookRef.current,
           });
-          if (cancelled) return;
+          if (resetEpochRef.current !== epoch) return;
           if (chatRes.logEntry) setLlmLogs((prev) => [chatRes.logEntry!, ...prev].slice(0, 40));
           setActiveExpression(chatRes.expression);
           enqueueOpponentSegments(char.name, chatRes.segments);
@@ -1310,6 +1322,8 @@ export function App() {
     }
     timersRef.current = [];
     queueRef.current = [];
+    inFlightTaskRef.current = null;
+    resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     setQueuedCount(0);
     setFloatingBubble(null);
