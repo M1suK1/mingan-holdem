@@ -64,8 +64,7 @@ export default function P2pLobbyModal({
   onNotify,
   onClose,
 }: P2pLobbyModalProps) {
-  const [relayAvailable, setRelayAvailable] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<'room' | 'manual'>('room');
+  const [relayAvailable, setRelayAvailable] = useState<boolean>(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [guestOfferInput, setGuestOfferInput] = useState('');
   const [hostAnswerInput, setHostAnswerInput] = useState('');
@@ -73,9 +72,7 @@ export default function P2pLobbyModal({
   useEffect(() => {
     let alive = true;
     void probeRoomSignaling().then((ok) => {
-      if (!alive) return;
-      setRelayAvailable(ok);
-      if (!ok) setTab('manual');
+      if (alive) setRelayAvailable(ok);
     });
     return () => {
       alive = false;
@@ -106,7 +103,7 @@ export default function P2pLobbyModal({
         <div className="window-titlebar">
           <div className="window-title-left">
             <Users size={15} color="var(--neon-cyan)" aria-hidden="true" />
-            <span id="p2p-modal-title">黑域 P2P 好友直连大厅 // WebRTC 端到端对战</span>
+            <span id="p2p-modal-title">黑域 P2P 好友直连大厅 // 邀请码与房间号直连</span>
           </div>
           <button
             id="p2p-btn-close"
@@ -121,7 +118,10 @@ export default function P2pLobbyModal({
         </div>
 
         <div className="modal-content-scroll">
-          <div className="cyber-panel-box" style={{ borderColor: isConnected ? 'var(--neon-emerald)' : 'var(--px-border-bright)' }}>
+          <div
+            className="cyber-panel-box"
+            style={{ borderColor: isConnected ? 'var(--neon-emerald)' : 'var(--px-border-bright)' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Radio size={15} color={isConnected ? 'var(--neon-emerald)' : 'var(--neon-cyan)'} aria-hidden="true" />
@@ -167,93 +167,16 @@ export default function P2pLobbyModal({
 
           {!isConnected && (
             <>
-              <div className="modal-tab-strip" role="tablist" style={{ padding: 0, borderBottom: '1px solid var(--px-border)' }}>
-                <button
-                  id="p2p-tab-room"
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'room'}
-                  className={`modal-tab-btn ${tab === 'room' ? 'active' : ''}`}
-                  onClick={() => setTab('room')}
-                >
-                  <PlugZap size={14} aria-hidden="true" />
-                  6 位房间号秒连 {relayAvailable ? '(本服务就绪)' : '(需 Vite 信令)'}
-                </button>
-                <button
-                  id="p2p-tab-manual"
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'manual'}
-                  className={`modal-tab-btn ${tab === 'manual' ? 'active' : ''}`}
-                  onClick={() => setTab('manual')}
-                >
+              {/* 方式一：零服务器邀请码直连（默认首屏直接展示，方便一键复制/粘贴） */}
+              <div className="cyber-panel-box">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: 'var(--neon-cyan-soft)' }}>
                   <Link2 size={14} aria-hidden="true" />
-                  零服务器邀请码直连（任意网络通用）
-                </button>
-              </div>
-
-              {tab === 'room' ? (
-                <div className="cmd-grid cols-2">
-                  <div className="cyber-panel-box">
-                    <strong style={{ fontSize: 13, color: 'var(--neon-cyan-soft)' }}>
-                      我是房主 · 创建 6 位房间号
-                    </strong>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      双方通过同一 Vite 服务（局域网 / 内网穿透端口）访问时，创建房间后把 6 位房间号发给好友即可自动建立 P2P 直连。
-                    </div>
-                    <button
-                      id="p2p-btn-room-create"
-                      type="button"
-                      className="cyber-cmd-btn primary-cyan"
-                      disabled={isBusy || !relayAvailable}
-                      onClick={() => onHostCreateRoomRelay(generateRoomCode())}
-                    >
-                      <RefreshCw size={14} aria-hidden="true" />
-                      {roomCode ? `已建房：${roomCode}（等待好友加入）` : '生成房间号并等待好友'}
-                    </button>
-                    {roomCode && (
-                      <button
-                        id="p2p-btn-copy-room-code"
-                        type="button"
-                        className="os-nav-btn"
-                        onClick={() => void copyText(roomCode, '房间号')}
-                      >
-                        <Copy size={13} aria-hidden="true" />
-                        复制房间号：{roomCode}
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="cyber-panel-box">
-                    <strong style={{ fontSize: 13, color: 'var(--neon-pink-soft)' }}>
-                      我是好友 · 输入房间号加入
-                    </strong>
-                    <input
-                      id="p2p-input-join-room"
-                      type="text"
-                      className="cyber-text-input"
-                      placeholder="输入 6 位房间号（如 A7K9P2）"
-                      maxLength={12}
-                      value={joinCodeInput}
-                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    />
-                    <button
-                      id="p2p-btn-room-join"
-                      type="button"
-                      className="cyber-cmd-btn primary-pink"
-                      disabled={isBusy || !relayAvailable || joinCodeInput.trim().length < 4}
-                      onClick={() => onGuestJoinRoomRelay(joinCodeInput.trim())}
-                    >
-                      <Check size={14} aria-hidden="true" />
-                      连接房间并开战
-                    </button>
-                  </div>
+                  方式一：零服务器邀请码直连（任意网络/纯静态打开均可直接复制发送）
                 </div>
-              ) : (
                 <div className="cmd-grid cols-2">
                   <div className="cyber-panel-box">
-                    <strong style={{ fontSize: 13, color: 'var(--neon-cyan-soft)' }}>
-                      房主流程（零服务器）
+                    <strong style={{ fontSize: 12.5, color: 'var(--neon-cyan-soft)' }}>
+                      我是房主 · 建房并生成邀请码
                     </strong>
                     <button
                       id="p2p-btn-manual-create-offer"
@@ -277,7 +200,7 @@ export default function P2pLobbyModal({
                         <button
                           id="p2p-btn-copy-offer"
                           type="button"
-                          className="os-nav-btn"
+                          className="os-nav-btn highlight"
                           onClick={() => void copyText(offerToken, 'Offer 邀请码')}
                         >
                           <Copy size={13} aria-hidden="true" />
@@ -309,8 +232,8 @@ export default function P2pLobbyModal({
                   </div>
 
                   <div className="cyber-panel-box">
-                    <strong style={{ fontSize: 13, color: 'var(--neon-pink-soft)' }}>
-                      好友加入流程（零服务器）
+                    <strong style={{ fontSize: 12.5, color: 'var(--neon-pink-soft)' }}>
+                      我是好友 · 粘贴邀请码并回传应答码
                     </strong>
                     <label htmlFor="p2p-textarea-offer-in" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                       1. 粘贴房主发来的 Offer 邀请码：
@@ -356,11 +279,66 @@ export default function P2pLobbyModal({
                     )}
                   </div>
                 </div>
-              )}
+              </div>
 
+              {/* 方式二：6 位房间号秒连（同服务下自动中继信令） */}
               <div className="cyber-panel-box">
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                  <strong>安全防泄密说明：</strong>联机采用「房主权威 + 客机视野脱敏投影」架构。房主向好友同步牌桌时会自动擦除未翻开公共节点、己方私有暗牌与未摊牌的黑客改牌数据，抓包亦无法偷看底牌。若双方处于严格对称 NAT 下偶发无法直连，推荐使用局域网/虚拟组网（Tailscale / ZeroTier）配合 6 位房间号秒连。
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: 'var(--text-main)' }}>
+                    <PlugZap size={14} aria-hidden="true" />
+                    方式二：6 位房间号秒连
+                  </span>
+                  <span className={`cyber-badge ${relayAvailable ? 'cyan' : 'pink'}`}>
+                    {relayAvailable ? '当前 Vite 信令服务可用' : '纯静态模式不可用（请用上方邀请码）'}
+                  </span>
+                </div>
+                <div className="cmd-grid cols-2">
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      id="p2p-btn-room-create"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={isBusy || !relayAvailable}
+                      onClick={() => onHostCreateRoomRelay(generateRoomCode())}
+                    >
+                      <RefreshCw size={13} aria-hidden="true" />
+                      {roomCode ? `已建房：${roomCode}` : '生成 6 位房间号'}
+                    </button>
+                    {roomCode && (
+                      <button
+                        id="p2p-btn-copy-room-code"
+                        type="button"
+                        className="os-nav-btn"
+                        onClick={() => void copyText(roomCode, '房间号')}
+                      >
+                        <Copy size={13} aria-hidden="true" />
+                        复制房间号：{roomCode}
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      id="p2p-input-join-room"
+                      type="text"
+                      className="cyber-text-input"
+                      style={{ flex: 1 }}
+                      placeholder="输入 6 位房间号"
+                      maxLength={12}
+                      value={joinCodeInput}
+                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    />
+                    <button
+                      id="p2p-btn-room-join"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={isBusy || !relayAvailable || joinCodeInput.trim().length < 4}
+                      onClick={() => onGuestJoinRoomRelay(joinCodeInput.trim())}
+                    >
+                      <Check size={13} aria-hidden="true" />
+                      加入
+                    </button>
+                  </div>
                 </div>
               </div>
             </>

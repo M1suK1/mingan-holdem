@@ -2028,6 +2028,21 @@ export function App() {
           </button>
 
           <button
+            id="hud-btn-p2p-lobby"
+            type="button"
+            className="lc-stack-btn"
+            onClick={() => setActiveModal({ type: 'p2p' })}
+          >
+            <span className="lc-btn-inline">
+              <PixelBroadcastIcon size={14} />
+              {isP2pConnected ? '联机中' : '联机'}
+            </span>
+            <span className="lc-stack-sub">
+              {isP2pConnected ? `${p2pLatency ?? '--'}ms` : '好友对战'}
+            </span>
+          </button>
+
+          <button
             id="hud-btn-quick-restart"
             type="button"
             className="lc-stack-btn amber"
@@ -2054,10 +2069,10 @@ export function App() {
           >
             <span className="lc-btn-inline">
               <PixelSwitchUserIcon size={15} />
-              {isP2pConnected ? '联机中' : '换人'}
+              {isP2pConnected ? '联机大厅' : '换人'}
             </span>
             <span className="lc-stack-sub">
-              {isP2pConnected ? `${p2pLatency ?? '--'}ms` : '切换对手'}
+              {isP2pConnected ? '管理连接' : '切换对手'}
             </span>
           </button>
         </div>
