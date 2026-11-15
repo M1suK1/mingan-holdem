@@ -7,6 +7,8 @@ import {
   sanitizeStateForGuest,
   encodeP2pSignalToken,
   decodeP2pSignalToken,
+  splitP2pWireMessage,
+  P2pChunkAssembler,
 } from '../src/engine/p2pProtocol.ts';
 
 function c(rank: Card['rank'], suit: Card['suit'], copy: 0 | 1 = 0): Card {
@@ -122,5 +124,19 @@ describe('P2P Protocol: strict anti-sniff sanitization & guest perspective mirro
     assert.ok(encoded.startsWith('MGP2P:'));
     const decoded = await decodeP2pSignalToken(encoded);
     assert.deepEqual(decoded, sample);
+  });
+
+  it('chunks large payloads (>16KB) and reassembles them without data loss', () => {
+    const huge = JSON.stringify({ type: 'HELLO', blob: 'X'.repeat(75_000) });
+    const frames = splitP2pWireMessage(huge, 16_000);
+    assert.ok(frames.length >= 5);
+    assert.ok(frames.every((f) => f.length <= 16_500));
+
+    const assembler = new P2pChunkAssembler();
+    let reassembled: string | null = null;
+    for (const frame of frames) {
+      reassembled = assembler.feed(frame);
+    }
+    assert.equal(reassembled, huge);
   });
 });

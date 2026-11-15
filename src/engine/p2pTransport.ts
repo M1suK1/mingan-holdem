@@ -1,6 +1,8 @@
 import {
+  P2pChunkAssembler,
   decodeP2pSignalToken,
   encodeP2pSignalToken,
+  splitP2pWireMessage,
   type P2pPacket,
 } from './p2pProtocol.ts';
 
@@ -14,12 +16,14 @@ export interface P2pTransportCallbacks {
 }
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.miwifi.com:3478' },
+  { urls: 'stun:stun.qq.com:3478' },
+  { urls: 'stun:stun.chat.bilibili.com:3478' },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.l.google.com:19302' },
 ];
 
-async function waitForIceGathering(pc: RTCPeerConnection, maxWaitMs = 2600): Promise<void> {
+async function waitForIceGathering(pc: RTCPeerConnection, maxWaitMs = 3400): Promise<void> {
   if (pc.iceGatheringState === 'complete') return;
   await new Promise<void>((resolve) => {
     let done = false;
@@ -42,6 +46,7 @@ export class WebRtcP2pTransport {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private pingTimer: number | null = null;
+  private readonly chunkAssembler = new P2pChunkAssembler();
   private readonly callbacks: P2pTransportCallbacks;
 
   constructor(role: P2pRole, callbacks: P2pTransportCallbacks) {
@@ -55,8 +60,10 @@ export class WebRtcP2pTransport {
     this.pc = pc;
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        this.callbacks.onStatusChange('closed', '对端网络连接已断开');
+      if (pc.connectionState === 'failed') {
+        this.callbacks.onStatusChange('closed', 'ICE 网络穿透失败（可尝试切换同网 6 位房间号或检查防火墙）');
+      } else if (pc.connectionState === 'disconnected') {
+        this.callbacks.onStatusChange('connecting', '网络波动，正在尝试恢复 P2P 连接...');
       }
     };
 
@@ -84,7 +91,9 @@ export class WebRtcP2pTransport {
     };
     channel.onmessage = (ev) => {
       try {
-        const pkt = JSON.parse(String(ev.data)) as P2pPacket;
+        const assembled = this.chunkAssembler.feed(String(ev.data));
+        if (!assembled) return;
+        const pkt = JSON.parse(assembled) as P2pPacket;
         if (pkt.type === 'PING') {
           this.send({ type: 'PONG', ts: pkt.ts });
           return;
@@ -158,24 +167,43 @@ export class WebRtcP2pTransport {
 
   send(packet: P2pPacket): boolean {
     if (!this.dc || this.dc.readyState !== 'open') return false;
-    this.dc.send(JSON.stringify(packet));
-    return true;
+    try {
+      const json = JSON.stringify(packet);
+      const frames = splitP2pWireMessage(json, 14_000);
+      for (const frame of frames) {
+        this.dc.send(frame);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   close(): void {
     this.stopHeartbeat();
-    try {
-      this.dc?.close();
-    } catch {
-      /* ignore */
+    this.chunkAssembler.clear();
+    if (this.dc) {
+      this.dc.onopen = null;
+      this.dc.onclose = null;
+      this.dc.onerror = null;
+      this.dc.onmessage = null;
+      try {
+        this.dc.close();
+      } catch {
+        /* ignore */
+      }
+      this.dc = null;
     }
-    try {
-      this.pc?.close();
-    } catch {
-      /* ignore */
+    if (this.pc) {
+      this.pc.onconnectionstatechange = null;
+      this.pc.ondatachannel = null;
+      try {
+        this.pc.close();
+      } catch {
+        /* ignore */
+      }
+      this.pc = null;
     }
-    this.dc = null;
-    this.pc = null;
   }
 }
 

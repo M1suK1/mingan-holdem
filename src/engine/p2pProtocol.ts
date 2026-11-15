@@ -269,3 +269,61 @@ export async function decodeP2pSignalToken(token: string): Promise<P2pSignalPayl
   }
   return { kind: parsed.kind, sdp: parsed.sdp };
 }
+
+const CHUNK_PREFIX = '__MGCHUNK__:';
+
+export function splitP2pWireMessage(rawJson: string, maxChunkChars = 14_000): string[] {
+  if (rawJson.length <= maxChunkChars) {
+    return [rawJson];
+  }
+  const msgId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const total = Math.ceil(rawJson.length / maxChunkChars);
+  const frames: string[] = [];
+  for (let idx = 0; idx < total; idx += 1) {
+    const slice = rawJson.slice(idx * maxChunkChars, (idx + 1) * maxChunkChars);
+    frames.push(`${CHUNK_PREFIX}${msgId}:${idx}:${total}:${slice}`);
+  }
+  return frames;
+}
+
+export class P2pChunkAssembler {
+  private readonly buffers = new Map<string, { total: number; parts: string[]; received: number; ts: number }>();
+
+  feed(frame: string): string | null {
+    if (!frame.startsWith(CHUNK_PREFIX)) {
+      return frame;
+    }
+    const rest = frame.slice(CHUNK_PREFIX.length);
+    const firstColon = rest.indexOf(':');
+    const secondColon = rest.indexOf(':', firstColon + 1);
+    const thirdColon = rest.indexOf(':', secondColon + 1);
+    if (firstColon === -1 || secondColon === -1 || thirdColon === -1) return null;
+
+    const msgId = rest.slice(0, firstColon);
+    const idx = Number(rest.slice(firstColon + 1, secondColon));
+    const total = Number(rest.slice(secondColon + 1, thirdColon));
+    const data = rest.slice(thirdColon + 1);
+    if (!Number.isInteger(idx) || !Number.isInteger(total) || total <= 0 || idx < 0 || idx >= total) {
+      return null;
+    }
+
+    let entry = this.buffers.get(msgId);
+    if (!entry) {
+      entry = { total, parts: new Array<string>(total).fill(''), received: 0, ts: Date.now() };
+      this.buffers.set(msgId, entry);
+    }
+    if (!entry.parts[idx]) {
+      entry.parts[idx] = data;
+      entry.received += 1;
+    }
+    if (entry.received >= entry.total) {
+      this.buffers.delete(msgId);
+      return entry.parts.join('');
+    }
+    return null;
+  }
+
+  clear(): void {
+    this.buffers.clear();
+  }
+}

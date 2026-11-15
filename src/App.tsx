@@ -380,13 +380,19 @@ export function App() {
   const buildLocalPeerProfile = useCallback((): P2pPeerProfile => {
     const char = latestCharRef.current;
     const dis = activeDisguiseRef.current;
+    const rawPortrait = dis.virtualPortrait || './assets/opponent-halfbody.webp';
+    // Avoid stuffing 200KB base64 images directly into HELLO when characterFileName can resolve locally
+    const lightweightPortrait =
+      rawPortrait.startsWith('data:') && (dis.sourceCharacterFile || char.fileName)
+        ? './assets/opponent-halfbody.webp'
+        : rawPortrait;
     return {
       name: localP2pNameRef.current.trim() || '潜行黑客',
       codename: dis.codename || 'ZERO-BYTE',
       title: dis.isCore ? '潜行黑客本体' : dis.name,
-      portrait: dis.virtualPortrait || resolveVirtualEntityPortrait(char, 'calm'),
+      portrait: lightweightPortrait,
       accentColor: dis.accentColor || '#00F0FF',
-      characterFileName: char.fileName,
+      characterFileName: dis.sourceCharacterFile || char.fileName,
     };
   }, []);
 
@@ -482,6 +488,16 @@ export function App() {
           ai: { ...prev.players.ai, name: pkt.peer.name },
         },
       }));
+      if (pkt.peer.characterFileName) {
+        void loadContractCharacterByFile(pkt.peer.characterFileName)
+          .then((loaded) => {
+            const resolvedImg = resolveVirtualEntityPortrait(loaded, 'calm');
+            setRemotePeer((curr) => (curr ? { ...curr, portrait: resolvedImg } : curr));
+          })
+          .catch(() => {
+            /* keep lightweight portrait */
+          });
+      }
       enqueueTask({
         kind: 'opponent',
         speaker: pkt.peer.name,
