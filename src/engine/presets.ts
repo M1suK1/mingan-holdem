@@ -132,6 +132,13 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
   },
 ];
 
+const DECISION_STYLE_TEXT = [
+  '【核心博弈与极速决策规则】',
+  '1. 双花色52张精确概率牌型大小：四条 > 同花顺 > 葫芦 > 顺子 > 三条 > 两对 > 同花 > 一对 > 高牌。',
+  '2. 黑客作弊（hack，不占回合、每回合限1次）：可对己方公开明牌执行 plus-one(+1) / minus-one(-1) / flip-suit(反色)，修改结果仅己方可见，对手视野中仍显示原牌；若将已改手牌换入公共牌池同样仅自己感知改牌态，但摊牌时按修改后牌面结算。不要在台词中直接坦白自己作弊！',
+  '3. 协议扫描（scan，不占回合、每回合限1次）：可扫描对手手牌或对手换入公共区的明牌核验是否被篡改；若抓获对方作弊直接赢下本局并永久封印其对应改牌技能。公共牌未全明前遇加注须先跟注；公共牌全明（river）时可先扫描再决定是否跟注。',
+].join('\n');
+
 function defaultEntries(): PromptEntry[] {
   return [
     {
@@ -191,13 +198,12 @@ function defaultEntries(): PromptEntry[] {
     },
     {
       id: 'entry-decision-style',
-      name: '博弈出牌思路',
+      name: '博弈出牌思路（含作弊与扫描速览）',
       scope: 'decision',
       role: 'system',
       enabled: true,
       builtin: true,
-      content:
-        '请结合【双花色精确概率重排：四条>同花顺>葫芦>顺子>三条>两对>同花>一对>高牌】与当前赔率权衡动作；若需要误导或施加压力，可将心理战术融入 reply 台词中。',
+      content: DECISION_STYLE_TEXT,
     },
     {
       id: 'entry-encounter-style',
@@ -530,6 +536,13 @@ export function loadPresets(): ChatPreset[] {
             (/不超过(85|65|75)字/.test(entry.content) || !entry.content.includes('立绘神态'))
           ) {
             return { ...entry, content: latestContract.content, defaultContent: latestContract.content };
+          }
+          if (
+            entry.id === 'entry-decision-style' &&
+            entry.builtin &&
+            !entry.content.includes('黑客作弊')
+          ) {
+            return { ...entry, name: '博弈出牌思路（含作弊与扫描速览）', content: DECISION_STYLE_TEXT };
           }
           return entry;
         });

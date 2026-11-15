@@ -492,6 +492,8 @@ describe('Thinking effort tuning & round-settled LLM感想', () => {
       compactMode: true,
     });
     assert.ok(fastComposed.system.length < fullComposed.system.length);
+    assert.ok(fastComposed.system.includes('黑客作弊'));
+    assert.ok(fastComposed.system.includes('协议扫描'));
   });
 
   it('includes expression switching guidance in contracts and normalizes expression aliases', () => {
