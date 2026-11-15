@@ -113,6 +113,7 @@ export interface PlayerState {
   folded: boolean;
   allIn: boolean;
   sealedSkills: HackSkillId[];
+  ghostShield?: boolean;
 }
 
 export type GameAction =
@@ -124,7 +125,8 @@ export type GameAction =
   | { type: 'call' }
   | { type: 'end-turn' }
   | { type: 'hack'; handIndex: number; skill: HackSkillId }
-  | { type: 'scan'; targetKind: 'hand' | 'board'; targetIndex: number };
+  | { type: 'scan'; targetKind: 'hand' | 'board'; targetIndex: number }
+  | { type: 'use-skill'; skillId: string; targetIndex?: number };
 
 export interface HandEvaluation {
   category: number; // 0..8
@@ -180,6 +182,7 @@ export interface VfxEvent {
     | 'end-turn'
     | 'hack'
     | 'scan'
+    | 'use-skill'
     | 'allin-reveal'
     | 'showdown';
   actor: PlayerId;
@@ -231,6 +234,10 @@ export interface GameState {
   usedHackThisTurn: boolean;
   usedScanThisTurn: boolean;
   scannedKeys: string[];
+  playerAcquiredSkills: string[];
+  usedProtocolSkillThisHand: boolean;
+  peekedBoardIndices: number[];
+  frozenBoardIndices: number[];
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
   result?: ShowdownResult;
@@ -272,6 +279,7 @@ export interface SkillPoolEntry {
   category: 'hack' | 'recon' | 'protocol' | 'passive';
   summary: string;
   costHint?: number;
+  targetMode?: 'instant' | 'human-open-hand' | 'human-locked-hand' | 'hidden-board' | 'passive';
   implemented: boolean;
   tags: string[];
 }

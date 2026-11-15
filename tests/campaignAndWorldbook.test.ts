@@ -37,9 +37,13 @@ import {
   parseVertexServiceAccount,
   vertexTarget,
 } from '../src/engine/vertexClient.ts';
-import { createInitialState } from '../src/engine/gameEngine.ts';
+import {
+  generateLocalPersonaReply,
+  parseDialogueSegments,
+  serializeStateForLlm,
+} from '../src/engine/llmClient.ts';
+import { applyAction, createInitialState, getEffectiveHackCost, getEffectiveScanCost, getNextSwapFee, isActionLegal } from '../src/engine/gameEngine.ts';
 import { DEFAULT_CONFIG } from '../src/engine/types.ts';
-import { serializeStateForLlm } from '../src/engine/llmClient.ts';
 
 describe('Campaign: virtual entities, disguise decoy escape, skill loot & failure ending', () => {
   it('initializes player core virtual entity with zero captured decoys and no failure ending', () => {
@@ -243,7 +247,81 @@ describe('Google Vertex AI credential & endpoint helpers', () => {
     );
 
     const express = vertexTarget({ model: 'gemini-2.5-flash', expressKey: 'AIza123' });
-    assert.ok(express.url.startsWith('https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent?key=AIza123'));
+    assert.equal(express.url.startsWith('https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent?key=AIza123'), true);
     assert.equal(normalizeVertexModel('google/gemini-2.5-pro'), 'gemini-2.5-pro');
+  });
+});
+
+describe('Dialogue segments (1-3 items, <=200 chars, thought + speech)', () => {
+  it('parses up to 3 dialogue segments with speech/thought kinds and 200-char limit', () => {
+    const longTxt = '字'.repeat(240);
+    const raw = JSON.stringify({
+      segments: [
+        { kind: 'thought', text: '他突然全下难道手里真有同花？' },
+        { kind: 'speech', text: longTxt },
+        { kind: 'thought', text: '先试探一下他的呼吸频段。' },
+        { kind: 'speech', text: '第四句应被截断丢弃' },
+      ],
+      expression: 'surprise',
+    });
+    const parsed = parseDialogueSegments(JSON.parse(raw), '兜底台词');
+    assert.equal(parsed.length, 3);
+    assert.equal(parsed[0].kind, 'thought');
+    assert.equal(parsed[1].kind, 'speech');
+    assert.equal(parsed[1].text.length, 200);
+    assert.equal(parsed[2].kind, 'thought');
+  });
+
+  it('supports multi-segment local persona reply with inner thought', () => {
+    const state = createInitialState();
+    const res = generateLocalPersonaReply(FALLBACK_CONTRACT_CHARACTER, state, '你暗牌是什么', false);
+    assert.ok(res.segments.length >= 1 && res.segments.length <= 3);
+    assert.ok(res.segments.every((s) => s.text.length <= 200));
+  });
+});
+
+describe('Protocol Skill Pool mechanics (passive & active skills)', () => {
+  it('defines 9 implemented skills in SKILL_POOL_REGISTRY', () => {
+    assert.equal(SKILL_POOL_REGISTRY.length, 9);
+    assert.ok(SKILL_POOL_REGISTRY.every((s) => s.implemented === true));
+  });
+
+  it('applies passive fee reductions for mirror-checksum, entropy-shield, and trace-scramble', () => {
+    const base = createInitialState();
+    const buffed = createInitialState({
+      playerAcquiredSkills: ['mirror-checksum', 'entropy-shield', 'trace-scramble'],
+    });
+    assert.equal(getEffectiveScanCost(buffed, 'human'), getEffectiveScanCost(base, 'human') - 15);
+    assert.equal(getNextSwapFee(buffed, 'human'), Math.max(10, getNextSwapFee(base, 'human') - 10));
+    assert.equal(
+      getEffectiveHackCost(buffed, 'human', 'plus-one'),
+      getEffectiveHackCost(base, 'human', 'plus-one') - 15
+    );
+  });
+
+  it('executes ghost-packet shield to block one opponent scan catch, and enforces once-per-hand active skill limit', () => {
+    let state = createInitialState({
+      playerAcquiredSkills: ['ghost-packet', 'zero-day-peek'],
+    });
+    state.currentTurn = 'human';
+    state.players.human.hand[0].visibility = 'open';
+    state.players.human.hand[0].card = { id: 'h-open', suit: 'B', rank: 6 };
+
+    // Use ghost-packet + hack on human hand[0]
+    state = applyAction(state, { type: 'use-skill', skillId: 'ghost-packet' });
+    assert.equal(state.players.human.ghostShield, true);
+    assert.equal(state.usedProtocolSkillThisHand, true);
+
+    // Second active protocol skill in the same hand is illegal
+    assert.equal(isActionLegal(state, { type: 'use-skill', skillId: 'zero-day-peek', targetIndex: 1 }), false);
+
+    state = applyAction(state, { type: 'hack', handIndex: 0, skill: 'plus-one' });
+    // Hand turn to AI and scan human hand[0] -> ghostShield absorbs the catch!
+    state.currentTurn = 'ai';
+    state.players.ai.roundBet = state.players.human.roundBet;
+    state = applyAction(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 });
+    assert.notEqual(state.phase, 'showdown');
+    assert.equal(state.players.human.ghostShield, false);
+    assert.equal(state.lastAction?.caught, false);
   });
 });

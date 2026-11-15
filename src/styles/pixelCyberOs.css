@@ -933,6 +933,16 @@ button:disabled {
   animation: lcBubbleCoupledPress 2.95s linear forwards;
 }
 
+.lc-speech-bubble.is-thought {
+  border-style: dashed;
+  border-width: 2px;
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--char-accent) 7%, #090813);
+  border-color: color-mix(in srgb, var(--char-accent) 76%, transparent);
+  color: #e6e8f8;
+  font-style: italic;
+}
+
 .lc-speech-pointer {
   position: absolute;
   left: -13px;
@@ -1059,7 +1069,7 @@ button:disabled {
 /* Unified Chat Card */
 .lc-chat-msg {
   width: 100%;
-  max-height: 170px;
+  max-height: 290px;
   padding: 8px 10px;
   border: 1px solid var(--px-border);
   border-left: 3px solid var(--px-border-bright);
@@ -1083,6 +1093,16 @@ button:disabled {
   border-color: color-mix(in srgb, var(--char-accent) 68%, transparent);
   border-left: 3px solid var(--char-accent);
   color: #ffffff;
+}
+
+.lc-chat-msg.opponent.is-thought {
+  border-style: dashed;
+  border-width: 1.5px;
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--char-accent) 7%, #080914);
+  border-color: color-mix(in srgb, var(--char-accent) 74%, transparent);
+  color: #d8ddf0;
+  font-style: italic;
 }
 
 .lc-chat-msg.human {
@@ -2583,43 +2603,39 @@ button:disabled {
 }
 
 /* =========================================================================
-   8B. Player Avatar Frame (Left of Cards) & Campaign / Preset / Worldbook UI
+   8B. Player Pure Avatar Frame (Left of Cards) & Campaign / Preset / Worldbook UI
    ========================================================================= */
 .lc-player-main-split {
   width: 100%;
   display: grid;
-  grid-template-columns: 102px minmax(0, 1fr);
+  grid-template-columns: 96px minmax(0, 1fr);
   gap: 12px;
-  align-items: stretch;
-}
-
-.lc-player-avatar-dock {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 5px;
-  padding: 6px;
-  background: #050810;
-  border: 1px solid var(--entity-accent, var(--neon-cyan));
-  box-shadow: inset 0 0 14px rgba(0, 240, 255, 0.08);
 }
 
-.lc-player-avatar-dock.is-core {
-  border-color: rgba(255, 46, 136, 0.72);
-  box-shadow: inset 0 0 14px rgba(255, 46, 136, 0.12);
-}
-
-.lc-avatar-frame {
+.lc-player-avatar-only {
   position: relative;
-  width: 86px;
-  height: 86px;
-  border: 1px solid var(--px-border-bright);
-  background: #020307;
+  width: 96px;
+  height: 126px;
+  padding: 0;
+  background: #03050a;
+  border: 2px solid var(--entity-accent, var(--neon-cyan));
+  box-shadow: inset 0 0 14px rgba(0, 240, 255, 0.14);
   overflow: hidden;
+  display: block;
 }
 
-.lc-avatar-img {
+.lc-player-avatar-only.is-core {
+  border-color: var(--neon-pink);
+  box-shadow: inset 0 0 14px rgba(255, 46, 136, 0.18);
+}
+
+.lc-player-avatar-only:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--entity-accent, var(--neon-cyan)) 48%, transparent);
+}
+
+.lc-avatar-only-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -2627,57 +2643,45 @@ button:disabled {
   display: block;
 }
 
-.lc-avatar-badge {
-  position: absolute;
-  left: 3px;
-  bottom: 3px;
-  padding: 1px 5px;
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  background: rgba(5, 7, 13, 0.92);
-  border: 1px solid var(--neon-cyan);
-  color: var(--neon-cyan-soft);
-}
-
-.lc-avatar-badge.core {
-  border-color: var(--neon-pink);
-  color: var(--neon-pink-soft);
-}
-
-.lc-avatar-name {
+.lc-acquired-skill-bar {
   width: 100%;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.lc-acquired-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
   font-size: 10.5px;
-  font-weight: 800;
-  color: #ffffff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: var(--px-ghost-ui);
-}
-
-.lc-avatar-meta {
-  font-size: 9.5px;
-  color: var(--text-muted);
-  text-align: center;
-  font-family: var(--font-mono);
-}
-
-.lc-avatar-switch-btn {
-  width: 100%;
-  padding: 3px 4px;
-  font-size: 10px;
   font-weight: 700;
-  color: var(--neon-cyan-soft);
-  background: rgba(0, 240, 255, 0.1);
+  background: #07101b;
   border: 1px solid rgba(0, 240, 255, 0.52);
-  text-shadow: var(--px-ghost-ui);
+  color: var(--neon-cyan-soft);
 }
 
-.lc-avatar-switch-btn:hover:not(:disabled) {
-  background: rgba(0, 240, 255, 0.22);
+.lc-acquired-skill-chip.is-passive {
+  border-color: rgba(16, 245, 160, 0.45);
+  color: #b7ffdf;
+  opacity: 0.9;
+}
+
+.lc-acquired-skill-chip.is-targeting {
+  border-color: var(--neon-amber);
+  background: rgba(255, 176, 32, 0.16);
+  color: #ffe2a6;
+}
+
+.lc-acquired-skill-chip:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.18);
   color: #ffffff;
+}
+
+.lc-acquired-skill-chip:disabled:not(.is-passive) {
+  opacity: 0.42;
 }
 
 .lc-player-cards-col {
@@ -2931,10 +2935,9 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .lc-player-avatar-dock {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+  .lc-player-avatar-only {
+    width: 76px;
+    height: 98px;
   }
 }
 

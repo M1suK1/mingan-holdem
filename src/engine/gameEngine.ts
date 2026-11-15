@@ -86,12 +86,39 @@ export function getCurrentRaiseCap(state: GameState): number {
 }
 
 export function getNextSwapFee(state: GameState, playerId: PlayerId): number {
-  if (state.config.swapFeeMode === 'fixed') {
-    return state.config.fixedSwapFee;
+  const base =
+    state.config.swapFeeMode === 'fixed'
+      ? state.config.fixedSwapFee
+      : state.config.escalatingSwapFees[
+          Math.min(state.players[playerId].swapCount, state.config.escalatingSwapFees.length - 1)
+        ];
+  if (playerId === 'human' && state.playerAcquiredSkills?.includes('entropy-shield')) {
+    return Math.max(10, base - 10);
   }
-  const fees = state.config.escalatingSwapFees;
-  const idx = Math.min(state.players[playerId].swapCount, fees.length - 1);
-  return fees[idx];
+  return base;
+}
+
+export function getEffectiveHackCost(
+  state: Pick<GameState, 'config' | 'playerAcquiredSkills'>,
+  actorId: PlayerId,
+  skill: HackSkillId
+): number {
+  const base = getHackSkillCost(state, skill);
+  if (actorId === 'human' && state.playerAcquiredSkills?.includes('trace-scramble')) {
+    return Math.max(15, base - 15);
+  }
+  return base;
+}
+
+export function getEffectiveScanCost(
+  state: Pick<GameState, 'config' | 'playerAcquiredSkills'>,
+  actorId: PlayerId
+): number {
+  const base = state.config.scanCost;
+  if (actorId === 'human' && state.playerAcquiredSkills?.includes('mirror-checksum')) {
+    return Math.max(15, base - 15);
+  }
+  return base;
 }
 
 export function getBetDiff(state: GameState, actorId: PlayerId): number {
@@ -240,6 +267,7 @@ export interface CreateStateOptions {
   tieStarter?: PlayerId;
   chips?: Record<PlayerId, number>;
   sealedSkills?: Record<PlayerId, HackSkillId[]>;
+  playerAcquiredSkills?: string[];
   opponentName?: string;
   deckOverride?: Card[];
   rng?: () => number;
@@ -336,6 +364,10 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     usedHackThisTurn: false,
     usedScanThisTurn: false,
     scannedKeys: [],
+    playerAcquiredSkills: [...(options.playerAcquiredSkills ?? [])],
+    usedProtocolSkillThisHand: false,
+    peekedBoardIndices: [],
+    frozenBoardIndices: [],
     lastAction: {
       id: makeEventId(),
       type: 'deal',
@@ -377,6 +409,7 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
       human: [...prev.players.human.sealedSkills],
       ai: [...prev.players.ai.sealedSkills],
     },
+    playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])],
   });
 }
 
@@ -441,7 +474,7 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     if (action.type === 'hack') {
       if (state.usedHackThisTurn) return false;
       if (actor.sealedSkills.includes(action.skill)) return false;
-      const cost = getHackSkillCost(state, action.skill);
+      const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
       const hCard = actor.hand[action.handIndex];
       if (!hCard || hCard.visibility !== 'open') return false;
@@ -453,7 +486,7 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     // Non-consuming Universal Scan Skill (requires diff === 0: must call raises first!)
     if (action.type === 'scan') {
       if (state.usedScanThisTurn) return false;
-      if (actor.chips < state.config.scanCost) return false;
+      if (actor.chips < getEffectiveScanCost(state, actorId)) return false;
       const scanKey = `${actorId}:${action.targetKind}:${action.targetIndex}`;
       if (state.scannedKeys.includes(scanKey)) return false;
       if (action.targetKind === 'hand') {
@@ -461,6 +494,38 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       }
       const slot = state.board[action.targetIndex];
       return Boolean(slot && slot.isOpen && slot.swappedBy === oppId);
+    }
+
+    // Acquired Protocol Skills (once per hand, human player)
+    if (action.type === 'use-skill') {
+      if (actorId !== 'human') return false;
+      if (state.usedProtocolSkillThisHand) return false;
+      if (!state.playerAcquiredSkills?.includes(action.skillId)) return false;
+      const idx = action.targetIndex ?? 0;
+      switch (action.skillId) {
+        case 'ghost-packet':
+          return !actor.ghostShield && actor.chips >= 40;
+        case 'parity-spoof': {
+          const hc = actor.hand[idx];
+          return Boolean(hc && hc.visibility === 'open' && actor.chips >= 55);
+        }
+        case 'phantom-swap': {
+          const hc = actor.hand[idx];
+          return Boolean(hc && hc.visibility === 'private' && hc.lockedFromSwap && actor.chips >= 45);
+        }
+        case 'zero-day-peek': {
+          const slot = state.board[idx];
+          return Boolean(slot && !slot.isOpen && !state.peekedBoardIndices.includes(idx) && actor.chips >= 50);
+        }
+        case 'ice-firewall': {
+          const slot = state.board[idx];
+          return Boolean(slot && !slot.isOpen && !state.frozenBoardIndices.includes(idx) && actor.chips >= 45);
+        }
+        case 'overclock-bluff':
+          return actor.chips >= 35 && opp.chips > 0 && !opp.allIn;
+        default:
+          return false;
+      }
     }
 
     if (state.phase === 'river') {
@@ -494,7 +559,8 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
           hCard.visibility === 'open' &&
           !hCard.lockedFromSwap &&
           bSlot &&
-          !bSlot.isOpen
+          !bSlot.isOpen &&
+          !(actorId === 'ai' && state.frozenBoardIndices?.includes(action.boardIndex))
       );
     }
     if (action.type === 'raise') {
@@ -833,7 +899,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (action.type === 'hack') {
     const next = cloneState(state);
     const actor = next.players[actorId];
-    const cost = getHackSkillCost(next, action.skill);
+    const cost = getEffectiveHackCost(next, actorId, action.skill);
     const hc = actor.hand[action.handIndex];
     const prevCard = { ...hc.card };
 
@@ -887,7 +953,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     const next = cloneState(state);
     const actor = next.players[actorId];
     const opp = next.players[oppId];
-    const cost = next.config.scanCost;
+    const cost = getEffectiveScanCost(next, actorId);
 
     actor.chips -= cost;
     actor.totalCommitted += cost;
@@ -921,6 +987,31 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         tampered = true;
         tamperedSkills = [...slot.tamperedBy];
       }
+    }
+
+    if (tampered && opp.ghostShield) {
+      opp.ghostShield = false;
+      tampered = false;
+      const shieldMsg = `${actorLabel} 预支 ${cost} 扫描对端节点：封包校验干扰，未能检出异常`;
+      next.lastAction = {
+        id: makeEventId(),
+        type: 'scan',
+        actor: actorId,
+        targetKind: action.targetKind,
+        targetIndex: action.targetIndex,
+        amount: cost,
+        caught: false,
+        label: shieldMsg,
+      };
+      next.actionHistory.push({
+        id: makeEventId(),
+        handNumber: next.handNumber,
+        actor: actorId,
+        phase: next.phase,
+        summary: shieldMsg,
+        timestamp: Date.now(),
+      });
+      return next;
     }
 
     if (tampered) {
@@ -974,6 +1065,88 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       targetIndex: action.targetIndex,
       amount: cost,
       caught: false,
+      label: summary,
+    };
+    next.actionHistory.push({
+      id: makeEventId(),
+      handNumber: next.handNumber,
+      actor: actorId,
+      phase: next.phase,
+      summary,
+      timestamp: Date.now(),
+    });
+    return next;
+  }
+
+  if (action.type === 'use-skill') {
+    const next = cloneState(state);
+    const actor = next.players[actorId];
+    const idx = action.targetIndex ?? 0;
+    next.usedProtocolSkillThisHand = true;
+
+    let summary = '';
+    if (action.skillId === 'ghost-packet') {
+      const cost = 40;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.hackEscrowPot += cost;
+      actor.ghostShield = true;
+      summary = `${actorLabel} 激活「幽灵封包」（预支 ${cost}）：已部署一次性的底层反扫描护盾`;
+    } else if (action.skillId === 'parity-spoof') {
+      const cost = 55;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.hackEscrowPot += cost;
+      const hc = actor.hand[idx];
+      if (!hc.originalCard) hc.originalCard = { ...hc.card };
+      const delta = hc.card.rank <= 12 ? 2 : -2;
+      hc.card = { ...hc.card, rank: (hc.card.rank + delta) as Rank };
+      hc.tamperedBy = Array.from(new Set([...(hc.tamperedBy ?? []), delta > 0 ? 'plus-one' : 'minus-one']));
+      summary = `${actorLabel} 激活「奇偶跃迁」（预支 ${cost}）：手牌 #${idx + 1} 已跨阶偏移 ${delta > 0 ? '+2' : '-2'}`;
+    } else if (action.skillId === 'phantom-swap') {
+      const cost = 45;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.pot += cost;
+      const hc = actor.hand[idx];
+      hc.lockedFromSwap = false;
+      hc.visibility = 'open';
+      summary = `${actorLabel} 激活「幻影解绑」（投入 ${cost}）：手牌 #${idx + 1} 已恢复换牌机动权`;
+    } else if (action.skillId === 'zero-day-peek') {
+      const cost = 50;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.pot += cost;
+      next.peekedBoardIndices = Array.from(new Set([...next.peekedBoardIndices, idx]));
+      const slotCard = next.board[idx].card;
+      summary = `${actorLabel} 激活「零日窥视」（投入 ${cost}）：暗槽 #${idx + 1} 实为 ${formatCardShort(slotCard)}`;
+    } else if (action.skillId === 'ice-firewall') {
+      const cost = 45;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.pot += cost;
+      next.frozenBoardIndices = Array.from(new Set([...next.frozenBoardIndices, idx]));
+      summary = `${actorLabel} 激活「冰墙锁槽」（投入 ${cost}）：暗槽 #${idx + 1} 已对对端封锁换牌`;
+    } else if (action.skillId === 'overclock-bluff') {
+      const cost = 35;
+      actor.chips -= cost;
+      actor.roundBet += cost;
+      actor.totalCommitted += cost;
+      next.pot += cost;
+      if (actor.chips === 0) actor.allIn = true;
+      next.justCalledThisTurn = false;
+      next.usedHackThisTurn = false;
+      next.usedScanThisTurn = false;
+      next.currentTurn = oppId;
+      summary = `${actorLabel} 激活「超频脉压」：强行推进 ${cost} 算力，迫使对端响应`;
+    }
+
+    next.lastAction = {
+      id: makeEventId(),
+      type: 'use-skill',
+      actor: actorId,
+      boardIndex: action.skillId === 'zero-day-peek' || action.skillId === 'ice-firewall' ? idx : undefined,
+      handIndex: action.skillId === 'parity-spoof' || action.skillId === 'phantom-swap' ? idx : undefined,
       label: summary,
     };
     next.actionHistory.push({

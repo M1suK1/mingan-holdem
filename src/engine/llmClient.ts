@@ -78,6 +78,11 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
   customSystemPrompt: '',
 };
 
+export interface ChatDialogueSegment {
+  kind: 'speech' | 'thought';
+  text: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'human' | 'opponent' | 'system';
@@ -227,12 +232,43 @@ function stripEmoji(text: string): string {
   return text.replace(/[\p{Extended_Pictographic}\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
 }
 
+export function parseDialogueSegments(
+  parsed: Record<string, unknown> | null,
+  fallbackText: string
+): ChatDialogueSegment[] {
+  const out: ChatDialogueSegment[] = [];
+  if (parsed && Array.isArray(parsed.segments)) {
+    for (const item of parsed.segments) {
+      if (out.length >= 3) break;
+      if (!item || typeof item !== 'object') continue;
+      const obj = item as Record<string, unknown>;
+      const rawText = typeof obj.text === 'string' ? stripEmoji(obj.text).trim() : '';
+      if (!rawText) continue;
+      const kind: 'speech' | 'thought' = obj.kind === 'thought' ? 'thought' : 'speech';
+      out.push({ kind, text: rawText.slice(0, 200) });
+    }
+  }
+  if (out.length === 0 && parsed) {
+    if (typeof parsed.thought === 'string' && parsed.thought.trim()) {
+      out.push({ kind: 'thought', text: stripEmoji(parsed.thought).trim().slice(0, 200) });
+    }
+    if (typeof parsed.reply === 'string' && parsed.reply.trim() && out.length < 3) {
+      out.push({ kind: 'speech', text: stripEmoji(parsed.reply).trim().slice(0, 200) });
+    }
+  }
+  if (out.length === 0) {
+    const clean = stripEmoji(fallbackText).trim().slice(0, 200);
+    if (clean) out.push({ kind: 'speech', text: clean });
+  }
+  return out.slice(0, 3);
+}
+
 export function generateLocalPersonaReply(
   character: ContractCharacter,
   state: GameState,
   userMessage: string,
   overloadMode = false
-): { reply: string; expression: ContractExpression } {
+): { reply: string; segments: ChatDialogueSegment[]; expression: ContractExpression } {
   const msg = userMessage.trim();
   const diff = getBetDiff(state, 'human');
   const hiddenCount = getHiddenBoardCount(state);
@@ -240,53 +276,73 @@ export function generateLocalPersonaReply(
     character.voice?.samples?.[state.actionHistory.length % (character.voice?.samples?.length || 1)];
 
   if (/底牌|暗牌|什么牌|同花|顺子/.test(msg)) {
+    const thought = '他在试探我私有暗牌的花色分布……绝对不能提前暴露换牌路线。';
+    const reply =
+      overloadMode && character.witchPersonality
+        ? '想窥探我的私有扇区？把你的算力和虚拟实体全部押上来，摊牌时我自然会让你看清。'
+        : `想知道我换进来的暗牌是不是黑粉同花？交足底池门票（当前奖池 ${state.pot}）再来套话吧。`;
     return {
       expression: 'smile',
-      reply:
-        overloadMode && character.witchPersonality
-          ? '想窥探我的私有扇区？把你的算力和虚拟实体全部押上来，摊牌时我自然会让你看清。'
-          : `想知道我换进来的暗牌是不是黑粉同花？交足底池门票（当前奖池 ${state.pot}）再来套话吧。`,
+      reply,
+      segments: [
+        { kind: 'thought', text: thought },
+        { kind: 'speech', text: reply },
+      ],
     };
   }
 
   if (/诱饵|伪装|本体|通缉|追捕|实体/.test(msg)) {
+    const thought = '如果他身上还套着俘获来的伪装实体，这一场就算打穿算力也未必能抓到本体……';
+    const reply =
+      '别指望靠一副伪装诱饵就能在黑域协议下全身而退——算力清零之时，我会亲自核验你的本体签名。';
     return {
       expression: 'angry',
-      reply:
-        '别指望靠一副伪装诱饵就能在黑域协议下全身而退——算力清零之时，我会亲自核验你的本体签名。',
+      reply,
+      segments: [
+        { kind: 'thought', text: thought },
+        { kind: 'speech', text: reply },
+      ],
     };
   }
 
   if (/投降|弃牌|怕了|不敢|梭哈|加注/.test(msg)) {
+    const reply =
+      diff > 0
+        ? `少用言语干扰我的频段——差额 ${diff} 摆在桌上，先跟注或者反加证明你的胆量。`
+        : `心理战对我可不管用。桌面上还有 ${hiddenCount} 个加密节点未揭开，好戏才刚开始。`;
     return {
       expression: 'angry',
-      reply:
-        diff > 0
-          ? `少用言语干扰我的频段——差额 ${diff} 摆在桌上，先跟注或者反加证明你的胆量。`
-          : `心理战对我可不管用。桌面上还有 ${hiddenCount} 个加密节点未揭开，好戏才刚开始。`,
+      reply,
+      segments: [{ kind: 'speech', text: reply }],
     };
   }
 
   if (/你是谁|名字|来历|夜糖|事务所|契约/.test(msg)) {
     const trait = character.traits[0];
+    const reply = `我是「${character.title}」${character.name}（代号 ${character.codename}）。${
+      trait ? `小心我的「${trait.name}」特性——` : ''
+    }${character.quote}`;
     return {
       expression: 'calm',
-      reply: `我是「${character.title}」${character.name}（代号 ${character.codename}）。${
-        trait ? `小心我的「${trait.name}」特性——` : ''
-      }${character.quote}`,
+      reply,
+      segments: [{ kind: 'speech', text: reply }],
     };
   }
 
   if (sample) {
+    const reply = `${sample}（当前底池 ${state.pot}，剩余加密节点 ${hiddenCount}/4）`;
     return {
       expression: state.pot >= 120 ? 'smile' : 'calm',
-      reply: `${sample}（当前底池 ${state.pot}，剩余加密节点 ${hiddenCount}/4）`,
+      reply,
+      segments: [{ kind: 'speech', text: reply.slice(0, 200) }],
     };
   }
 
+  const fallback = '收到你的通讯信号了。不过在黑域牌桌上，算力推进的声音可比聊天记录更有说服力。';
   return {
     expression: 'shy',
-    reply: '收到你的通讯信号了。不过在黑域牌桌上，算力推进的声音可比聊天记录更有说服力。',
+    reply: fallback,
+    segments: [{ kind: 'speech', text: fallback }],
   };
 }
 
@@ -445,6 +501,7 @@ export async function requestOpponentChatReply(params: {
   worldbook?: WorldbookEntry[];
 }): Promise<{
   reply: string;
+  segments: ChatDialogueSegment[];
   expression: ContractExpression;
   fromLlm: boolean;
   logEntry?: LlmCallLog;
@@ -494,15 +551,13 @@ export async function requestOpponentChatReply(params: {
 
     const cleanedContent = applyRegexScripts(out.content, rt.preset.regex, 'output');
     const parsed = extractJsonPayload(cleanedContent);
-    const rawReply =
-      typeof parsed?.reply === 'string' && parsed.reply.trim()
-        ? parsed.reply.trim()
-        : cleanedContent.slice(0, 140);
-    const reply = stripEmoji(rawReply);
+    const segments = parseDialogueSegments(parsed, cleanedContent);
+    const reply = segments.map((s) => s.text).join(' / ');
     const expression = sanitizeExpression(parsed?.expression, 'smile');
 
     return {
       reply,
+      segments,
       expression,
       fromLlm: true,
       logEntry: {
@@ -562,14 +617,16 @@ export async function requestEncounterDialogue(params: {
   detailNote?: string;
 }): Promise<{
   reply: string;
+  segments: ChatDialogueSegment[];
   expression: ContractExpression;
   fromLlm: boolean;
   logEntry?: LlmCallLog;
 }> {
   const { eventKind, character, state, llmConfig, campaign, dossier, detailNote } = params;
 
-  const fallbackMap: Record<typeof eventKind, { reply: string; expression: ContractExpression }> = {
+  const fallbackMap: Record<typeof eventKind, { reply: string; thought?: string; expression: ContractExpression }> = {
     'pursuer-arrive': {
+      thought: `通缉目标 ${campaign.playerCodename} 的信号果然落在这个扇区……先把他逼进底池博弈。`,
       reply: `通缉目标 ${campaign.playerCodename}，我是${dossier.identityTitle}。黑域协议已锁定这片扇区，交出你的虚拟实体吧。`,
       expression: 'angry',
     },
@@ -578,6 +635,7 @@ export async function requestEncounterDialogue(params: {
       expression: 'sad',
     },
     'decoy-escape': {
+      thought: '信号签名在瞬间坍缩成残片……可恶，中了他的替身伪装！',
       reply: `居然只是个伪装诱饵实体？算你滑头……等下次定位到你的本体签名，可没这么好运了！`,
       expression: 'surprise',
     },
@@ -588,7 +646,11 @@ export async function requestEncounterDialogue(params: {
   };
 
   if (!llmConfig.enabled) {
-    return { ...fallbackMap[eventKind], fromLlm: false };
+    const fb = fallbackMap[eventKind];
+    const segments: ChatDialogueSegment[] = [];
+    if (fb.thought) segments.push({ kind: 'thought', text: fb.thought });
+    segments.push({ kind: 'speech', text: fb.reply });
+    return { reply: fb.reply, segments, expression: fb.expression, fromLlm: false };
   }
 
   const eventDescMap: Record<typeof eventKind, string> = {
@@ -620,14 +682,12 @@ export async function requestEncounterDialogue(params: {
     });
     const cleaned = applyRegexScripts(out.content, rt.preset.regex, 'output');
     const parsed = extractJsonPayload(cleaned);
-    const reply = stripEmoji(
-      typeof parsed?.reply === 'string' && parsed.reply.trim()
-        ? parsed.reply.trim()
-        : fallbackMap[eventKind].reply
-    );
+    const segments = parseDialogueSegments(parsed, fallbackMap[eventKind].reply);
+    const reply = segments.map((s) => s.text).join(' / ');
     const expression = sanitizeExpression(parsed?.expression, fallbackMap[eventKind].expression);
     return {
       reply,
+      segments,
       expression,
       fromLlm: true,
       logEntry: {
@@ -647,7 +707,11 @@ export async function requestEncounterDialogue(params: {
       },
     };
   } catch {
-    return { ...fallbackMap[eventKind], fromLlm: false };
+    const fb = fallbackMap[eventKind];
+    const segments: ChatDialogueSegment[] = [];
+    if (fb.thought) segments.push({ kind: 'thought', text: fb.thought });
+    segments.push({ kind: 'speech', text: fb.reply });
+    return { reply: fb.reply, segments, expression: fb.expression, fromLlm: false };
   }
 }
 
@@ -725,6 +789,7 @@ export async function requestLlmPokerDecision(params: {
 }): Promise<{
   action: GameAction;
   reply: string;
+  segments: ChatDialogueSegment[];
   expression: ContractExpression;
   mood: OpponentMood;
   logEntry: LlmCallLog;
@@ -764,11 +829,8 @@ export async function requestLlmPokerDecision(params: {
       return null;
     }
     const expression = sanitizeExpression(parsed?.expression, 'smile');
-    const rawReply =
-      typeof parsed?.reply === 'string' && parsed.reply.trim()
-        ? parsed.reply.trim()
-        : '这一步协议已经写入。';
-    const reply = stripEmoji(rawReply);
+    const segments = parseDialogueSegments(parsed, '这一步协议已经写入。');
+    const reply = segments.map((s) => s.text).join(' / ');
     const mood: OpponentMood =
       expression === 'smile'
         ? 'confident'
@@ -781,6 +843,7 @@ export async function requestLlmPokerDecision(params: {
     return {
       action: candidate,
       reply,
+      segments,
       expression,
       mood,
       logEntry: {

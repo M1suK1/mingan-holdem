@@ -94,9 +94,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '请严格只输出一段 JSON 对象，禁止任何 Markdown 代码块或 Emoji 符号，格式：{"reply":"不超过85字的中文台词","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
     defaultContent:
-      '请严格只输出一段 JSON 对象，禁止任何 Markdown 代码块或 Emoji 符号，格式：{"reply":"不超过85字的中文台词","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '请严格只输出一段 JSON 对象，禁止 Markdown 代码块或 Emoji 符号。每次回复允许输出 1 至 3 段对话或心理想法（每段不超过200字）：{"segments":[{"kind":"thought","text":"可选心理独白，不超过200字"},{"kind":"speech","text":"实际开口台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
   },
   {
     id: 'contract-decision',
@@ -107,9 +107,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji）：{"action":<合法动作对象>,"reply":"出招台词(65字以内)","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
     defaultContent:
-      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji）：{"action":<合法动作对象>,"reply":"出招台词(65字以内)","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '现在轮到你出牌。只能从【本次指令上下文】列出的合法动作中选择一项并严格返回 JSON（无 Markdown、无 Emoji；segments 可写 1 至 3 段对话或心理想法，每段不超过200字）：{"action":<合法动作对象>,"segments":[{"kind":"thought","text":"决策心理，不超过200字"},{"kind":"speech","text":"出招台词，不超过200字"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
   },
   {
     id: 'contract-encounter',
@@ -120,9 +120,9 @@ export const CONTRACT_PROMPTS: PromptEntry[] = [
     contract: true,
     builtin: true,
     content:
-      '请以当前追捕者口吻针对局势变化输出一句高张力台词，严格返回 JSON（无 Markdown、无 Emoji）：{"reply":"75字以内中文宣言","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji），严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
     defaultContent:
-      '请以当前追捕者口吻针对局势变化输出一句高张力台词，严格返回 JSON（无 Markdown、无 Emoji）：{"reply":"75字以内中文宣言","expression":"calm|smile|surprise|sad|angry|shy"}',
+      '请以当前追捕者口吻针对局势变化输出 1 至 3 段台词或心理想法（每段不超过200字，无 Markdown、无 Emoji），严格返回 JSON：{"segments":[{"kind":"thought","text":"内心活动"},{"kind":"speech","text":"对黑客的宣言"}],"expression":"calm|smile|surprise|sad|angry|shy"}',
   },
 ];
 

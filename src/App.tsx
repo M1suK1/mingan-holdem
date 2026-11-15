@@ -27,7 +27,8 @@ import {
   formatSuitLabel,
   getBetDiff,
   getCurrentRaiseCap,
-  getHackSkillCost,
+  getEffectiveHackCost,
+  getEffectiveScanCost,
   getHalfStackRaiseAmount,
   getHiddenBoardCount,
   getLegalRaiseRange,
@@ -81,6 +82,7 @@ import {
   requestLlmPokerDecision,
   requestOpponentChatReply,
   saveLlmConfigToStorage,
+  type ChatDialogueSegment,
   type LlmCallLog,
   type LlmConfig,
 } from './engine/llmClient.ts';
@@ -178,6 +180,7 @@ interface ChatItem {
   sender: 'opponent' | 'human';
   speaker: string;
   text: string;
+  msgKind?: 'speech' | 'thought';
   crushed: boolean;
   anim?: 'player-rising';
   riseDy?: number;
@@ -187,12 +190,13 @@ interface FloatingBubbleState {
   id: string;
   speaker: string;
   text: string;
+  msgKind?: 'speech' | 'thought';
   contactDy: number;
   dropDy: number;
 }
 
 type QueuedChatTask =
-  | { kind: 'opponent'; speaker: string; text: string }
+  | { kind: 'opponent'; speaker: string; text: string; msgKind?: 'speech' | 'thought' }
   | { kind: 'human'; text: string };
 
 interface SwapFlightCard {
@@ -219,10 +223,12 @@ export function App() {
   const [catalogSource, setCatalogSource] = useState<'api' | 'static' | 'fallback'>('fallback');
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
+  const [campaign, setCampaign] = useState(() => loadCampaignState());
   const [state, setState] = useState<GameState>(() =>
     createInitialState({
       config: DEFAULT_CONFIG,
       opponentName: FALLBACK_CONTRACT_CHARACTER.name,
+      playerAcquiredSkills: loadCampaignState().acquiredSkills,
     })
   );
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
@@ -233,6 +239,7 @@ export function App() {
   const [dragOverBoardIndex, setDragOverBoardIndex] = useState<number | null>(null);
   const [showRaiseTiers, setShowRaiseTiers] = useState(false);
   const [scanMode, setScanMode] = useState(false);
+  const [pendingSkillTargetId, setPendingSkillTargetId] = useState<string | null>(null);
   const [holdProgress, setHoldProgress] = useState(0);
   const [activeModal, setActiveModal] = useState<ActiveModal>({ type: 'none' });
   const [activeMenuId, setActiveMenuId] = useState('menu-contracts');
@@ -256,7 +263,6 @@ export function App() {
   const [presets, setPresets] = useState<ChatPreset[]>(() => loadPresets());
   const [activePresetId, setActivePresetId] = useState<string>(() => loadActivePresetId(loadPresets()));
   const [worldbook, setWorldbook] = useState<WorldbookEntry[]>(() => loadWorldbook());
-  const [campaign, setCampaign] = useState(() => loadCampaignState());
   const [manualDisguiseOpen, setManualDisguiseOpen] = useState(false);
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
@@ -453,6 +459,7 @@ export function App() {
           id,
           speaker: next.speaker,
           text: next.text,
+          msgKind: next.msgKind ?? 'speech',
           contactDy,
           dropDy,
         });
@@ -475,6 +482,7 @@ export function App() {
                 sender: 'opponent',
                 speaker: next.speaker,
                 text: next.text,
+                msgKind: next.msgKind ?? 'speech',
                 crushed: false,
               },
             ];
@@ -532,6 +540,23 @@ export function App() {
     [processNextTask]
   );
 
+  const enqueueOpponentSegments = useCallback(
+    (speaker: string, segments: ChatDialogueSegment[]) => {
+      const capped = segments.slice(0, 3);
+      for (const seg of capped) {
+        const cleanText = seg.text.trim().slice(0, 200);
+        if (!cleanText) continue;
+        enqueueTask({
+          kind: 'opponent',
+          speaker,
+          text: cleanText,
+          msgKind: seg.kind,
+        });
+      }
+    },
+    [enqueueTask]
+  );
+
   // One-shot opening speech on mount
   useEffect(() => {
     if (hasBootedRef.current) return;
@@ -559,6 +584,7 @@ export function App() {
   useEffect(() => {
     setShowRaiseTiers(false);
     setScanMode(false);
+    setPendingSkillTargetId(null);
     setHoldProgress(0);
     if (holdIntervalRef.current !== null) {
       window.clearInterval(holdIntervalRef.current);
@@ -681,11 +707,7 @@ export function App() {
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
           setActiveExpression(llmDecision.expression);
-          enqueueTask({
-            kind: 'opponent',
-            speaker: char.name,
-            text: llmDecision.reply,
-          });
+          enqueueOpponentSegments(char.name, llmDecision.segments);
           setState((prev) => {
             if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
             return applyAction(prev, llmDecision.action);
@@ -827,7 +849,7 @@ export function App() {
         if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
         if (enc.fromLlm) {
           setActiveExpression(enc.expression);
-          enqueueTask({ kind: 'opponent', speaker: currChar.name, text: enc.reply });
+          enqueueOpponentSegments(currChar.name, enc.segments);
         }
       });
     } else if (state.players.human.chips === 0) {
@@ -855,11 +877,11 @@ export function App() {
         if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
         if (enc.fromLlm) {
           setActiveExpression(enc.expression);
-          enqueueTask({ kind: 'opponent', speaker: currChar.name, text: enc.reply });
+          enqueueOpponentSegments(currChar.name, enc.segments);
         }
       });
     }
-  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, scheduleTimeout]);
+  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, enqueueOpponentSegments, scheduleTimeout]);
 
   const cancelHoldHalfRaise = useCallback(() => {
     if (holdIntervalRef.current !== null) {
@@ -876,6 +898,7 @@ export function App() {
     setDragOverBoardIndex(null);
     setShowRaiseTiers(false);
     setScanMode(false);
+    setPendingSkillTargetId(null);
     setState((prev) => applyAction(prev, action));
   };
 
@@ -915,7 +938,7 @@ export function App() {
     const action: GameAction = { type: 'hack', handIndex: selectedHandIndex, skill };
     if (!isActionLegal(state, action)) {
       const hc = state.players.human.hand[selectedHandIndex];
-      const cost = getHackSkillCost(state, skill);
+      const cost = getEffectiveHackCost(state, 'human', skill);
       if (state.players.human.chips < cost) {
         pushToast('warn', `算力不足（需预支 ${cost}）`);
       } else if (!hc || hc.visibility !== 'open') {
@@ -927,6 +950,57 @@ export function App() {
     }
     setState((prev) => applyAction(prev, action));
     pushToast('info', '黑客协议注入成功', '改变结果仅己方可见，且可继续交换或行动');
+  };
+
+  const handleUseAcquiredSkill = (skillId: string) => {
+    if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
+    if (getBetDiff(state, 'human') > 0) {
+      pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能释放掠夺技能');
+      return;
+    }
+    if (state.usedProtocolSkillThisHand) {
+      pushToast('warn', '本局已释放过掠夺技能', '每小局最多激活 1 次主动掠夺技能');
+      return;
+    }
+    const sk = getSkillById(skillId);
+    if (!sk || sk.targetMode === 'passive') return;
+
+    if (sk.targetMode === 'hidden-board') {
+      if (hiddenCount === 0) {
+        pushToast('warn', '桌面已无未公开暗槽');
+        return;
+      }
+      setPendingSkillTargetId((prev) => (prev === skillId ? null : skillId));
+      setScanMode(false);
+      setSelectedHandIndex(null);
+      return;
+    }
+
+    let targetIndex = 0;
+    if (sk.targetMode === 'human-open-hand') {
+      if (selectedHandIndex === null) {
+        pushToast('warn', '请先点击一张己方明牌', `选中明牌后再点击「${sk.name}」`);
+        return;
+      }
+      targetIndex = selectedHandIndex;
+    } else if (sk.targetMode === 'human-locked-hand') {
+      const lockedIdx = state.players.human.hand.findIndex(
+        (h) => h.visibility === 'private' && h.lockedFromSwap
+      );
+      if (lockedIdx < 0) {
+        pushToast('warn', '当前没有被锁定的己方私有暗牌');
+        return;
+      }
+      targetIndex = lockedIdx;
+    }
+
+    const action: GameAction = { type: 'use-skill', skillId, targetIndex };
+    if (!isActionLegal(state, action)) {
+      pushToast('warn', `无法释放「${sk.name}」`, `请确认可用算力是否充足（需 ${sk.costHint ?? 40}）`);
+      return;
+    }
+    executeHumanAction(action);
+    pushToast('success', `已激活「${sk.name}」`, sk.summary);
   };
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
@@ -986,6 +1060,29 @@ export function App() {
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     const slot = state.board[boardIndex];
     if (!slot || slot.isOpen) return;
+
+    if (pendingSkillTargetId) {
+      const action: GameAction = {
+        type: 'use-skill',
+        skillId: pendingSkillTargetId,
+        targetIndex: boardIndex,
+      };
+      if (!isActionLegal(state, action)) {
+        pushToast('warn', '当前暗槽不可作为该技能目标或算力不足');
+        setPendingSkillTargetId(null);
+        return;
+      }
+      const sk = getSkillById(pendingSkillTargetId);
+      executeHumanAction(action);
+      pushToast(
+        'success',
+        `「${sk?.name ?? pendingSkillTargetId}」生效`,
+        pendingSkillTargetId === 'zero-day-peek'
+          ? `窥视节点 #${boardIndex + 1}：${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
+          : `暗槽 #${boardIndex + 1} 已对对端封锁换牌`
+      );
+      return;
+    }
 
     const diff = getBetDiff(state, 'human');
     if (diff > 0) {
@@ -1073,7 +1170,11 @@ export function App() {
     setState((prev) => startNextHand(prev));
   };
 
-  const performFullReset = (customConfig?: GameConfig, nextCharacter?: ContractCharacter) => {
+  const performFullReset = (
+    customConfig?: GameConfig,
+    nextCharacter?: ContractCharacter,
+    overrideAcquiredSkills?: string[]
+  ) => {
     const targetChar = nextCharacter ?? character;
     const cfg = customConfig ?? state.config;
     for (const id of timersRef.current) {
@@ -1089,6 +1190,7 @@ export function App() {
     setSelectedHandIndex(null);
     setDraggedHandIndex(null);
     setShowRaiseTiers(false);
+    setPendingSkillTargetId(null);
     setVfxTestMode('auto');
     setRoundLossFlicker(false);
     setAiRoundLossFlicker(false);
@@ -1098,6 +1200,7 @@ export function App() {
     const freshState = createInitialState({
       config: cfg,
       opponentName: targetChar.name,
+      playerAcquiredSkills: overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
     });
     setState(freshState);
     setMessages([
@@ -1127,7 +1230,8 @@ export function App() {
     const nextDossier = buildPursuerDossier(nextChar, nextCamp.roundIndex);
     const freshState = performFullReset(
       { ...state.config, aiStyle: deriveAiStyleFromCharacter(nextChar) },
-      nextChar
+      nextChar,
+      nextCamp.acquiredSkills
     );
     const arrive = await requestEncounterDialogue({
       eventKind: 'pursuer-arrive',
@@ -1143,7 +1247,7 @@ export function App() {
       setLlmLogs((p) => [arrive.logEntry!, ...p].slice(0, 40));
     }
     setActiveExpression(arrive.expression);
-    enqueueTask({ kind: 'opponent', speaker: nextChar.name, text: arrive.reply });
+    enqueueOpponentSegments(nextChar.name, arrive.segments);
   };
 
   const handleSwitchContractFile = async (fileName: string) => {
@@ -1241,11 +1345,7 @@ export function App() {
       setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
     }
     setActiveExpression(res.expression);
-    enqueueTask({
-      kind: 'opponent',
-      speaker: character.name,
-      text: res.reply,
-    });
+    enqueueOpponentSegments(character.name, res.segments);
   };
 
   const handleReplayBubble = () => {
@@ -1607,15 +1707,24 @@ export function App() {
                   ? `原:${formatSuitLabel(slot.originalCard.suit)}${formatRank(slot.originalCard.rank)}`
                   : undefined;
 
+              const isPeeked = isHidden && state.peekedBoardIndices.includes(slot.index);
+              const isFrozen = isHidden && state.frozenBoardIndices.includes(slot.index);
+              const nodeBackCode = isPeeked
+                ? `窥:${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
+                : isFrozen
+                  ? '锁槽'
+                  : `节点0${slot.index + 1}`;
               const hint = canScanBoard
-                ? `点击扫描对端换出的节点 #${slot.index + 1}（预支 ${state.config.scanCost}）`
-                : !clickableHidden
-                  ? undefined
-                  : draggedHandIndex !== null
-                    ? `松手将手牌 #${draggedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
-                    : selectedHandIndex !== null
-                      ? `点击将手牌 #${selectedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
-                      : `点击直接免费翻开节点 #${slot.index + 1}`;
+                ? `点击扫描对端换出的节点 #${slot.index + 1}（预支 ${getEffectiveScanCost(state, 'human')}）`
+                : pendingSkillTargetId && isHidden
+                  ? `点击对暗槽 #${slot.index + 1} 释放「${getSkillById(pendingSkillTargetId)?.name ?? '技能'}」`
+                  : !clickableHidden
+                    ? undefined
+                    : draggedHandIndex !== null
+                      ? `松手将手牌 #${draggedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
+                      : selectedHandIndex !== null
+                        ? `点击将手牌 #${selectedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
+                        : `点击直接免费翻开节点 #${slot.index + 1}`;
 
               return (
                 <CyberCard3D
@@ -1624,8 +1733,8 @@ export function App() {
                   card={showFace ? visibleBoardCard : undefined}
                   faceDown={!showFace}
                   size="md"
-                  backCode={`节点0${slot.index + 1}`}
-                  targetable={clickableHidden && diff === 0}
+                  backCode={nodeBackCode}
+                  targetable={clickableHidden && (diff === 0 || Boolean(pendingSkillTargetId))}
                   isDropTarget={isDropTarget}
                   isDropHover={isDropHover}
                   isSwappingHidden={isSwappingHidden}
@@ -1701,50 +1810,35 @@ export function App() {
           </div>
         </section>
 
-        {/* COL 2, ROW 3: Player Avatar Dock (Left) + 3 Cards + Hacker & Scan Skill Bar */}
+        {/* COL 2, ROW 3: Player Pure Portrait Avatar (Left) + 3 Cards + Hacker & Scan Skill Bar */}
         <section
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
           aria-label="己方手牌序列区"
         >
           <div className="lc-player-main-split">
-            <div
-              className={`lc-player-avatar-dock ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
+            <button
+              id="player-btn-switch-disguise"
+              type="button"
+              className={`lc-player-avatar-only ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
               style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
+              onClick={() => {
+                if (state.handNumber === 1 && state.actionHistory.length === 0) {
+                  setManualDisguiseOpen(true);
+                } else if (campaign.capturedEntities.length === 0) {
+                  pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
+                } else {
+                  pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
+                }
+              }}
+              title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
+              aria-label={`当前出战虚拟实体头像：${activeDisguise.name}`}
             >
-              <div className="lc-avatar-frame">
-                <img
-                  src={activeDisguise.virtualPortrait}
-                  alt={activeDisguise.name}
-                  className="lc-avatar-img"
-                />
-                <span className={`lc-avatar-badge ${activeDisguise.isCore ? 'core' : 'decoy'}`}>
-                  {activeDisguise.isCore ? '本体' : '诱饵'}
-                </span>
-              </div>
-              <div className="lc-avatar-name" title={activeDisguise.name}>
-                {activeDisguise.codename}
-              </div>
-              <div className="lc-avatar-meta">
-                通缉 LV.{campaign.wantedLevel} · 诱饵 {campaign.capturedEntities.length}
-              </div>
-              <button
-                id="player-btn-switch-disguise"
-                type="button"
-                className="lc-avatar-switch-btn"
-                onClick={() => {
-                  if (state.handNumber === 1 && state.actionHistory.length === 0) {
-                    setManualDisguiseOpen(true);
-                  } else if (campaign.capturedEntities.length === 0) {
-                    pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
-                  } else {
-                    pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
-                  }
-                }}
-                title="每局开战前可选择俘获的虚拟实体作为伪装诱饵"
-              >
-                {campaign.capturedEntities.length > 0 ? '切换伪装' : '伪装库(0)'}
-              </button>
-            </div>
+              <img
+                src={activeDisguise.virtualPortrait}
+                alt={activeDisguise.name}
+                className="lc-avatar-only-img"
+              />
+            </button>
 
             <div className="lc-player-cards-col">
               <div className="lc-status-strip" style={{ width: '100%' }}>
@@ -1825,21 +1919,21 @@ export function App() {
                       id: 'hack-btn-plus-one',
                       skill: 'plus-one' as const,
                       label: '+1',
-                      cost: state.config.hackPlusCost,
+                      cost: getEffectiveHackCost(state, 'human', 'plus-one'),
                       icon: <PixelPlusOneIcon size={12} />,
                     },
                     {
                       id: 'hack-btn-minus-one',
                       skill: 'minus-one' as const,
                       label: '-1',
-                      cost: state.config.hackMinusCost,
+                      cost: getEffectiveHackCost(state, 'human', 'minus-one'),
                       icon: <PixelMinusOneIcon size={12} />,
                     },
                     {
                       id: 'hack-btn-flip-suit',
                       skill: 'flip-suit' as const,
                       label: '反色',
-                      cost: state.config.hackFlipSuitCost,
+                      cost: getEffectiveHackCost(state, 'human', 'flip-suit'),
                       icon: <PixelFlipSuitIcon size={12} />,
                     },
                   ] as const
@@ -1876,21 +1970,69 @@ export function App() {
                   id="hack-btn-scan-toggle"
                   type="button"
                   className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
-                  disabled={!isHumanTurn || diff > 0 || state.usedScanThisTurn || human.chips < state.config.scanCost}
-                  onClick={() => setScanMode((s) => !s)}
+                  disabled={
+                    !isHumanTurn ||
+                    diff > 0 ||
+                    state.usedScanThisTurn ||
+                    human.chips < getEffectiveScanCost(state, 'human')
+                  }
+                  onClick={() => {
+                    setPendingSkillTargetId(null);
+                    setScanMode((s) => !s);
+                  }}
                   title={
                     diff > 0
                       ? '遭遇加注，请先在右侧跟注后再进行扫描'
                       : state.usedScanThisTurn
                         ? '扫描技能每回合限用 1 次'
-                        : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${state.config.scanCost}，每回合限 1 次）`
+                        : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${getEffectiveScanCost(
+                            state,
+                            'human'
+                          )}，每回合限 1 次）`
                   }
                 >
                   <PixelScanIcon size={12} />
                   <span>{state.usedScanThisTurn ? '已用' : scanMode ? '取消' : '扫描'}</span>
-                  {!state.usedScanThisTurn && <span className="lc-hack-cost">{state.config.scanCost}</span>}
+                  {!state.usedScanThisTurn && (
+                    <span className="lc-hack-cost">{getEffectiveScanCost(state, 'human')}</span>
+                  )}
                 </button>
               </div>
+
+              {campaign.acquiredSkills.length > 0 && (
+                <div className="lc-acquired-skill-bar" role="group" aria-label="已掠夺协议技能槽">
+                  {campaign.acquiredSkills.map((sid, sIdx) => {
+                    const sk = getSkillById(sid);
+                    if (!sk) return null;
+                    const isPassive = sk.targetMode === 'passive';
+                    const isTargeting = pendingSkillTargetId === sid;
+                    const cost = sk.costHint ?? 0;
+                    const disabled =
+                      isPassive ||
+                      !isHumanTurn ||
+                      diff > 0 ||
+                      state.usedProtocolSkillThisHand ||
+                      human.chips < cost;
+                    return (
+                      <button
+                        key={sid}
+                        id={`acquired-skill-btn-${sIdx}`}
+                        type="button"
+                        className={`lc-acquired-skill-chip ${isPassive ? 'is-passive' : ''} ${
+                          isTargeting ? 'is-targeting' : ''
+                        }`}
+                        disabled={disabled}
+                        onClick={() => handleUseAcquiredSkill(sid)}
+                        title={sk.summary}
+                      >
+                        <span>{isTargeting ? `选暗槽:${sk.name}` : sk.name}</span>
+                        {!isPassive && <span className="lc-hack-cost">{cost}</span>}
+                        {isPassive && <span className="lc-hack-cost">被动</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="lc-player-footer">
                 <span>
@@ -1942,7 +2084,9 @@ export function App() {
             {floatingBubble && (
               <div
                 key={floatingBubble.id}
-                className="lc-speech-bubble"
+                className={`lc-speech-bubble ${
+                  floatingBubble.msgKind === 'thought' ? 'is-thought' : ''
+                }`}
                 style={
                   {
                     '--contact-dy': `${floatingBubble.contactDy}px`,
@@ -1962,7 +2106,7 @@ export function App() {
                 </svg>
                 <div className="lc-chat-meta opponent">
                   <span>{floatingBubble.speaker}</span>
-                  <span>OPP</span>
+                  <span>{floatingBubble.msgKind === 'thought' ? 'THOUGHT' : 'OPP'}</span>
                 </div>
                 <div>{floatingBubble.text}</div>
               </div>
@@ -2009,11 +2153,11 @@ export function App() {
                   return (
                     <article
                       key={msg.id}
-                      className={`lc-chat-msg ${msg.sender} ${msg.anim ?? ''} ${
-                        isCrushingNow ? 'is-crushing-now' : ''
-                      } ${isScrolledAbove ? 'is-scrolled-above' : ''} ${
-                        isEnteringBottom ? 'enter-from-bottom' : ''
-                      }`}
+                      className={`lc-chat-msg ${msg.sender} ${
+                        msg.msgKind === 'thought' ? 'is-thought' : ''
+                      } ${msg.anim ?? ''} ${isCrushingNow ? 'is-crushing-now' : ''} ${
+                        isScrolledAbove ? 'is-scrolled-above' : ''
+                      } ${isEnteringBottom ? 'enter-from-bottom' : ''}`}
                       style={
                         msg.riseDy !== undefined
                           ? ({ '--rise-dy': `${msg.riseDy}px` } as CSSProperties)
@@ -2023,7 +2167,13 @@ export function App() {
                       <div className="lc-chat-msg-inner">
                         <div className={`lc-chat-meta ${msg.sender}`}>
                           <span>{msg.speaker}</span>
-                          <span>{msg.sender === 'opponent' ? 'OPP' : 'YOU'}</span>
+                          <span>
+                            {msg.sender === 'opponent'
+                              ? msg.msgKind === 'thought'
+                                ? 'THOUGHT'
+                                : 'OPP'
+                              : 'YOU'}
+                          </span>
                         </div>
                         <div>{msg.text}</div>
                       </div>
@@ -2058,7 +2208,7 @@ export function App() {
                 className="lc-chat-input"
                 placeholder={`向 ${character.name} 发送消息...`}
                 value={chatDraft}
-                maxLength={120}
+                maxLength={200}
                 onChange={(e) => setChatDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
@@ -2637,7 +2787,7 @@ export function App() {
               const fresh = createInitialCampaign(campaign.playerCodename);
               setCampaign(fresh);
               setManualDisguiseOpen(false);
-              performFullReset();
+              performFullReset(undefined, undefined, []);
               pushToast('success', '已重构黑域本体档案，重新开始潜行');
             }}
             onCloseOptional={
