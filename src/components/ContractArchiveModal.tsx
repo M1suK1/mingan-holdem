@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Check, FileUp, Search, Sparkles, UserCheck, Users, X } from 'lucide-react';
 import type { ContractExpression } from '../engine/types.ts';
 import {
@@ -220,11 +220,23 @@ export default function ContractArchiveModal({
           ) : (
             <div className="dossier-split-grid">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className={`portrait-viewport ${previewOverload ? 'overload' : ''}`} style={{ height: 310 }}>
+                <div
+                  className="px-portrait-stage"
+                  style={
+                    {
+                      height: 300,
+                      '--win-accent': previewOverload
+                        ? '#FF4757'
+                        : activeCharacter.color || '#FF2E88',
+                    } as CSSProperties
+                  }
+                >
+                  <div className="px-portrait-dither" />
                   <img
                     src={resolveCharacterPortrait(activeCharacter, previewExpr, previewOverload)}
                     alt={`${activeCharacter.name}档案预览`}
-                    className="opponent-portrait-img"
+                    className="px-portrait-halfbody"
+                    style={{ maxHeight: 296 }}
                   />
                 </div>
                 <div className="expression-strip">

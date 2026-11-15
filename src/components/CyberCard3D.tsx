@@ -13,6 +13,7 @@ interface CyberCard3DProps {
   selected?: boolean;
   targetable?: boolean;
   isWinner?: boolean;
+  actionHint?: string;
   onClick?: () => void;
 }
 
@@ -21,12 +22,13 @@ export function CyberCard3D({
   card,
   faceDown = false,
   size = 'md',
-  backCode = 'ICE_NODE',
+  backCode = '暗码',
   isOwnPrivate = false,
   justActed = false,
   selected = false,
   targetable = false,
   isWinner = false,
+  actionHint,
   onClick,
 }: CyberCard3DProps) {
   const isPink = card?.suit === 'P';
@@ -35,7 +37,7 @@ export function CyberCard3D({
   const interactive = Boolean(onClick);
 
   const bodyClasses = [
-    'cyber-card-3d',
+    'px-card-3d',
     faceDown ? 'is-facedown' : '',
     interactive ? 'clickable' : '',
     selected ? 'is-selected' : '',
@@ -45,8 +47,8 @@ export function CyberCard3D({
     .join(' ');
 
   const frontClasses = [
-    'cyber-card-face',
-    'cyber-card-front',
+    'px-card-face',
+    'px-card-front',
     isPink ? 'suit-P' : 'suit-B',
     isOwnPrivate ? 'own-private-blink' : '',
     justActed ? 'acted-flash' : '',
@@ -55,21 +57,24 @@ export function CyberCard3D({
     .filter(Boolean)
     .join(' ');
 
-  const centerSize = size === 'sm' ? 20 : size === 'lg' ? 30 : 26;
+  const centerSize = size === 'sm' ? 20 : size === 'lg' ? 28 : 24;
   const cornerSize = size === 'sm' ? 11 : 13;
 
   const ariaLabel = faceDown
-    ? `加密卡牌 ${backCode}`
-    : `${suitName}色 ${rankTxt}${isOwnPrivate ? '（己方私有暗牌）' : ''}`;
+    ? `加密卡牌 ${backCode}${actionHint ? `（${actionHint}）` : ''}`
+    : `${suitName}色 ${rankTxt}${isOwnPrivate ? '（己方私有暗牌）' : ''}${
+        actionHint ? `（${actionHint}）` : ''
+      }`;
 
   return (
-    <div className={`cyber-card-scene sz-${size}`}>
+    <div className={`px-card-scene sz-${size}`}>
       <div
         id={id}
         className={bodyClasses}
         onClick={onClick}
         role={interactive ? 'button' : 'img'}
         aria-label={ariaLabel}
+        title={actionHint}
         tabIndex={interactive ? 0 : undefined}
         onKeyDown={
           interactive
@@ -83,32 +88,30 @@ export function CyberCard3D({
         }
       >
         <div className={frontClasses}>
-          <div className="card-holo-sheen" />
-          <div className="card-corner-row">
-            <span className={`card-rank-txt ${isPink ? 'rank-pink' : 'rank-black'}`}>
+          <div className="px-card-corner">
+            <span className={`px-card-rank ${isPink ? 'rank-pink' : 'rank-black'}`}>
               {rankTxt}
             </span>
             {card && <CyberSuitEmblem suit={card.suit} size={cornerSize} />}
           </div>
 
-          <div className="card-center-emblem">
+          <div className="px-card-center">
             {card && <CyberSuitEmblem suit={card.suit} size={centerSize} />}
           </div>
 
-          <div className="card-corner-row bottom">
-            <span className={`card-rank-txt ${isPink ? 'rank-pink' : 'rank-black'}`}>
+          <div className="px-card-corner bottom">
+            <span className={`px-card-rank ${isPink ? 'rank-pink' : 'rank-black'}`}>
               {rankTxt}
             </span>
             {card && <CyberSuitEmblem suit={card.suit} size={cornerSize} />}
           </div>
         </div>
 
-        <div className="cyber-card-face cyber-card-back">
-          <div className="card-holo-sheen" />
-          <div className="ice-hex-core">
-            <div className="ice-hex-dot" />
+        <div className="px-card-face px-card-back">
+          <div className="px-back-grid-icon" aria-hidden="true">
+            <span />
           </div>
-          <span className="ice-slot-code">{backCode}</span>
+          <span className="px-back-code">{backCode}</span>
         </div>
       </div>
     </div>

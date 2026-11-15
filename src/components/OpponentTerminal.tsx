@@ -1,14 +1,22 @@
-import { Cpu, Flame, FolderOpen, Sparkles, UserCheck } from 'lucide-react';
-import type { ContractExpression } from '../engine/types.ts';
+import { Cpu, Flame, FolderOpen, Layers, UserCheck } from 'lucide-react';
+import type {
+  ContractExpression,
+  GameState,
+  VisibleHandSummary,
+} from '../engine/types.ts';
 import {
   CONTRACT_EXPRESSIONS,
   EXPRESSION_META,
   resolveCharacterPortrait,
   type ContractCharacter,
 } from '../engine/contractCards.ts';
+import { PixelWindow } from './PixelWindow.tsx';
+import { CyberCard3D } from './CyberCard3D.tsx';
 
 interface OpponentTerminalProps {
+  state: GameState;
   character: ContractCharacter;
+  opponentSummary: VisibleHandSummary;
   activeExpression: ContractExpression;
   overloadMode: boolean;
   isAiTurn: boolean;
@@ -19,8 +27,15 @@ interface OpponentTerminalProps {
   onOpenArchive: () => void;
 }
 
+/**
+ * Top-Center Dual-Window Block:
+ * 1) Left Window: Opponent's 3 Hand Cards + Live Hand Rank + Remaining Credits
+ * 2) Center Window: Opponent Half-Body Portrait wrapped in a Pixel Windows Frame tinted with character.color!
+ */
 export function OpponentTerminal({
+  state,
   character,
+  opponentSummary,
   activeExpression,
   overloadMode,
   isAiTurn,
@@ -30,39 +45,103 @@ export function OpponentTerminal({
   onToggleOverload,
   onOpenArchive,
 }: OpponentTerminalProps) {
+  const ai = state.players.ai;
+  const isShowdown = state.phase === 'showdown';
+  const revealAll = isShowdown || state.config.revealOpponentHidden;
+  const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
+  const evt = state.lastAction;
+
   const portraitSrc = resolveCharacterPortrait(character, activeExpression, overloadMode);
   const exprMeta = EXPRESSION_META[activeExpression];
+  const signatureColor = overloadMode ? '#FF4757' : character.color || '#FF2E88';
 
   return (
-    <aside
-      className={`cyber-window ${isAiTurn ? 'active-turn-window' : ''}`}
-      aria-label="契约对手监控窗口"
-    >
-      <div className="window-titlebar">
-        <div className="window-title-left">
-          <span className="win-dots" aria-hidden="true">
-            <span className="win-dot pink" />
-            <span className="win-dot cyan" />
+    <div className="opponent-top-deck" role="region" aria-label="对端手牌与角色立绘区">
+      {/* LEFT OF PORTRAIT: Opponent's 3 Cards Window */}
+      <PixelWindow
+        title={`对端序列 · ${ai.name}`}
+        code="OPP_DECK"
+        accentColor="#26365e"
+        icon={<Layers size={13} color="var(--neon-pink-300)" aria-hidden="true" />}
+        activeGlow={isAiTurn}
+        bodyClassName="opp-cards-win-body"
+      >
+        <div
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            fontSize: 11.5,
+          }}
+        >
+          <span className="cyber-badge pink">
+            牌型：{opponentSummary.label} · {opponentSummary.detail}
           </span>
-          <UserCheck size={14} color="var(--accent-primary)" aria-hidden="true" />
-          <span>契约对手显像</span>
+          <span className="cyber-badge cyan">算力 {ai.chips}</span>
         </div>
-        <span className="win-pid">WIN://OPPONENT_LINK</span>
-      </div>
 
-      <div className="opponent-window-body">
-        <div className={`portrait-viewport ${overloadMode ? 'overload' : ''}`}>
+        <div className="cards-row-flex">
+          {ai.hand.map((hc, idx) => {
+            const isPrivate = hc.visibility === 'private';
+            const showFace = !isPrivate || revealAll;
+            return (
+              <CyberCard3D
+                key={`ai-hand-${idx}`}
+                id={`opponent-hand-card-${idx}`}
+                card={showFace ? hc.card : undefined}
+                faceDown={!showFace}
+                size="sm"
+                backCode="暗码"
+                justActed={Boolean(
+                  evt && evt.actor === 'ai' && evt.type === 'swap' && evt.handIndex === idx
+                )}
+                isWinner={
+                  isShowdown && state.result?.winner === 'ai' && aiWinIds.has(hc.card.id)
+                }
+              />
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: 11,
+            color: 'var(--text-muted)',
+          }}
+        >
+          <span>{ai.roundBet > 0 ? `本轮已注: ${ai.roundBet}` : '本轮待注'}</span>
+          <span>已换牌: {ai.swapCount} 次</span>
+        </div>
+      </PixelWindow>
+
+      {/* CENTER: Half-Body Opponent Portrait in Signature-Color Pixel Windows Frame */}
+      <PixelWindow
+        title={`${character.name} [${character.title}]`}
+        code={character.codename}
+        accentColor={signatureColor}
+        icon={<UserCheck size={13} color="#ffffff" aria-hidden="true" />}
+        activeGlow={isAiTurn}
+        bodyClassName="opp-portrait-win-body"
+      >
+        <div className="px-portrait-stage">
+          <div className="px-portrait-dither" />
           <img
             src={portraitSrc}
-            alt={`${character.name}（${exprMeta.label}表情）`}
-            className="opponent-portrait-img"
-            width={268}
-            height={256}
+            alt={`${character.name}半身立绘（${exprMeta.label}表情）`}
+            className="px-portrait-halfbody"
+            width={380}
+            height={190}
           />
-          <div className="portrait-hud-overlay">
-            <div className="portrait-top-tags">
+          <div className="px-portrait-hud">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
               <span className="cyber-badge pink">
-                {isAiThinking ? '指令推演中...' : `${exprMeta.label} // ${exprMeta.cyberCode}`}
+                {isAiThinking ? '指令推演中...' : `${exprMeta.label} · ${exprMeta.cyberCode}`}
               </span>
               <span className={`cyber-badge ${llmEnabled ? 'cyan' : ''}`}>
                 <Cpu size={11} aria-hidden="true" />
@@ -70,36 +149,29 @@ export function OpponentTerminal({
               </span>
             </div>
 
-            <div className="portrait-bottom-name">
-              <div className="char-name-title">
-                <h2>{character.name}</h2>
-                <p>
-                  {character.title} · {character.codename}
-                </p>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 6 }}>
+              <span
+                style={{
+                  background: 'rgba(5, 8, 17, 0.85)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  padding: '2px 6px',
+                  fontSize: 11,
+                  color: 'var(--frost-100)',
+                  maxWidth: '72%',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                「{character.quote}」
+              </span>
               <span className="cyber-badge">{character.element}</span>
             </div>
           </div>
         </div>
 
-        {/* 6-Expression Live Switcher / Inspector */}
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 4,
-              fontSize: 11,
-              color: 'var(--text-muted)',
-            }}
-          >
-            <span>表情差分实时显像（随战况切换）</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>
-              {exprMeta.desc.slice(0, 12)}
-            </span>
-          </div>
-          <div className="expression-strip" role="group" aria-label="对手表情差分切换">
+        <div className="px-expr-bar">
+          <div className="expression-strip" style={{ flex: 1 }} role="group" aria-label="切换角色表情差分">
             {CONTRACT_EXPRESSIONS.map((expr) => (
               <button
                 key={expr}
@@ -113,72 +185,33 @@ export function OpponentTerminal({
               </button>
             ))}
           </div>
-        </div>
 
-        {/* 4D Stats from Night-Sugar-Office Contract Card */}
-        <div className="char-stat-mini-grid" aria-label="契约角色四维能力">
-          <div className="stat-mini-cell">
-            <span>魔力负荷</span>
-            <span className="stat-mini-val">{character.stats.magic}</span>
-          </div>
-          <div className="stat-mini-cell">
-            <span>数据洞察</span>
-            <span className="stat-mini-val">{character.stats.insight}</span>
-          </div>
-          <div className="stat-mini-cell">
-            <span>响应敏捷</span>
-            <span className="stat-mini-val">{character.stats.agility}</span>
-          </div>
-          <div className="stat-mini-cell">
-            <span>心防共感</span>
-            <span className="stat-mini-val">{character.stats.empathy}</span>
-          </div>
-        </div>
-
-        {/* Quote & Primary Trait */}
-        <div className="char-quote-box">「{character.quote}」</div>
-
-        {character.traits.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {character.traits.slice(0, 3).map((t) => (
-              <span
-                key={t.id}
-                className={`cyber-badge ${t.polarity === 'positive' ? 'cyan' : 'pink'}`}
-                title={t.description}
-              >
-                <Sparkles size={11} aria-hidden="true" />
-                {t.name}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Controls: Overload Persona & Switch Contract Card */}
-        <div className="cmd-grid cols-2" style={{ marginTop: 'auto' }}>
           <button
             id="opponent-btn-toggle-overload"
             type="button"
             className={`os-nav-btn ${overloadMode ? 'highlight' : ''}`}
-            style={{ justifyContent: 'center' }}
+            style={{ minHeight: 24, padding: '2px 7px', fontSize: 11 }}
             onClick={onToggleOverload}
             aria-pressed={overloadMode}
+            title="切换深层过载人格与差分"
           >
-            <Flame size={14} aria-hidden="true" />
-            {overloadMode ? '过载态已激活' : '切换过载人格'}
+            <Flame size={12} aria-hidden="true" />
+            过载
           </button>
 
           <button
             id="opponent-btn-open-contracts"
             type="button"
             className="os-nav-btn"
-            style={{ justifyContent: 'center' }}
+            style={{ minHeight: 24, padding: '2px 7px', fontSize: 11 }}
             onClick={onOpenArchive}
+            title="从夜糖契约档案库切换对手"
           >
-            <FolderOpen size={14} aria-hidden="true" />
-            更换契约对手
+            <FolderOpen size={12} aria-hidden="true" />
+            换人
           </button>
         </div>
-      </div>
-    </aside>
+      </PixelWindow>
+    </div>
   );
 }

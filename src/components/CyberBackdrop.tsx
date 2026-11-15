@@ -10,21 +10,20 @@ export const SITUATION_META: Record<
   BattleSituation,
   { label: string; code: string; firewallPct: number }
 > = {
-  recon: { label: '侦察潜伏', code: 'SEC_LEVEL_01 // RECON', firewallPct: 94 },
-  intrusion: { label: '协议交锋', code: 'SEC_LEVEL_02 // INTRUSION', firewallPct: 68 },
-  overclock: { label: '算力过载', code: 'SEC_LEVEL_03 // OVERCLOCK', firewallPct: 36 },
-  breach: { label: '核心熔断', code: 'CRITICAL // ALL_IN_BREACH', firewallPct: 8 },
-  victory: { label: '破译接管', code: 'ROOT_ACCESS // GRANTED', firewallPct: 100 },
-  disconnect: { label: '链路受阻', code: 'ICE_COUNTER // BLOCKED', firewallPct: 20 },
+  recon: { label: '侦察潜伏', code: 'PIXEL_OS // SEC_01_RECON', firewallPct: 94 },
+  intrusion: { label: '协议交锋', code: 'PIXEL_OS // SEC_02_INTRUSION', firewallPct: 68 },
+  overclock: { label: '算力过载', code: 'PIXEL_OS // SEC_03_OVERCLOCK', firewallPct: 36 },
+  breach: { label: '核心熔断', code: 'PIXEL_OS // ALERT_ALL_IN', firewallPct: 8 },
+  victory: { label: '破译接管', code: 'PIXEL_OS // ROOT_GRANTED', firewallPct: 100 },
+  disconnect: { label: '链路受阻', code: 'PIXEL_OS // ICE_BLOCKED', firewallPct: 20 },
 };
 
-const HEX_COLUMNS = [
-  '0x7F A4 19 C2 8E FF 01 4B',
-  'PKT::SYNC 99 2E 88 D0 41',
-  'ICE::NODE 00 F0 FF 7A 13',
-  'HASH::4C 9B E2 10 77 C8',
-  'PORT::5178 ACK 3D 9F 02',
-  'CIPHER::B0 P1 14 0E 6A',
+const PIXEL_STREAMS = [
+  '01001110 0x7F [SYN]',
+  '11010010 PKT::PINK',
+  '00110101 ICE::NODE',
+  '10101100 HASH::B0P1',
+  '01110010 PORT::5178',
 ];
 
 export const CyberBackdrop = memo(function CyberBackdrop({
@@ -33,55 +32,29 @@ export const CyberBackdrop = memo(function CyberBackdrop({
 }: CyberBackdropProps) {
   return (
     <div
-      className={`cyber-backdrop situation-${situation}`}
+      className={`px-backdrop situation-${situation}`}
       data-situation={situation}
       aria-hidden="true"
     >
-      {/* Dynamic radial aura responding to situation */}
-      <div className="cyber-aura-layer" />
+      <div className="px-dither-bg" />
+      <div className="px-grid-floor" />
 
-      {/* 3D perspective cyberspace matrix floor */}
-      <div className="cyber-grid-horizon">
-        <div className="cyber-grid-plane" />
-      </div>
-
-      {/* Vertical flowing packet telemetry columns */}
-      <div className="cyber-data-streams">
-        {HEX_COLUMNS.map((text, idx) => (
-          <div
-            key={idx}
-            className={`data-stream-col col-${idx + 1}`}
-            style={{ animationDuration: `${14 - Math.min(7, Math.floor(pot / 45)) + idx * 1.7}s` }}
-          >
-            <span>{text}</span>
-            <span>{text}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Dynamic Battleground Signal Waveform */}
+      {/* Stepped 8-bit square-wave telemetry line */}
       <svg
-        viewBox="0 0 1440 160"
+        viewBox="0 0 640 80"
         preserveAspectRatio="none"
-        style={{
-          position: 'absolute',
-          top: '18%',
-          left: 0,
-          width: '100%',
-          height: '140px',
-          opacity: situation === 'breach' || situation === 'overclock' ? 0.34 : 0.16,
-          transition: 'opacity 0.6s ease',
-        }}
+        shapeRendering="crispEdges"
+        className="px-wave-svg"
       >
         <path
           d={
             situation === 'breach'
-              ? 'M0,80 L180,80 L220,18 L260,142 L310,30 L360,130 L420,80 L720,80 L760,12 L810,148 L860,26 L920,80 L1440,80'
+              ? 'M0,40 H80 V10 H110 V70 H140 V16 H170 V64 H210 V40 H360 V8 H390 V72 H430 V20 H470 V40 H640'
               : situation === 'overclock'
-                ? 'M0,80 Q180,10 360,80 T720,80 T1080,80 T1440,80'
+                ? 'M0,40 H90 V20 H150 V60 H210 V20 H270 V40 H410 V18 H470 V62 H530 V40 H640'
                 : situation === 'intrusion'
-                  ? 'M0,80 Q240,42 480,80 T960,80 T1440,80'
-                  : 'M0,80 Q360,66 720,80 T1440,80'
+                  ? 'M0,40 H120 V28 H200 V52 H280 V40 H440 V28 H520 V52 H640'
+                  : 'M0,40 H200 V34 H280 V46 H360 V40 H640'
           }
           fill="none"
           stroke={
@@ -93,16 +66,24 @@ export const CyberBackdrop = memo(function CyberBackdrop({
                   ? '#10F5A0'
                   : '#00F0FF'
           }
-          strokeWidth="1.6"
+          strokeWidth="2"
         />
       </svg>
 
-      {/* Subtle CRT / Tactical HUD scanlines & corner brackets */}
-      <div className="cyber-scanlines" />
-      <div className="hud-corner corner-tl" />
-      <div className="hud-corner corner-tr" />
-      <div className="hud-corner corner-bl" />
-      <div className="hud-corner corner-br" />
+      <div className="px-data-rain">
+        {PIXEL_STREAMS.map((txt, idx) => (
+          <div
+            key={idx}
+            className="px-rain-col"
+            style={{ animationDuration: `${13 - Math.min(6, Math.floor(pot / 50)) + idx * 1.8}s` }}
+          >
+            <span>{txt}</span>
+            <span>{txt}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="px-crt-scanlines" />
     </div>
   );
 });

@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowLeftRight,
   ArrowRightCircle,
   Check,
-  Eye,
   Flame,
+  Grid,
+  Hand,
   RotateCcw,
   ShieldOff,
   Swords,
   Terminal,
+  XCircle,
 } from 'lucide-react';
 import type { GameAction, GameState, VisibleHandSummary } from '../engine/types.ts';
 import {
+  computeThreeRaisePresets,
   getBetDiff,
   getCurrentRaiseCap,
   getHiddenBoardCount,
@@ -20,23 +22,13 @@ import {
   getNextSwapFee,
   otherPlayer,
 } from '../engine/gameEngine.ts';
+import { PixelWindow } from './PixelWindow.tsx';
 import { CyberCard3D } from './CyberCard3D.tsx';
-import { ChipPushAnim, CyberChips } from './CyberChips.tsx';
-
-export type ConsoleMode =
-  | 'idle'
-  | 'pick-swap-hand'
-  | 'pick-swap-board'
-  | 'pick-flip'
-  | 'pick-raise';
 
 interface CyberTableArenaProps {
   state: GameState;
-  mode: ConsoleMode;
   selectedHandIndex: number | null;
   humanSummary: VisibleHandSummary;
-  opponentSummary: VisibleHandSummary;
-  onModeChange: (mode: ConsoleMode) => void;
   onSelectHumanCard: (handIndex: number) => void;
   onSelectBoardSlot: (boardIndex: number) => void;
   onClearSelection: () => void;
@@ -45,13 +37,18 @@ interface CyberTableArenaProps {
   onRequestResetMatch: () => void;
 }
 
+/**
+ * Middle + Bottom Pixel Windows:
+ * - Middle Window (below Opponent Portrait): 4 Community Cards (Direct click hidden card = Free Flip;
+ *   if player already clicked own open card = Direct Swap!)
+ * - Bottom Row:
+ *   - Left/Center Window: Player's 3 Hand Cards (Click open card to arm Swap)
+ *   - Right Window: Simplified Tactical Action Buttons (Raise -> 3 fixed amount choices, NO slider!)
+ */
 export function CyberTableArena({
   state,
-  mode,
   selectedHandIndex,
   humanSummary,
-  opponentSummary,
-  onModeChange,
   onSelectHumanCard,
   onSelectBoardSlot,
   onClearSelection,
@@ -59,36 +56,29 @@ export function CyberTableArena({
   onNextHand,
   onRequestResetMatch,
 }: CyberTableArenaProps) {
+  const [showRaiseChoices, setShowRaiseChoices] = useState(false);
+
+  useEffect(() => {
+    setShowRaiseChoices(false);
+  }, [state.handNumber, state.actionHistory.length, state.currentTurn]);
+
   const human = state.players.human;
   const ai = state.players.ai;
   const isShowdown = state.phase === 'showdown';
   const isHumanTurn = state.currentTurn === 'human' && !isShowdown;
-  const isAiTurn = state.currentTurn === 'ai' && !isShowdown;
-  const revealAll = isShowdown || state.config.revealOpponentHidden;
 
   const diff = getBetDiff(state, 'human');
   const paid = Math.min(diff, human.chips);
   const willBeAllIn = human.chips - paid === 0 || ai.allIn;
   const hiddenCount = getHiddenBoardCount(state);
   const swapFee = getNextSwapFee(state, 'human');
-  const hasSwappableHand = human.hand.some((h) => h.visibility === 'open' && !h.lockedFromSwap);
-  const canSwap = diff === 0 && hiddenCount > 0 && hasSwappableHand && human.chips >= swapFee;
-  const canFlip = diff === 0 && hiddenCount > 0;
   const raiseRange = getLegalRaiseRange(state, 'human', diff > 0 ? paid : 0);
+  const raisePresets = raiseRange.allowed
+    ? computeThreeRaisePresets(raiseRange.min, raiseRange.max)
+    : [];
   const raiseCap = getCurrentRaiseCap(state);
   const maxRaises = getMaxRaisesAllowed(state);
 
-  const [raiseAmt, setRaiseAmt] = useState<number>(raiseRange.min || 10);
-
-  useEffect(() => {
-    if (raiseRange.allowed) {
-      setRaiseAmt((prev) =>
-        Math.max(raiseRange.min, Math.min(raiseRange.max, prev || raiseRange.min))
-      );
-    }
-  }, [raiseRange.allowed, raiseRange.min, raiseRange.max]);
-
-  const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const boardWinIds = new Set(
     state.result?.winner === 'human'
@@ -99,623 +89,498 @@ export function CyberTableArena({
   );
 
   const evt = state.lastAction;
-  const showChipPush =
-    evt &&
-    (evt.type === 'raise' || evt.type === 'call' || evt.type === 'swap') &&
-    (evt.amount ?? 0) > 0;
 
-  const canPickHumanCard = mode === 'pick-swap-hand' || mode === 'pick-swap-board';
+  const fireAction = (action: GameAction) => {
+    setShowRaiseChoices(false);
+    onExecuteAction(action);
+  };
 
-  let tableStatus = '对手运算中';
-  let statusWarn = false;
-  if (isShowdown && state.result) {
-    tableStatus =
-      state.result.winner === 'tie'
-        ? '序列平分奖池'
-        : state.result.winner === 'human'
-          ? '我方破译获胜'
-          : `${ai.name}夺取奖池`;
-  } else if (mode === 'pick-flip') {
-    tableStatus = '点选加密节点破译';
-  } else if (mode === 'pick-swap-board') {
-    tableStatus = '点选加密节点置换';
-  } else if (isHumanTurn) {
-    if (diff > 0) {
-      tableStatus = `需同步差额 ${diff}`;
-      statusWarn = true;
-    } else if (state.justCalledThisTurn) {
-      tableStatus = '已跟注 · 请继续行动';
-    } else {
-      tableStatus = '我方回合控制权';
-    }
-  }
+  const boardGuideText = !isHumanTurn
+    ? isShowdown
+      ? '本轮核验完毕，可查看完整亮牌结果'
+      : `等待 ${ai.name} 执行回合动作...`
+    : diff > 0
+      ? `请先在右下指令窗点击「跟注同步 +${paid}」（不消耗动作），再点击牌面操作`
+      : selectedHandIndex !== null
+        ? `已选中我方手牌 #${selectedHandIndex + 1}：点击任意加密节点支付 ${swapFee} 互换（再次点击该手牌可取消）`
+        : hiddenCount > 0
+          ? `直觉操作：直接点击上方暗牌 = 免费翻牌 ｜ 先点下方己方明牌再点暗牌 = 付费换牌（门票 ${swapFee}）`
+          : '全部公共节点已破译，请在右下指令窗完成终局河牌决策';
 
   return (
-    <section className="center-battle-column" aria-label="赛博黑客攻防主战桌">
-      {/* Opponent Real-Time Rank & Credits Strip */}
-      <div className={`combatant-hud-strip ${isAiTurn ? 'is-ai-turn' : ''}`}>
-        <div className="combatant-id-group">
-          {isAiTurn && <span className="pulse-led pink" aria-hidden="true" />}
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>{ai.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>对端黑客节点</div>
-          </div>
+    <>
+      {/* MIDDLE WINDOW (Directly below Opponent Portrait): 4 Community Cards */}
+      <PixelWindow
+        title={`公共加密节点池 · 剩余暗牌 ${hiddenCount}/4`}
+        code="BOARD_4X"
+        accentColor="#1e315c"
+        icon={<Grid size={13} color="var(--accent-telemetry)" aria-hidden="true" />}
+        bodyClassName="community-win-body"
+      >
+        <div className="board-nodes-row">
+          {state.board.map((slot) => {
+            const isHidden = !slot.isOpen;
+            const clickableHidden = isHumanTurn && isHidden;
+            const revealDebug = isHidden && state.config.revealOpponentHidden;
+            const showFace = slot.isOpen || revealDebug;
+
+            const hint = !clickableHidden
+              ? undefined
+              : selectedHandIndex !== null
+                ? `点击将手牌 #${selectedHandIndex + 1} 与节点 #${slot.index + 1} 互换（消耗 ${swapFee}）`
+                : `点击直接免费翻开节点 #${slot.index + 1}`;
+
+            return (
+              <CyberCard3D
+                key={`board-slot-${slot.index}`}
+                id={`board-node-card-${slot.index}`}
+                card={showFace ? slot.card : undefined}
+                faceDown={!showFace}
+                size="md"
+                backCode={`节点0${slot.index + 1}`}
+                justActed={Boolean(
+                  evt &&
+                    (evt.type === 'flip' || evt.type === 'swap') &&
+                    evt.boardIndex === slot.index
+                )}
+                targetable={clickableHidden && diff === 0}
+                isWinner={isShowdown && boardWinIds.has(slot.card.id)}
+                actionHint={hint}
+                onClick={clickableHidden ? () => onSelectBoardSlot(slot.index) : undefined}
+              />
+            );
+          })}
         </div>
 
-        <div className="live-rank-readout" aria-live="polite">
-          <span className="live-rank-title">对方牌型：{opponentSummary.label}</span>
-          <span className="live-rank-sub">{opponentSummary.detail}</span>
-        </div>
+        <div className="direct-op-hint">{boardGuideText}</div>
+      </PixelWindow>
 
-        <div className="credits-readout">
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>剩余算力</span>
-          <span className="credits-amount" style={{ color: 'var(--neon-pink-300)' }}>
-            {ai.chips}
-          </span>
-        </div>
-      </div>
-
-      {/* 3D Holographic Cyber Table */}
-      <div className="cyber-table-stage">
-        <div className="cyber-table-surface">
-          {/* Far side: Opponent's 3 3D Cards + Bet Stack */}
-          <div className="table-row-opponent">
-            <div className="table-cards-trio">
-              {ai.hand.map((hc, idx) => {
-                const isPrivate = hc.visibility === 'private';
-                const showFace = !isPrivate || revealAll;
-                return (
-                  <CyberCard3D
-                    key={`ai-hand-${idx}`}
-                    id={`opponent-hand-card-${idx}`}
-                    card={showFace ? hc.card : undefined}
-                    faceDown={!showFace}
-                    size="sm"
-                    backCode="暗码"
-                    justActed={Boolean(
-                      evt && evt.actor === 'ai' && evt.type === 'swap' && evt.handIndex === idx
-                    )}
-                    isWinner={
-                      isShowdown && state.result?.winner === 'ai' && aiWinIds.has(hc.card.id)
-                    }
-                  />
-                );
-              })}
-            </div>
-
-            {ai.roundBet > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CyberChips amount={ai.roundBet} compact />
-                <span className="bet-chip-pill">对端注码 {ai.roundBet}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Center: 4 Encrypted Community Nodes + 3D Core Pot */}
-          <div className="table-row-center">
-            <div className="board-nodes-grid">
-              {state.board.map((slot) => {
-                const canClickHidden =
-                  !slot.isOpen && (mode === 'pick-flip' || mode === 'pick-swap-board');
-                const revealDebug = !slot.isOpen && state.config.revealOpponentHidden;
-                const showFace = slot.isOpen || revealDebug;
-
-                return (
-                  <CyberCard3D
-                    key={`board-slot-${slot.index}`}
-                    id={`board-node-card-${slot.index}`}
-                    card={showFace ? slot.card : undefined}
-                    faceDown={!showFace}
-                    size="md"
-                    backCode={`节点0${slot.index + 1}`}
-                    justActed={Boolean(
-                      evt &&
-                        (evt.type === 'flip' || evt.type === 'swap') &&
-                        evt.boardIndex === slot.index
-                    )}
-                    targetable={canClickHidden}
-                    isWinner={isShowdown && boardWinIds.has(slot.card.id)}
-                    onClick={canClickHidden ? () => onSelectBoardSlot(slot.index) : undefined}
-                  />
-                );
-              })}
-            </div>
-
-            <div className="core-pot-hub">
-              <CyberChips amount={state.pot} />
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' }}>
-                  奖池算力
-                </span>
-                <span className="pot-num-big">{state.pot}</span>
-              </div>
-              <span className={`pot-turn-tag ${statusWarn ? 'warn' : ''}`}>{tableStatus}</span>
-            </div>
-          </div>
-
-          {/* Near side: Your 3 3D Cards + Your Bet Stack */}
-          <div className="table-row-human">
-            <div className="table-cards-trio">
-              {human.hand.map((hc, idx) => {
-                const isPrivate = hc.visibility === 'private';
-                const selectableForSwap = canPickHumanCard && !isPrivate && !hc.lockedFromSwap;
-                return (
-                  <CyberCard3D
-                    key={`human-hand-${idx}`}
-                    id={`human-hand-card-${idx}`}
-                    card={hc.card}
-                    faceDown={false}
-                    size="lg"
-                    isOwnPrivate={isPrivate}
-                    justActed={Boolean(
-                      evt && evt.actor === 'human' && evt.type === 'swap' && evt.handIndex === idx
-                    )}
-                    selected={selectedHandIndex === idx}
-                    targetable={selectableForSwap && selectedHandIndex === null}
-                    isWinner={
-                      isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
-                    }
-                    onClick={selectableForSwap ? () => onSelectHumanCard(idx) : undefined}
-                  />
-                );
-              })}
-            </div>
-
-            {human.roundBet > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CyberChips amount={human.roundBet} compact />
-                <span className="bet-chip-pill">我方注码 {human.roundBet}</span>
-              </div>
-            )}
-          </div>
-
-          {showChipPush && evt && (
-            <ChipPushAnim eventId={evt.id} actor={evt.actor} amount={evt.amount!} />
-          )}
-        </div>
-      </div>
-
-      {/* Player Real-Time Rank & Credits Strip */}
-      <div className={`combatant-hud-strip ${isHumanTurn ? 'is-turn' : ''}`}>
-        <div className="combatant-id-group">
-          {isHumanTurn && <span className="pulse-led" aria-hidden="true" />}
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>我方终端 · 潜行黑客</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              闪烁边框代表己方私有暗牌（锁定不可再换）
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="live-rank-readout"
-          style={{
-            background: 'rgba(0, 240, 255, 0.1)',
-            borderColor: 'rgba(0, 240, 255, 0.42)',
-          }}
-          aria-live="polite"
+      {/* BOTTOM DECK: [Player's 3 Cards Window] + [Right-Side Tactical Action Buttons Window] */}
+      <div className="player-bottom-deck">
+        {/* Left/Center: Player's 3 Cards Window */}
+        <PixelWindow
+          title="己方手牌序列 · 潜行黑客"
+          code="MY_HAND"
+          accentColor="#193b4d"
+          icon={<Hand size={13} color="var(--accent-telemetry)" aria-hidden="true" />}
+          activeGlow={isHumanTurn}
+          bodyClassName="player-cards-win-body"
         >
-          <span className="live-rank-title">己方牌型：{humanSummary.label}</span>
-          <span className="live-rank-sub" style={{ color: 'var(--neon-cyan-300)' }}>
-            {humanSummary.detail}
-          </span>
-        </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              fontSize: 11.5,
+            }}
+          >
+            <span className="cyber-badge cyan">
+              己方牌型：{humanSummary.label} · {humanSummary.detail}
+            </span>
+            <span className="cyber-badge">可用算力 {human.chips}</span>
+          </div>
 
-        <div className="credits-readout">
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>可用算力</span>
-          <span className="credits-amount">{human.chips}</span>
-        </div>
-      </div>
+          <div className="cards-row-flex">
+            {human.hand.map((hc, idx) => {
+              const isPrivate = hc.visibility === 'private';
+              const canClickForSwap =
+                isHumanTurn && !isPrivate && !hc.lockedFromSwap && hiddenCount > 0;
+              const isSelected = selectedHandIndex === idx;
 
-      {/* Tactical Intrusion Action Console */}
-      <div className="command-console" role="region" aria-label="战术指令控制台">
-        {isShowdown && state.result ? (
-          <>
-            <div className="console-header-line">
-              <strong style={{ color: 'var(--accent-telemetry)' }}>
+              return (
+                <CyberCard3D
+                  key={`human-hand-${idx}`}
+                  id={`human-hand-card-${idx}`}
+                  card={hc.card}
+                  faceDown={false}
+                  size="lg"
+                  isOwnPrivate={isPrivate}
+                  justActed={Boolean(
+                    evt && evt.actor === 'human' && evt.type === 'swap' && evt.handIndex === idx
+                  )}
+                  selected={isSelected}
+                  actionHint={
+                    isPrivate
+                      ? '私有加密暗牌（已锁定不可再次换出）'
+                      : canClickForSwap
+                        ? isSelected
+                          ? '已选中：点击上方暗牌完成互换，或再次点击取消'
+                          : `点击选中手牌 #${idx + 1} 准备与上方暗牌互换（门票 ${swapFee}）`
+                        : undefined
+                  }
+                  isWinner={
+                    isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
+                  }
+                  onClick={canClickForSwap ? () => onSelectHumanCard(idx) : undefined}
+                />
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: 11,
+              color: 'var(--text-muted)',
+            }}
+          >
+            <span>闪烁边框 = 己方私有暗牌</span>
+            <span>换牌门票: {swapFee}（已换 {human.swapCount} 次）</span>
+          </div>
+        </PixelWindow>
+
+        {/* RIGHT OF PLAYER CARDS: Simplified Tactical Command Window (3 Raise Presets, Zero Slider!) */}
+        <PixelWindow
+          title="战术指令窗口"
+          code="CMD.BAT"
+          accentColor="#421636"
+          icon={<Terminal size={13} color="var(--neon-pink-300)" aria-hidden="true" />}
+          activeGlow={isHumanTurn}
+          bodyClassName="action-deck-win-body"
+        >
+          {isShowdown && state.result ? (
+            <>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--neon-cyan-300)' }}>
                 {state.result.winner === 'tie'
-                  ? `平局分池 · 双方各回收 ${state.result.payouts.human}`
+                  ? `平局分池 · 各得 ${state.result.payouts.human}`
                   : state.result.winner === 'human'
-                    ? `破译大捷 · 我方赢取总奖池 +${state.result.potWon}`
-                    : `${ai.name} 赢下本轮奖池 ${state.result.potWon}`}
-              </strong>
-              <span className="cmd-sub-meta">
-                {state.result.reason === 'showdown' &&
-                state.result.humanEval &&
-                state.result.aiEval
-                  ? `我方 [${state.result.humanEval.categoryName}] vs ${ai.name} [${state.result.aiEval.categoryName}]`
-                  : `${
-                      otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) ===
-                      'human'
-                        ? '我方'
-                        : ai.name
-                    } 主动断开连接`}
-              </span>
-            </div>
-            <div className="cmd-grid cols-2">
-              {human.chips > 0 && ai.chips > 0 ? (
+                    ? `破译大捷！赢取奖池 +${state.result.potWon}`
+                    : `${ai.name} 夺取奖池 ${state.result.potWon}`}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {state.result.reason === 'showdown' &&
+                  state.result.humanEval &&
+                  state.result.aiEval
+                    ? `我方 [${state.result.humanEval.categoryName}] vs 对端 [${state.result.aiEval.categoryName}]`
+                    : `${
+                        otherPlayer(
+                          state.result.winner === 'tie' ? 'human' : state.result.winner
+                        ) === 'human'
+                          ? '我方'
+                          : ai.name
+                      } 主动断开弃权`}
+                </div>
+              </div>
+
+              <div className="px-btn-grid cols-2">
+                {human.chips > 0 && ai.chips > 0 ? (
+                  <button
+                    id="console-btn-next-hand"
+                    type="button"
+                    className="px-cmd-btn cyan"
+                    onClick={() => {
+                      setShowRaiseChoices(false);
+                      onNextHand();
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <Swords size={14} aria-hidden="true" /> 下一局协议
+                    </span>
+                    <span className="cmd-sub-meta">第 #{state.handNumber + 1} 局</span>
+                  </button>
+                ) : (
+                  <button
+                    id="console-btn-match-over-restart"
+                    type="button"
+                    className="px-cmd-btn pink"
+                    onClick={onRequestResetMatch}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <RotateCcw size={14} aria-hidden="true" />{' '}
+                      {human.chips > 0 ? '完胜！重开' : '算力归零！重开'}
+                    </span>
+                    <span className="cmd-sub-meta">恢复 {state.config.startingChips}</span>
+                  </button>
+                )}
+
                 <button
-                  id="console-btn-next-hand"
+                  id="console-btn-reset-match"
                   type="button"
-                  className="cyber-cmd-btn primary-cyan"
-                  onClick={onNextHand}
-                >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <Swords size={15} aria-hidden="true" /> 载入下一局协议
-                  </span>
-                  <span className="cmd-sub-meta">进入第 {state.handNumber + 1} 局</span>
-                </button>
-              ) : (
-                <button
-                  id="console-btn-match-over-restart"
-                  type="button"
-                  className="cyber-cmd-btn primary-pink"
+                  className="px-cmd-btn"
                   onClick={onRequestResetMatch}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <RotateCcw size={15} aria-hidden="true" />{' '}
-                    {human.chips > 0 ? '整场完胜！重置战场' : '算力耗尽！重新接入'}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <RotateCcw size={14} aria-hidden="true" /> 重置整场
                   </span>
-                  <span className="cmd-sub-meta">恢复初始算力 {state.config.startingChips}</span>
+                  <span className="cmd-sub-meta">恢复初始算力</span>
                 </button>
-              )}
-              <button
-                id="console-btn-reset-match"
-                type="button"
-                className="cyber-cmd-btn"
-                onClick={onRequestResetMatch}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <RotateCcw size={15} aria-hidden="true" /> 重置整场对局
-                </span>
-                <span className="cmd-sub-meta">清空局数并恢复初始筹码</span>
-              </button>
-            </div>
-          </>
-        ) : !isHumanTurn ? (
-          <div className="console-header-line" style={{ justifyContent: 'center', padding: '10px 0' }}>
-            <Terminal size={15} color="var(--accent-primary)" aria-hidden="true" />
-            <strong style={{ color: 'var(--neon-pink-300)' }}>
-              {ai.name} 正在解析牌桌数据流并构造指令...
-            </strong>
-          </div>
-        ) : mode === 'pick-swap-hand' ? (
-          <div className="console-header-line">
-            <span>
-              <strong>覆写换牌 [步骤 1/2]</strong>：请点击桌面上方你的任意一张{' '}
-              <strong style={{ color: 'var(--accent-telemetry)' }}>公开手牌</strong>
-            </span>
-            <button
-              id="console-btn-cancel-swap-1"
-              type="button"
-              className="os-nav-btn"
-              onClick={() => {
-                onClearSelection();
-                onModeChange('idle');
+              </div>
+            </>
+          ) : !isHumanTurn ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                color: 'var(--neon-pink-300)',
+                fontWeight: 800,
               }}
             >
-              取消换牌
-            </button>
-          </div>
-        ) : mode === 'pick-swap-board' ? (
-          <div className="console-header-line">
-            <span>
-              <strong>覆写换牌 [步骤 2/2]</strong>：已选手牌 #{(selectedHandIndex ?? 0) + 1}，请点击中央任意{' '}
-              <strong style={{ color: 'var(--neon-pink-300)' }}>未破译节点</strong>（消耗 {swapFee}）
-            </span>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                id="console-btn-repick-hand"
-                type="button"
-                className="os-nav-btn"
-                onClick={() => {
-                  onClearSelection();
-                  onModeChange('pick-swap-hand');
-                }}
-              >
-                重选手牌
-              </button>
-              <button
-                id="console-btn-cancel-swap-2"
-                type="button"
-                className="os-nav-btn"
-                onClick={() => {
-                  onClearSelection();
-                  onModeChange('idle');
-                }}
-              >
-                取消
-              </button>
+              <Terminal size={15} aria-hidden="true" />
+              <span>{ai.name} 正在发送牌桌指令...</span>
             </div>
-          </div>
-        ) : mode === 'pick-flip' ? (
-          <div className="console-header-line">
-            <span>
-              <strong>免费节点破译</strong>：请点击中央桌面任意一张{' '}
-              <strong style={{ color: 'var(--accent-telemetry)' }}>加密节点卡牌</strong>
-            </span>
-            <button
-              id="console-btn-cancel-flip"
-              type="button"
-              className="os-nav-btn"
-              onClick={() => onModeChange('idle')}
-            >
-              取消破译
-            </button>
-          </div>
-        ) : mode === 'pick-raise' ? (
-          <>
-            <div className="raise-slider-bar">
-              <div className="console-header-line">
-                <span>
-                  {diff > 0 ? `同步差额 ${paid} 后反加` : '注入算力加注'}（阶段上限 {raiseCap} · 已加注{' '}
-                  {state.raisesInSubPhase}/{maxRaises}）
-                </span>
-                <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--neon-pink-300)', fontSize: 16 }}>
-                  +{raiseAmt}
-                </strong>
-              </div>
-              <div className="preset-step-row">
-                {Array.from(
-                  new Set([
-                    raiseRange.min,
-                    Math.max(
-                      raiseRange.min,
-                      Math.min(
-                        raiseRange.max,
-                        Math.round((raiseRange.min + raiseRange.max) / 2 / 5) * 5
-                      )
-                    ),
-                    raiseRange.max,
-                  ])
-                )
-                  .sort((a, b) => a - b)
-                  .map((val) => (
-                    <button
-                      key={val}
-                      id={`raise-preset-btn-${val}`}
-                      type="button"
-                      className={`preset-chip-btn ${raiseAmt === val ? 'active' : ''}`}
-                      onClick={() => setRaiseAmt(val)}
-                    >
-                      +{val}
-                    </button>
-                  ))}
-              </div>
-              {raiseRange.max > raiseRange.min && (
-                <input
-                  id="raise-amount-slider"
-                  type="range"
-                  min={raiseRange.min}
-                  max={raiseRange.max}
-                  step={raiseRange.max - raiseRange.min <= 20 ? 1 : 5}
-                  value={raiseAmt}
-                  onChange={(e) => setRaiseAmt(Number(e.target.value))}
-                  aria-label="调整加注算力额度"
-                />
-              )}
-            </div>
-            <div className="cmd-grid cols-2">
-              <button
-                id="console-btn-cancel-raise"
-                type="button"
-                className="cyber-cmd-btn"
-                onClick={() => onModeChange('idle')}
-              >
-                返回指令面板
-              </button>
-              <button
-                id="console-btn-confirm-raise"
-                type="button"
-                className="cyber-cmd-btn primary-pink"
-                onClick={() => onExecuteAction({ type: 'raise', amount: raiseAmt })}
-              >
-                确认推入筹码 {diff > 0 ? `+${paid + raiseAmt}` : `+${raiseAmt}`}
-              </button>
-            </div>
-          </>
-        ) : state.phase === 'river' ? (
-          diff === 0 ? (
+          ) : showRaiseChoices && raiseRange.allowed ? (
             <>
-              <div className="console-header-line">
-                <span>终局河牌圈（全部节点已公开）</span>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 12,
+                }}
+              >
+                <span>
+                  <strong>选择加注档位</strong>
+                  {diff > 0 ? `（含同步差额 +${paid}）` : ''}
+                </span>
                 <span className="cmd-sub-meta">
-                  本圈加注 {state.raisesInSubPhase}/{maxRaises} · 单次上限 {raiseCap}
+                  本段 {state.raisesInSubPhase}/{maxRaises} · 上限 {raiseCap}
                 </span>
               </div>
-              <div className="cmd-grid cols-2">
+
+              <div className="px-btn-grid">
+                {raisePresets.map((amt, idx) => {
+                  const tierLabels = ['轻度试探', '中幅施压', '满额上限'];
+                  const label =
+                    raisePresets.length === 1
+                      ? '定额加注'
+                      : tierLabels[idx] ?? `档位 ${idx + 1}`;
+                  return (
+                    <button
+                      key={amt}
+                      id={`raise-tier-btn-${idx}`}
+                      type="button"
+                      className="px-cmd-btn pink"
+                      onClick={() => fireAction({ type: 'raise', amount: amt })}
+                    >
+                      <span>+{amt}</span>
+                      <span className="cmd-sub-meta">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                id="raise-tier-btn-cancel"
+                type="button"
+                className="os-nav-btn"
+                style={{ width: '100%', justifyContent: 'center' }}
+                onClick={() => setShowRaiseChoices(false)}
+              >
+                返回上一级指令
+              </button>
+            </>
+          ) : diff > 0 ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 12,
+                }}
+              >
+                <span>
+                  遭遇加注 · 差额 <strong style={{ color: 'var(--neon-pink-300)' }}>{paid}</strong>
+                </span>
+                <span className="cmd-sub-meta">
+                  {state.phase === 'river'
+                    ? '河牌跟注即摊牌'
+                    : willBeAllIn
+                      ? '跟注即全下亮牌'
+                      : '跟注不消耗动作'}
+                </span>
+              </div>
+
+              <div className={`px-btn-grid ${raiseRange.allowed && !willBeAllIn ? '' : 'cols-2'}`}>
+                <button
+                  id="action-btn-call"
+                  type="button"
+                  className="px-cmd-btn cyan"
+                  onClick={() => fireAction({ type: 'call' })}
+                >
+                  <span>
+                    {state.phase === 'river'
+                      ? `跟注摊牌 +${paid}`
+                      : willBeAllIn
+                        ? `全下跟注 +${paid}`
+                        : `跟注 +${paid}`}
+                  </span>
+                  <span className="cmd-sub-meta">
+                    {state.phase === 'river' || willBeAllIn ? '亮牌核验' : '保留行动权'}
+                  </span>
+                </button>
+
+                {raiseRange.allowed && !willBeAllIn && (
+                  <button
+                    id="action-btn-open-reraise"
+                    type="button"
+                    className="px-cmd-btn pink"
+                    onClick={() => setShowRaiseChoices(true)}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Flame size={14} aria-hidden="true" /> 反加注
+                    </span>
+                    <span className="cmd-sub-meta">三档额度可选</span>
+                  </button>
+                )}
+
+                <button
+                  id="action-btn-fold"
+                  type="button"
+                  className="px-cmd-btn danger"
+                  onClick={() => fireAction({ type: 'fold' })}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <ShieldOff size={14} aria-hidden="true" /> 弃牌断连
+                  </span>
+                  <span className="cmd-sub-meta">放弃奖池</span>
+                </button>
+              </div>
+            </>
+          ) : state.phase === 'river' ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 12,
+                }}
+              >
+                <span>终局河牌圈（0暗牌）</span>
+                <span className="cmd-sub-meta">
+                  加注 {state.raisesInSubPhase}/{maxRaises} · 上限 {raiseCap}
+                </span>
+              </div>
+
+              <div className="px-btn-grid cols-2">
                 <button
                   id="action-btn-river-check"
                   type="button"
-                  className="cyber-cmd-btn primary-cyan"
-                  onClick={() => onExecuteAction({ type: 'check' })}
+                  className="px-cmd-btn cyan"
+                  onClick={() => fireAction({ type: 'check' })}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <Check size={15} aria-hidden="true" /> 静默过牌
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <Check size={14} aria-hidden="true" /> 静默过牌
                   </span>
-                  <span className="cmd-sub-meta">0 算力消耗</span>
+                  <span className="cmd-sub-meta">0 算力</span>
                 </button>
+
                 <button
-                  id="action-btn-river-bet"
+                  id="action-btn-river-open-raise"
                   type="button"
-                  className="cyber-cmd-btn primary-pink"
+                  className="px-cmd-btn pink"
                   disabled={!raiseRange.allowed}
-                  onClick={() => onModeChange('pick-raise')}
+                  onClick={() => setShowRaiseChoices(true)}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <Flame size={15} aria-hidden="true" /> 终局加注施压
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <Flame size={14} aria-hidden="true" /> 加注施压
                   </span>
                   <span className="cmd-sub-meta">
-                    {raiseRange.allowed ? `额度 ${raiseRange.min}~${raiseRange.max}` : '已达加注上限'}
+                    {raiseRange.allowed ? '三档额度选择' : '已达加注封顶'}
                   </span>
                 </button>
               </div>
             </>
           ) : (
             <>
-              <div className="console-header-line">
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 11.5,
+                }}
+              >
                 <span>
-                  终局遭遇压制 · 需补齐 <strong style={{ color: 'var(--neon-pink-300)' }}>{paid}</strong>
+                  {selectedHandIndex !== null
+                    ? `换牌待命：请点上方暗牌完成互换`
+                    : state.justCalledThisTurn
+                      ? '已补齐跟注：可点牌操作、加注或结束回合'
+                      : '点暗牌直翻 / 点己方明牌再点暗牌互换'}
                 </span>
                 <span className="cmd-sub-meta">
-                  本圈加注 {state.raisesInSubPhase}/{maxRaises}
+                  加注 {state.raisesInSubPhase}/{maxRaises}
                 </span>
               </div>
-              <div className={`cmd-grid ${raiseRange.allowed && !willBeAllIn ? '' : 'cols-2'}`}>
+
+              <div
+                className={`px-btn-grid ${
+                  selectedHandIndex !== null || state.justCalledThisTurn ? 'cols-2' : 'cols-2'
+                }`}
+              >
                 <button
-                  id="action-btn-river-fold"
+                  id="action-btn-open-raise"
                   type="button"
-                  className="cyber-cmd-btn danger-red"
-                  onClick={() => onExecuteAction({ type: 'fold' })}
+                  className="px-cmd-btn pink"
+                  disabled={!raiseRange.allowed}
+                  onClick={() => {
+                    onClearSelection();
+                    setShowRaiseChoices(true);
+                  }}
                 >
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <ShieldOff size={15} aria-hidden="true" /> 断开弃权
+                    <Flame size={14} aria-hidden="true" /> 加注施压
                   </span>
-                  <span className="cmd-sub-meta">放弃当前奖池</span>
+                  <span className="cmd-sub-meta">
+                    {raiseRange.allowed
+                      ? `三档可选（最高 +${raiseRange.max}）`
+                      : '已达2次封顶（翻/换重置）'}
+                  </span>
                 </button>
-                <button
-                  id="action-btn-river-call"
-                  type="button"
-                  className="cyber-cmd-btn primary-cyan"
-                  onClick={() => onExecuteAction({ type: 'call' })}
-                >
-                  <span>{willBeAllIn ? '全下跟注验牌' : '跟注启动摊牌'}</span>
-                  <span className="cmd-sub-meta">推入 +{paid}</span>
-                </button>
-                {raiseRange.allowed && !willBeAllIn && (
+
+                {selectedHandIndex !== null ? (
                   <button
-                    id="action-btn-river-reraise"
+                    id="action-btn-cancel-selected-card"
                     type="button"
-                    className="cyber-cmd-btn primary-pink"
-                    onClick={() => onModeChange('pick-raise')}
+                    className="px-cmd-btn"
+                    onClick={onClearSelection}
                   >
-                    <span>同步并反加</span>
-                    <span className="cmd-sub-meta">+{paid} 后继续施压</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <XCircle size={14} aria-hidden="true" /> 取消选中明牌
+                    </span>
+                    <span className="cmd-sub-meta">手牌 #{selectedHandIndex + 1}</span>
                   </button>
+                ) : state.justCalledThisTurn ? (
+                  <button
+                    id="action-btn-end-turn"
+                    type="button"
+                    className="px-cmd-btn cyan"
+                    onClick={() => fireAction({ type: 'end-turn' })}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <ArrowRightCircle size={14} aria-hidden="true" /> 移交回合
+                    </span>
+                    <span className="cmd-sub-meta">仅保留跟注</span>
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      padding: '4px 6px',
+                      background: '#0a1020',
+                      border: '2px dashed #2e416e',
+                      fontSize: 11,
+                      color: 'var(--text-muted)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <strong style={{ color: 'var(--neon-cyan-300)' }}>牌面直觉快捷区</strong>
+                    <span>点暗牌=翻 · 点明再点暗=换</span>
+                  </div>
                 )}
               </div>
             </>
-          )
-        ) : diff > 0 ? (
-          <>
-            <div className="console-header-line">
-              <span>
-                警报：对手加注施压 · 需同步差额{' '}
-                <strong style={{ color: 'var(--neon-pink-300)' }}>{paid}</strong>
-              </span>
-              <span className="cmd-sub-meta">
-                {willBeAllIn ? '跟注即触发全下熔断亮牌' : '跟注仅补齐筹码，不消耗你的回合动作'}
-              </span>
-            </div>
-            <div className={`cmd-grid ${raiseRange.allowed && !willBeAllIn ? '' : 'cols-2'}`}>
-              <button
-                id="action-btn-fold"
-                type="button"
-                className="cyber-cmd-btn danger-red"
-                onClick={() => onExecuteAction({ type: 'fold' })}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <ShieldOff size={15} aria-hidden="true" /> 断开弃权
-                </span>
-                <span className="cmd-sub-meta">让出底池</span>
-              </button>
-              <button
-                id="action-btn-call"
-                type="button"
-                className="cyber-cmd-btn primary-cyan"
-                onClick={() => onExecuteAction({ type: 'call' })}
-              >
-                <span>{willBeAllIn ? '全下跟注亮牌' : `跟注同步 +${paid}`}</span>
-                <span className="cmd-sub-meta">
-                  {willBeAllIn ? '立即翻开全部节点' : '不消耗行动权 · 可继续换牌/翻牌'}
-                </span>
-              </button>
-              {raiseRange.allowed && !willBeAllIn && (
-                <button
-                  id="action-btn-direct-reraise"
-                  type="button"
-                  className="cyber-cmd-btn primary-pink"
-                  onClick={() => onModeChange('pick-raise')}
-                >
-                  <span>直接反加</span>
-                  <span className="cmd-sub-meta">同步后再反压</span>
-                </button>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="console-header-line">
-              <span>
-                {state.justCalledThisTurn
-                  ? '已补齐跟注：请继续执行本回合战术动作，或移交回合'
-                  : '平注指令态：三项核心入侵动作必选其一（不可空过）'}
-              </span>
-              <span className="cmd-sub-meta">
-                本段加注 {state.raisesInSubPhase}/{maxRaises} · 上限 {raiseCap}
-              </span>
-            </div>
-            <div className={`cmd-grid ${state.justCalledThisTurn ? 'cols-4' : ''}`}>
-              <button
-                id="action-btn-swap"
-                type="button"
-                className="cyber-cmd-btn"
-                disabled={!canSwap}
-                onClick={() => onModeChange('pick-swap-hand')}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <ArrowLeftRight size={14} aria-hidden="true" /> 覆写换牌
-                </span>
-                <span className="cmd-sub-meta">
-                  {canSwap ? `门票 ${swapFee}（第${human.swapCount + 1}次）` : '当前不可换'}
-                </span>
-              </button>
-
-              <button
-                id="action-btn-flip"
-                type="button"
-                className="cyber-cmd-btn primary-cyan"
-                disabled={!canFlip}
-                onClick={() => onModeChange('pick-flip')}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <Eye size={14} aria-hidden="true" /> 免费破译翻牌
-                </span>
-                <span className="cmd-sub-meta">0 消耗 · 重置加注计数</span>
-              </button>
-
-              <button
-                id="action-btn-raise"
-                type="button"
-                className="cyber-cmd-btn primary-pink"
-                disabled={!raiseRange.allowed}
-                onClick={() => onModeChange('pick-raise')}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <Flame size={14} aria-hidden="true" /> 加注施压
-                </span>
-                <span className="cmd-sub-meta">
-                  {raiseRange.allowed ? `额度 ${raiseRange.min}~${raiseRange.max}` : '已达2次封顶'}
-                </span>
-              </button>
-
-              {state.justCalledThisTurn && (
-                <button
-                  id="action-btn-end-turn"
-                  type="button"
-                  className="cyber-cmd-btn"
-                  onClick={() => onExecuteAction({ type: 'end-turn' })}
-                >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <ArrowRightCircle size={14} aria-hidden="true" /> 移交回合
-                  </span>
-                  <span className="cmd-sub-meta">仅保留跟注</span>
-                </button>
-              )}
-            </div>
-          </>
-        )}
+          )}
+        </PixelWindow>
       </div>
-    </section>
+    </>
   );
 }

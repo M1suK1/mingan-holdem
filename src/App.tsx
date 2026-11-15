@@ -11,9 +11,11 @@ import {
   applyAction,
   computeBattleSituation,
   createInitialState,
+  getBetDiff,
   getCurrentRaiseCap,
   getHiddenBoardCount,
   getMaxRaisesAllowed,
+  getNextSwapFee,
   getRemainingSuitStats,
   startNextHand,
 } from './engine/gameEngine.ts';
@@ -41,10 +43,10 @@ import {
 import { LocalAiAgent } from './engine/aiAgent.ts';
 import { CyberBackdrop, SITUATION_META } from './components/CyberBackdrop.tsx';
 import { NetrunnerBrandLogo } from './components/CyberIcons.tsx';
+import { ComputePoolBar, PixelActionVfxOverlay } from './components/ComputePoolBar.tsx';
 import { OpponentTerminal } from './components/OpponentTerminal.tsx';
-import { CyberTableArena, type ConsoleMode } from './components/CyberTableArena.tsx';
+import { CyberTableArena } from './components/CyberTableArena.tsx';
 import { NeuralCommPanel } from './components/NeuralCommPanel.tsx';
-import { CyberVfxOverlay } from './components/CyberChips.tsx';
 import {
   ConfirmCyberModal,
   CyberToastHub,
@@ -86,7 +88,6 @@ export function App() {
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  const [consoleMode, setConsoleMode] = useState<ConsoleMode>('idle');
   const [selectedHandIndex, setSelectedHandIndex] = useState<number | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModal>({ type: 'none' });
 
@@ -98,7 +99,7 @@ export function App() {
       id: 'welcome-sys',
       sender: 'system',
       speakerName: '系统内核',
-      text: '黑域博弈链路已连通。当前使用黑曜/绯霓双色52张牌组，同花成牌率翻倍。',
+      text: 'PIXEL-OS 桌面已就绪：点暗牌直接免费翻牌，点己方明牌再点暗牌互换；双花色牌型已按真实概率重排。',
       timestamp: Date.now(),
       tag: 'system',
     },
@@ -121,7 +122,7 @@ export function App() {
       setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
       window.setTimeout(() => {
         setToasts((prev) => prev.filter((item) => item.id !== id));
-      }, 4200);
+      }, 4000);
     },
     []
   );
@@ -140,13 +141,12 @@ export function App() {
   const latestCharRef = useRef(character);
   latestCharRef.current = character;
 
-  // Keep Local AI synchronized with style & active contract character
   useEffect(() => {
     agentRef.current.setStyle(state.config.aiStyle);
     agentRef.current.setCharacter(character);
   }, [state.config.aiStyle, character]);
 
-  // Load Night-Sugar-Office Contract Catalog & Default Silver Wolf Card on mount
+  // Load Night-Sugar-Office Contract Catalog & Default Character
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -177,18 +177,22 @@ export function App() {
     };
   }, []);
 
-  // Global Escape handler for modals
+  // Global Escape handler
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeModal.type !== 'none') {
-        setActiveModal({ type: 'none' });
+      if (e.key === 'Escape') {
+        if (activeModal.type !== 'none') {
+          setActiveModal({ type: 'none' });
+        } else if (selectedHandIndex !== null) {
+          setSelectedHandIndex(null);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeModal.type]);
+  }, [activeModal.type, selectedHandIndex]);
 
-  // Step-by-step AI Turn Scheduler (supports optional LLM Poker Decision + Local AI fallback)
+  // AI Turn Scheduler
   useEffect(() => {
     if (state.phase === 'showdown' || state.currentTurn !== 'ai') {
       return;
@@ -276,7 +280,7 @@ export function App() {
     state.config.aiDelayMs,
   ]);
 
-  // Showdown reaction expression & message
+  // Showdown reaction
   useEffect(() => {
     if (state.phase !== 'showdown' || !state.result) return;
     const res = state.result;
@@ -291,10 +295,10 @@ export function App() {
         speakerName: `${character.name} // ${character.codename}`,
         text:
           res.winner === 'ai'
-            ? `奖池 ${res.potWon} 算力已归入我的端口。还要继续挑战我的防火墙吗？`
+            ? `算力池 ${res.potWon} 已被我全数接管。下一局还要继续接入吗？`
             : res.winner === 'human'
-              ? `这手牌被你算准了……拿走 ${res.potWon} 算力吧，下一局我会改写策略。`
-              : `完全同分平局？一人一半回收奖池，下一局见真章。`,
+              ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
+              : `完全同分平局？一人一半回收算力池，下一局再见真章。`,
         expression: expr,
         timestamp: Date.now(),
         tag: 'action',
@@ -323,7 +327,7 @@ export function App() {
           id: `switch-${Date.now()}`,
           sender: 'opponent',
           speakerName: `${nextChar.name} // ${nextChar.codename}`,
-          text: nextChar.quote || `契约接入完成，我是${nextChar.name}，来过两招吧。`,
+          text: nextChar.quote || `契约窗口已重绘为我的专属频段，来过两招吧。`,
           expression: 'smile',
           timestamp: Date.now(),
           tag: 'chat',
@@ -332,7 +336,7 @@ export function App() {
       pushToast(
         'success',
         `已切换对手为「${nextChar.name}」`,
-        `${nextChar.title} · 自动匹配战术倾向：${suggestedStyle}`
+        `专属特征色窗口 ${nextChar.color} 已加载`
       );
       setActiveModal({ type: 'none' });
     } catch (err) {
@@ -416,41 +420,85 @@ export function App() {
   };
 
   const executeHumanAction = (action: GameAction) => {
-    setConsoleMode('idle');
     setSelectedHandIndex(null);
     setState((prev) => applyAction(prev, action));
   };
 
+  // Direct-Click Step 1 for Swap: Click own open hand card
   const handleSelectHumanCard = (handIndex: number) => {
-    if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
-    if (consoleMode !== 'pick-swap-hand' && consoleMode !== 'pick-swap-board') return;
-    const card = state.players.human.hand[handIndex];
-    if (!card || card.visibility !== 'open' || card.lockedFromSwap) return;
+    if (state.currentTurn !== 'human' || state.phase === 'showdown' || state.phase === 'river') {
+      return;
+    }
+    const diff = getBetDiff(state, 'human');
+    if (diff > 0) {
+      const paid = Math.min(diff, state.players.human.chips);
+      pushToast(
+        'warn',
+        '请先补齐跟注差额',
+        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可选牌互换。`
+      );
+      return;
+    }
+
+    if (selectedHandIndex === handIndex) {
+      setSelectedHandIndex(null);
+      return;
+    }
+
+    const hc = state.players.human.hand[handIndex];
+    if (!hc || hc.visibility !== 'open' || hc.lockedFromSwap) return;
+
+    const swapFee = getNextSwapFee(state, 'human');
+    if (state.players.human.chips < swapFee) {
+      pushToast(
+        'warn',
+        `换牌门票不足（需 ${swapFee} 算力）`,
+        '当前剩余算力不足换牌，可直接点击上方未翻开暗牌免费翻牌。'
+      );
+      return;
+    }
+
     setSelectedHandIndex(handIndex);
-    setConsoleMode('pick-swap-board');
   };
 
+  // Direct-Click Board Hidden Card:
+  // - If own open card is selected -> Immediate Swap!
+  // - Otherwise -> Immediate 1-Click Free Flip!
   const handleSelectBoardSlot = (boardIndex: number) => {
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     const slot = state.board[boardIndex];
     if (!slot || slot.isOpen) return;
 
-    if (consoleMode === 'pick-flip') {
-      executeHumanAction({ type: 'flip', boardIndex });
+    const diff = getBetDiff(state, 'human');
+    if (diff > 0) {
+      const paid = Math.min(diff, state.players.human.chips);
+      pushToast(
+        'warn',
+        '请先补齐跟注差额',
+        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可直接点击暗牌翻牌或互换。`
+      );
       return;
     }
 
-    if (consoleMode === 'pick-swap-board' && selectedHandIndex !== null) {
+    if (selectedHandIndex !== null) {
+      const swapFee = getNextSwapFee(state, 'human');
+      if (state.players.human.chips < swapFee) {
+        setSelectedHandIndex(null);
+        pushToast('warn', '算力不足以支付换牌费', '已取消手牌选中');
+        return;
+      }
       executeHumanAction({
         type: 'swap',
         handIndex: selectedHandIndex,
         boardIndex,
       });
+      return;
     }
+
+    executeHumanAction({ type: 'flip', boardIndex });
   };
 
   const handleNextHand = () => {
-    setConsoleMode('idle');
     setSelectedHandIndex(null);
     setActiveExpression('calm');
     setState((prev) => startNextHand(prev));
@@ -458,7 +506,6 @@ export function App() {
 
   const performFullReset = (customConfig?: GameConfig) => {
     const cfg = customConfig ?? state.config;
-    setConsoleMode('idle');
     setSelectedHandIndex(null);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
@@ -468,7 +515,7 @@ export function App() {
         opponentName: character.name,
       })
     );
-    pushToast('info', '黑域牌桌已重置', `双方算力恢复为 ${cfg.startingChips}`);
+    pushToast('info', '像素战场已重置', `双方初始算力恢复为 ${cfg.startingChips}`);
   };
 
   const situation = useMemo(() => computeBattleSituation(state), [state]);
@@ -498,18 +545,41 @@ export function App() {
   }, [state.players.ai.hand, openBoardCards, state.phase, state.config.revealOpponentHidden]);
 
   const hiddenBoardCount = getHiddenBoardCount(state);
+  const diff = getBetDiff(state, 'human');
+  const isShowdown = state.phase === 'showdown';
+  const isHumanTurn = state.currentTurn === 'human' && !isShowdown;
+
+  let poolStatusLabel = '对端回合';
+  let poolStatusWarn = false;
+  if (isShowdown && state.result) {
+    poolStatusLabel =
+      state.result.winner === 'tie'
+        ? '平局分池'
+        : state.result.winner === 'human'
+          ? '我方获胜'
+          : '对端获胜';
+  } else if (isHumanTurn) {
+    if (diff > 0) {
+      poolStatusLabel = `待跟注 +${Math.min(diff, state.players.human.chips)}`;
+      poolStatusWarn = true;
+    } else if (selectedHandIndex !== null) {
+      poolStatusLabel = '点暗牌互换';
+    } else {
+      poolStatusLabel = '我方回合';
+    }
+  }
 
   return (
     <div className="cyber-app-shell">
       <CyberBackdrop situation={situation} pot={state.pot} />
 
-      {/* Top Cyber-OS Taskbar */}
-      <header className="cyber-topbar">
+      {/* Top Pixel-OS Taskbar Window */}
+      <header className="px-taskbar">
         <div className="topbar-left">
           <div className="brand-cluster">
-            <NetrunnerBrandLogo size={28} />
+            <NetrunnerBrandLogo size={26} />
             <div>
-              <h1 className="brand-title-main">黑域协议 · 明暗博弈德州</h1>
+              <h1 className="brand-title-main">黑域协议 PIXEL-OS</h1>
               <div className="brand-sub-code">{sitMeta.code}</div>
             </div>
           </div>
@@ -531,20 +601,20 @@ export function App() {
               战况：{sitMeta.label}（防火墙 {sitMeta.firewallPct}%）
             </span>
             <span className="cyber-badge">
-              加密节点 {hiddenBoardCount}/4 · 限注 {getCurrentRaiseCap(state)} · 加注{' '}
+              暗牌 {hiddenBoardCount}/4 · 限注 {getCurrentRaiseCap(state)} · 加注{' '}
               {state.raisesInSubPhase}/{getMaxRaisesAllowed(state)}
             </span>
           </div>
         </div>
 
-        <nav className="topbar-nav" aria-label="系统功能模块导航">
+        <nav className="topbar-nav" aria-label="系统功能窗口导航">
           <button
             id="nav-btn-contracts"
             type="button"
             className={`os-nav-btn ${activeModal.type === 'contracts' ? 'active' : ''}`}
             onClick={() => setActiveModal({ type: 'contracts' })}
           >
-            <Users size={15} aria-hidden="true" />
+            <Users size={14} aria-hidden="true" />
             契约档案 ({catalog.length})
           </button>
 
@@ -556,8 +626,8 @@ export function App() {
             }`}
             onClick={() => setActiveModal({ type: 'llm' })}
           >
-            <Bot size={15} aria-hidden="true" />
-            LLM神经链路
+            <Bot size={14} aria-hidden="true" />
+            LLM链路
           </button>
 
           <button
@@ -566,10 +636,10 @@ export function App() {
             className={`os-nav-btn ${
               activeModal.type === 'protocol' && activeModal.tab !== 'audit' ? 'active' : ''
             }`}
-            onClick={() => setActiveModal({ type: 'protocol', tab: 'rules' })}
+            onClick={() => setActiveModal({ type: 'protocol', tab: 'suits' })}
           >
-            <BookOpen size={15} aria-hidden="true" />
-            协议规则
+            <BookOpen size={14} aria-hidden="true" />
+            概率与规则
           </button>
 
           <button
@@ -580,8 +650,8 @@ export function App() {
             }`}
             onClick={() => setActiveModal({ type: 'protocol', tab: 'audit' })}
           >
-            <History size={15} aria-hidden="true" />
-            审计日志
+            <History size={14} aria-hidden="true" />
+            流水日志
           </button>
 
           <button
@@ -592,52 +662,63 @@ export function App() {
             }`}
             onClick={() => setActiveModal({ type: 'tuning' })}
           >
-            <Sliders size={15} aria-hidden="true" />
+            <Sliders size={14} aria-hidden="true" />
             数值调优
           </button>
         </nav>
       </header>
 
-      {/* Main 3-Column Cyber-OS Battle Workspace */}
-      <main className="cyber-workspace">
-        <OpponentTerminal
-          character={character}
-          activeExpression={activeExpression}
-          overloadMode={llmConfig.overloadPersona}
-          isAiTurn={state.currentTurn === 'ai' && state.phase !== 'showdown'}
-          isAiThinking={isAiThinking}
-          llmEnabled={llmConfig.enabled}
-          onSelectExpression={(expr) => setActiveExpression(expr)}
-          onToggleOverload={() => {
-            const next = { ...llmConfig, overloadPersona: !llmConfig.overloadPersona };
-            setLlmConfig(next);
-            saveLlmConfigToStorage(next);
-            pushToast(
-              next.overloadPersona ? 'warn' : 'info',
-              next.overloadPersona
-                ? `${character.name}：深层过载人格已激活`
-                : `${character.name}：已恢复常态契约人格`,
-              next.overloadPersona ? '立绘与对话语料已同步切换至高压侵蚀频段' : undefined
-            );
-          }}
-          onOpenArchive={() => setActiveModal({ type: 'contracts' })}
+      {/* Multi-Window Pixel Desktop Workspace */}
+      <main className="px-desktop-grid">
+        {/* Left Window: Compute Pool Column Bar + Flying Data Packet */}
+        <ComputePoolBar
+          pot={state.pot}
+          startingChips={state.config.startingChips}
+          lastAction={state.lastAction}
+          statusLabel={poolStatusLabel}
+          statusWarn={poolStatusWarn}
         />
 
-        <CyberTableArena
-          state={state}
-          mode={consoleMode}
-          selectedHandIndex={selectedHandIndex}
-          humanSummary={humanSummary}
-          opponentSummary={opponentSummary}
-          onModeChange={(m) => setConsoleMode(m)}
-          onSelectHumanCard={handleSelectHumanCard}
-          onSelectBoardSlot={handleSelectBoardSlot}
-          onClearSelection={() => setSelectedHandIndex(null)}
-          onExecuteAction={executeHumanAction}
-          onNextHand={handleNextHand}
-          onRequestResetMatch={() => setActiveModal({ type: 'confirm-reset' })}
-        />
+        {/* Center Stack: [Opp Cards + Colored Portrait Window] -> [4 Board Cards Window] -> [My Cards + Right 3-Tier Action Window] */}
+        <div className="center-windows-stack">
+          <OpponentTerminal
+            state={state}
+            character={character}
+            opponentSummary={opponentSummary}
+            activeExpression={activeExpression}
+            overloadMode={llmConfig.overloadPersona}
+            isAiTurn={state.currentTurn === 'ai' && !isShowdown}
+            isAiThinking={isAiThinking}
+            llmEnabled={llmConfig.enabled}
+            onSelectExpression={(expr) => setActiveExpression(expr)}
+            onToggleOverload={() => {
+              const next = { ...llmConfig, overloadPersona: !llmConfig.overloadPersona };
+              setLlmConfig(next);
+              saveLlmConfigToStorage(next);
+              pushToast(
+                next.overloadPersona ? 'warn' : 'info',
+                next.overloadPersona
+                  ? `${character.name}：过载态窗口已激活`
+                  : `${character.name}：恢复专属特征色窗口`
+              );
+            }}
+            onOpenArchive={() => setActiveModal({ type: 'contracts' })}
+          />
 
+          <CyberTableArena
+            state={state}
+            selectedHandIndex={selectedHandIndex}
+            humanSummary={humanSummary}
+            onSelectHumanCard={handleSelectHumanCard}
+            onSelectBoardSlot={handleSelectBoardSlot}
+            onClearSelection={() => setSelectedHandIndex(null)}
+            onExecuteAction={executeHumanAction}
+            onNextHand={handleNextHand}
+            onRequestResetMatch={() => setActiveModal({ type: 'confirm-reset' })}
+          />
+        </div>
+
+        {/* Right Windows: Suit Probability Radar Window + Neural Comm Window */}
         <NeuralCommPanel
           suitStats={suitStats}
           showDeckTracker={state.config.showDeckTracker}
@@ -650,10 +731,9 @@ export function App() {
         />
       </main>
 
-      <CyberVfxOverlay event={state.lastAction} />
+      <PixelActionVfxOverlay event={state.lastAction} />
       <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
 
-      {/* Lazy-Loaded Feature Modals */}
       <Suspense fallback={null}>
         {activeModal.type === 'contracts' && (
           <ContractArchiveModal
@@ -710,8 +790,8 @@ export function App() {
 
       {activeModal.type === 'confirm-reset' && (
         <ConfirmCyberModal
-          title="确认重置整场黑域赌局？"
-          description={`此操作将终止当前进行中的牌局，并将你与「${character.name}」的算力筹码全部重置为 ${state.config.startingChips}。`}
+          title="确认重置整场像素赌局？"
+          description={`此操作将终止当前牌局，并将你与「${character.name}」的算力全部重置为 ${state.config.startingChips}。`}
           confirmLabel="确认重置战场"
           onConfirm={() => performFullReset()}
           onCancel={() => setActiveModal({ type: 'none' })}

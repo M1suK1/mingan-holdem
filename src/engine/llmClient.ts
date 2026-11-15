@@ -139,6 +139,7 @@ export function buildCharacterSystemPrompt(
   return [
     `你正在赛博空间黑客牌桌游戏中扮演「${character.name}」（称号：${character.title}，代号：${character.codename}）。`,
     `你们正在进行《明暗博弈德州（黑/粉双花色52张版）》1v1单挑。全过程请用贴合角色的自然中文回答，严禁输出任何Emoji表情符号。`,
+    `【双花色精确概率重排牌型大小】四条 > 同花顺 > 葫芦 > 顺子 > 三条 > 两对 > 同花 > 一对 > 高牌。`,
     `【代表台词】「${character.quote}」`,
     personaText,
     traitsLine,
