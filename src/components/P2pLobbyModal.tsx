@@ -10,9 +10,14 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { P2pConnectionStatus, P2pRole } from '../engine/p2pTransport.ts';
 import type { P2pPeerProfile } from '../engine/p2pProtocol.ts';
-import { probeRoomSignaling } from '../engine/p2pTransport.ts';
+import {
+  loadTurnServerConfig,
+  probeRoomCapabilities,
+  saveTurnServerConfig,
+  type P2pConnectionStatus,
+  type P2pRole,
+} from '../engine/p2pTransport.ts';
 
 interface P2pLobbyModalProps {
   status: P2pConnectionStatus;
@@ -65,14 +70,19 @@ export default function P2pLobbyModal({
   onClose,
 }: P2pLobbyModalProps) {
   const [relayAvailable, setRelayAvailable] = useState<boolean>(false);
+  const [wsRelaySupported, setWsRelaySupported] = useState<boolean>(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [guestOfferInput, setGuestOfferInput] = useState('');
   const [hostAnswerInput, setHostAnswerInput] = useState('');
+  const [showTurnConfig, setShowTurnConfig] = useState(false);
+  const [turnCfg, setTurnCfg] = useState(() => loadTurnServerConfig());
 
   useEffect(() => {
     let alive = true;
-    void probeRoomSignaling().then((ok) => {
-      if (alive) setRelayAvailable(ok);
+    void probeRoomCapabilities().then((caps) => {
+      if (!alive) return;
+      setRelayAvailable(caps.available);
+      setWsRelaySupported(caps.wsRelay);
     });
     return () => {
       alive = false;
@@ -188,12 +198,144 @@ export default function P2pLobbyModal({
 
           {!isConnected && (
             <>
-              {/* 方式一：零服务器邀请码直连（默认首屏直接展示，方便一键复制/粘贴） */}
-              <div className="cyber-panel-box">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: 'var(--neon-cyan-soft)' }}>
-                  <Link2 size={14} aria-hidden="true" />
-                  方式一：零服务器邀请码直连（任意网络/纯静态打开均可直接复制发送）
+              {/* 6 位房间号秒连（Cloudflare 云端 WebSocket 中继 / Vite 本地信令） */}
+              <div
+                className="cyber-panel-box"
+                style={{
+                  borderColor: wsRelaySupported ? 'var(--neon-emerald)' : undefined,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: wsRelaySupported ? 'var(--neon-emerald)' : 'var(--text-main)' }}>
+                    <PlugZap size={14} aria-hidden="true" />
+                    {wsRelaySupported
+                      ? '方式一：6 位房间号秒连（电脑与手机 4G/5G 跨网直连推荐）'
+                      : '方式二：6 位房间号秒连'}
+                  </span>
+                  <span className={`cyber-badge ${relayAvailable ? 'cyan' : 'pink'}`}>
+                    {wsRelaySupported
+                      ? 'Cloudflare 云端中继可用（无需穿透防火墙）'
+                      : relayAvailable
+                        ? '当前 Vite 信令服务可用（同网 WebRTC）'
+                        : '纯静态模式不可用（请用邀请码）'}
+                  </span>
                 </div>
+                <div className="cmd-grid cols-2">
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      id="p2p-btn-room-create"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={isBusy || !relayAvailable}
+                      onClick={() => onHostCreateRoomRelay(generateRoomCode())}
+                    >
+                      <RefreshCw size={13} aria-hidden="true" />
+                      {roomCode ? `已建房：${roomCode}` : '生成 6 位房间号'}
+                    </button>
+                    {roomCode && (
+                      <button
+                        id="p2p-btn-copy-room-code"
+                        type="button"
+                        className="os-nav-btn"
+                        onClick={() => void copyText(roomCode, '房间号')}
+                      >
+                        <Copy size={13} aria-hidden="true" />
+                        复制房间号：{roomCode}
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      id="p2p-input-join-room"
+                      type="text"
+                      className="cyber-text-input"
+                      style={{ flex: 1 }}
+                      placeholder="输入 6 位房间号"
+                      maxLength={12}
+                      value={joinCodeInput}
+                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    />
+                    <button
+                      id="p2p-btn-room-join"
+                      type="button"
+                      className="os-nav-btn highlight"
+                      disabled={isBusy || !relayAvailable || joinCodeInput.trim().length < 4}
+                      onClick={() => onGuestJoinRoomRelay(joinCodeInput.trim())}
+                    >
+                      <Check size={13} aria-hidden="true" />
+                      加入
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 零服务器 WebRTC 邀请码直连 + 可选 TURN 配置 */}
+              <div className="cyber-panel-box">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: 'var(--neon-cyan-soft)' }}>
+                    <Link2 size={14} aria-hidden="true" />
+                    {wsRelaySupported
+                      ? '方式二：零服务器 WebRTC 邀请码直连（同 Wi-Fi 点对点直连）'
+                      : '方式一：零服务器 WebRTC 邀请码直连（任意纯静态网页可用）'}
+                  </div>
+                  <button
+                    id="p2p-btn-toggle-turn"
+                    type="button"
+                    className="os-nav-btn"
+                    onClick={() => setShowTurnConfig((v) => !v)}
+                  >
+                    {showTurnConfig ? '收起 TURN 设置' : '可选：配置 TURN 跨网中继'}
+                  </button>
+                </div>
+
+                {showTurnConfig && (
+                  <div className="cyber-panel-box" style={{ padding: '8px 10px', gap: 6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      纯 WebRTC 在手机 4G/5G 对称 NAT 下会触发 ICE 穿透失败；有自建 coturn 或 Metered / Cloudflare TURN 时可填入（或优先使用「6 位房间号」云端中继）。
+                    </div>
+                    <div className="cmd-grid cols-2">
+                      <input
+                        id="p2p-input-turn-urls"
+                        type="text"
+                        className="cyber-text-input"
+                        placeholder="TURN URL（如 turn:relay.example.com:3478）"
+                        value={turnCfg.urls}
+                        onChange={(e) => setTurnCfg((prev) => ({ ...prev, urls: e.target.value }))}
+                      />
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          id="p2p-input-turn-user"
+                          type="text"
+                          className="cyber-text-input"
+                          placeholder="用户名"
+                          value={turnCfg.username}
+                          onChange={(e) => setTurnCfg((prev) => ({ ...prev, username: e.target.value }))}
+                        />
+                        <input
+                          id="p2p-input-turn-cred"
+                          type="password"
+                          className="cyber-text-input"
+                          placeholder="凭证密码"
+                          value={turnCfg.credential}
+                          onChange={(e) => setTurnCfg((prev) => ({ ...prev, credential: e.target.value }))}
+                        />
+                        <button
+                          id="p2p-btn-save-turn"
+                          type="button"
+                          className="os-nav-btn highlight"
+                          onClick={() => {
+                            saveTurnServerConfig(turnCfg);
+                            onNotify('success', 'TURN 配置已保存', '重新生成邀请码即可生效');
+                          }}
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="cmd-grid cols-2">
                   <div className="cyber-panel-box">
                     <strong style={{ fontSize: 12.5, color: 'var(--neon-cyan-soft)' }}>
@@ -305,67 +447,6 @@ export default function P2pLobbyModal({
                     >
                       <Copy size={13} aria-hidden="true" />
                       {answerToken ? '复制应答码发回给房主' : '生成后可点击此处一键复制'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 方式二：6 位房间号秒连（同服务下自动中继信令） */}
-              <div className="cyber-panel-box">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800, color: 'var(--text-main)' }}>
-                    <PlugZap size={14} aria-hidden="true" />
-                    方式二：6 位房间号秒连
-                  </span>
-                  <span className={`cyber-badge ${relayAvailable ? 'cyan' : 'pink'}`}>
-                    {relayAvailable ? '当前 Vite 信令服务可用' : '纯静态模式不可用（请用上方邀请码）'}
-                  </span>
-                </div>
-                <div className="cmd-grid cols-2">
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <button
-                      id="p2p-btn-room-create"
-                      type="button"
-                      className="os-nav-btn highlight"
-                      disabled={isBusy || !relayAvailable}
-                      onClick={() => onHostCreateRoomRelay(generateRoomCode())}
-                    >
-                      <RefreshCw size={13} aria-hidden="true" />
-                      {roomCode ? `已建房：${roomCode}` : '生成 6 位房间号'}
-                    </button>
-                    {roomCode && (
-                      <button
-                        id="p2p-btn-copy-room-code"
-                        type="button"
-                        className="os-nav-btn"
-                        onClick={() => void copyText(roomCode, '房间号')}
-                      >
-                        <Copy size={13} aria-hidden="true" />
-                        复制房间号：{roomCode}
-                      </button>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      id="p2p-input-join-room"
-                      type="text"
-                      className="cyber-text-input"
-                      style={{ flex: 1 }}
-                      placeholder="输入 6 位房间号"
-                      maxLength={12}
-                      value={joinCodeInput}
-                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    />
-                    <button
-                      id="p2p-btn-room-join"
-                      type="button"
-                      className="os-nav-btn highlight"
-                      disabled={isBusy || !relayAvailable || joinCodeInput.trim().length < 4}
-                      onClick={() => onGuestJoinRoomRelay(joinCodeInput.trim())}
-                    >
-                      <Check size={13} aria-hidden="true" />
-                      加入
                     </button>
                   </div>
                 </div>

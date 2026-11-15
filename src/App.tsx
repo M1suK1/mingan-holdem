@@ -103,12 +103,15 @@ import {
 } from './engine/p2pProtocol.ts';
 import {
   WebRtcP2pTransport,
+  WsRelayP2pTransport,
   fetchRoomOffer,
   pollRoomAnswer,
+  probeRoomCapabilities,
   publishRoomAnswer,
   publishRoomOffer,
   type P2pConnectionStatus,
   type P2pRole,
+  type P2pTransport,
 } from './engine/p2pTransport.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
@@ -301,7 +304,7 @@ export function App() {
   const [p2pOfferToken, setP2pOfferToken] = useState('');
   const [p2pAnswerToken, setP2pAnswerToken] = useState('');
   const [p2pRoomCode, setP2pRoomCode] = useState('');
-  const p2pTransportRef = useRef<WebRtcP2pTransport | null>(null);
+  const p2pTransportRef = useRef<P2pTransport | null>(null);
   const p2pSeqRef = useRef(0);
   const p2pRoomPollRef = useRef<number | null>(null);
   const isP2pConnected = p2pStatus === 'connected';
@@ -423,6 +426,25 @@ export function App() {
       setP2pOfferToken('');
       setP2pAnswerToken('');
       const tr = new WebRtcP2pTransport(role, {
+        onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
+        onPacket: (pkt) => handleP2pPacketRef.current(pkt),
+        onLatency: (ms) => setP2pLatency(ms),
+      });
+      p2pTransportRef.current = tr;
+      return tr;
+    },
+    [stopP2pRoomPoll]
+  );
+
+  const initWsRelayTransport = useCallback(
+    (role: P2pRole) => {
+      stopP2pRoomPoll();
+      p2pTransportRef.current?.close();
+      setP2pRole(role);
+      p2pRoleRef.current = role;
+      setP2pOfferToken('');
+      setP2pAnswerToken('');
+      const tr = new WsRelayP2pTransport(role, {
         onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
         onPacket: (pkt) => handleP2pPacketRef.current(pkt),
         onLatency: (ms) => setP2pLatency(ms),
@@ -560,6 +582,14 @@ export function App() {
 
   const handleHostCreateRoomRelay = async (code: string) => {
     try {
+      const caps = await probeRoomCapabilities();
+      if (caps.wsRelay) {
+        const ws = initWsRelayTransport('host');
+        setP2pRoomCode(code);
+        ws.connect(code);
+        pushToast('info', `云端房间 ${code} 已开启`, '把 6 位房间号发给好友即可跨网秒连');
+        return;
+      }
       const tr = initP2pTransport('host');
       setP2pRoomCode(code);
       const offer = await tr.createHostOffer();
@@ -581,6 +611,14 @@ export function App() {
 
   const handleGuestJoinRoomRelay = async (code: string) => {
     try {
+      const caps = await probeRoomCapabilities();
+      if (caps.wsRelay) {
+        const ws = initWsRelayTransport('guest');
+        setP2pRoomCode(code);
+        ws.connect(code);
+        pushToast('info', `正在加入云端房间 ${code}`, '无需穿透防火墙，正在建立通道...');
+        return;
+      }
       const tr = initP2pTransport('guest');
       setP2pRoomCode(code);
       const offer = await fetchRoomOffer(code);
@@ -622,7 +660,7 @@ export function App() {
   const handleHostConfirmManualAnswer = async (answer: string) => {
     try {
       const tr = p2pTransportRef.current;
-      if (!tr) return;
+      if (!(tr instanceof WebRtcP2pTransport)) return;
       await tr.completeHostAnswer(answer);
     } catch (err) {
       pushToast('error', '应答确认失败', err instanceof Error ? err.message : '请确认 Answer 应答码正确');

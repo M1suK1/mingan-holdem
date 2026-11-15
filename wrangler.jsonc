@@ -1,8 +1,25 @@
 {
   "name": "mingan-holdem",
+  "main": "worker/index.mjs",
   "compatibility_date": "2026-01-01",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "P2P_ROOM",
+        "class_name": "P2pRoomDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["P2pRoomDO"]
+    }
+  ]
 }

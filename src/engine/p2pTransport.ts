@@ -15,39 +15,114 @@ export interface P2pTransportCallbacks {
   onLatency?: (rttMs: number) => void;
 }
 
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.miwifi.com:3478' },
+export interface P2pTransport {
+  readonly role: P2pRole;
+  send(packet: P2pPacket): boolean;
+  close(): void;
+}
+
+export interface TurnServerConfig {
+  urls: string;
+  username: string;
+  credential: string;
+}
+
+const TURN_STORAGE_KEY = 'mingan_p2p_turn_config_v1';
+
+export function loadTurnServerConfig(): TurnServerConfig {
+  try {
+    const raw = localStorage.getItem(TURN_STORAGE_KEY);
+    if (!raw) return { urls: '', username: '', credential: '' };
+    const parsed = JSON.parse(raw) as Partial<TurnServerConfig>;
+    return {
+      urls: typeof parsed.urls === 'string' ? parsed.urls : '',
+      username: typeof parsed.username === 'string' ? parsed.username : '',
+      credential: typeof parsed.credential === 'string' ? parsed.credential : '',
+    };
+  } catch {
+    return { urls: '', username: '', credential: '' };
+  }
+}
+
+export function saveTurnServerConfig(cfg: TurnServerConfig): void {
+  try {
+    localStorage.setItem(TURN_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    // Ignore storage quota issues
+  }
+}
+
+const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.qq.com:3478' },
+  { urls: 'stun:stun.miwifi.com:3478' },
   { urls: 'stun:stun.chat.bilibili.com:3478' },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun.hitv.com:3478' },
 ];
 
-async function waitForIceGathering(pc: RTCPeerConnection, maxWaitMs = 3400): Promise<void> {
+function buildIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [...DEFAULT_STUN_SERVERS];
+  const turn = loadTurnServerConfig();
+  const cleanUrls = turn.urls
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+  if (cleanUrls.length > 0) {
+    servers.push({
+      urls: cleanUrls,
+      username: turn.username.trim() || undefined,
+      credential: turn.credential || undefined,
+    });
+  }
+  return servers;
+}
+
+interface IceCandidateStats {
+  host: number;
+  srflx: number;
+  relay: number;
+}
+
+async function waitForIceGathering(
+  pc: RTCPeerConnection,
+  stats: IceCandidateStats,
+  maxWaitMs = 4500
+): Promise<void> {
   if (pc.iceGatheringState === 'complete') return;
   await new Promise<void>((resolve) => {
     let done = false;
+    let settleTimer: number | null = null;
     const finish = () => {
       if (done) return;
       done = true;
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
       pc.removeEventListener('icegatheringstatechange', onState);
+      pc.removeEventListener('icecandidate', onCand);
       resolve();
     };
     const onState = () => {
       if (pc.iceGatheringState === 'complete') finish();
     };
+    const onCand = () => {
+      // Once we have a public srflx or TURN relay candidate, allow a short settle then proceed
+      if ((stats.relay > 0 || stats.srflx > 0) && settleTimer === null) {
+        settleTimer = window.setTimeout(finish, 650);
+      }
+    };
     pc.addEventListener('icegatheringstatechange', onState);
+    pc.addEventListener('icecandidate', onCand);
     window.setTimeout(finish, maxWaitMs);
   });
 }
 
-export class WebRtcP2pTransport {
+export class WebRtcP2pTransport implements P2pTransport {
   readonly role: P2pRole;
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private pingTimer: number | null = null;
   private readonly chunkAssembler = new P2pChunkAssembler();
   private readonly callbacks: P2pTransportCallbacks;
+  private candidateStats: IceCandidateStats = { host: 0, srflx: 0, relay: 0 };
 
   constructor(role: P2pRole, callbacks: P2pTransportCallbacks) {
     this.role = role;
@@ -56,14 +131,40 @@ export class WebRtcP2pTransport {
 
   private setupPeerConnection(): RTCPeerConnection {
     if (this.pc) this.close();
-    const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
+    this.candidateStats = { host: 0, srflx: 0, relay: 0 };
+    const pc = new RTCPeerConnection({
+      iceServers: buildIceServers(),
+      iceCandidatePoolSize: 4,
+    });
     this.pc = pc;
+
+    pc.onicecandidate = (ev) => {
+      const cand = ev.candidate?.candidate || '';
+      if (!cand) return;
+      if (cand.includes(' typ relay')) this.candidateStats.relay += 1;
+      else if (cand.includes(' typ srflx')) this.candidateStats.srflx += 1;
+      else if (cand.includes(' typ host')) this.candidateStats.host += 1;
+    };
+
+    const reportFailure = () => {
+      const { host, srflx, relay } = this.candidateStats;
+      this.callbacks.onStatusChange(
+        'closed',
+        `ICE 网络穿透失败（host:${host} / srflx:${srflx} / relay:${relay}）。手机 4G/5G 或严格防火墙下请使用「6 位房间号云端中继」或配置 TURN`
+      );
+    };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') {
-        this.callbacks.onStatusChange('closed', 'ICE 网络穿透失败（可尝试切换同网 6 位房间号或检查防火墙）');
+        reportFailure();
       } else if (pc.connectionState === 'disconnected') {
         this.callbacks.onStatusChange('connecting', '网络波动，正在尝试恢复 P2P 连接...');
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed') {
+        reportFailure();
       }
     };
 
@@ -132,7 +233,7 @@ export class WebRtcP2pTransport {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    await waitForIceGathering(pc);
+    await waitForIceGathering(pc, this.candidateStats);
 
     const localSdp = pc.localDescription?.sdp ?? offer.sdp ?? '';
     const token = await encodeP2pSignalToken({ kind: 'offer', sdp: localSdp });
@@ -151,7 +252,7 @@ export class WebRtcP2pTransport {
 
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    await waitForIceGathering(pc);
+    await waitForIceGathering(pc, this.candidateStats);
 
     const localSdp = pc.localDescription?.sdp ?? answer.sdp ?? '';
     const token = await encodeP2pSignalToken({ kind: 'answer', sdp: localSdp });
@@ -197,7 +298,9 @@ export class WebRtcP2pTransport {
       this.dc = null;
     }
     if (this.pc) {
+      this.pc.onicecandidate = null;
       this.pc.onconnectionstatechange = null;
+      this.pc.oniceconnectionstatechange = null;
       this.pc.ondatachannel = null;
       try {
         this.pc.close();
@@ -209,15 +312,158 @@ export class WebRtcP2pTransport {
   }
 }
 
-export async function probeRoomSignaling(): Promise<boolean> {
+export class WsRelayP2pTransport implements P2pTransport {
+  readonly role: P2pRole;
+  private ws: WebSocket | null = null;
+  private pingTimer: number | null = null;
+  private readonly chunkAssembler = new P2pChunkAssembler();
+  private readonly callbacks: P2pTransportCallbacks;
+  private connectedOnce = false;
+  private closedManually = false;
+
+  constructor(role: P2pRole, callbacks: P2pTransportCallbacks) {
+    this.role = role;
+    this.callbacks = callbacks;
+  }
+
+  connect(roomCode: string): void {
+    this.close();
+    this.closedManually = false;
+    this.connectedOnce = false;
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${window.location.host}/api/p2p-ws?room=${encodeURIComponent(roomCode)}&role=${this.role}`;
+    this.callbacks.onStatusChange('connecting', `正在连接云端房间 ${roomCode}...`);
+
+    const ws = new WebSocket(url);
+    this.ws = ws;
+
+    ws.onopen = () => {
+      if (this.role === 'host') {
+        this.callbacks.onStatusChange('waiting-answer', `云端房间 ${roomCode} 已就绪，等待好友输入房间号加入...`);
+      } else {
+        this.callbacks.onStatusChange('connecting', `已进入房间 ${roomCode}，正在握手建立通道...`);
+      }
+    };
+
+    ws.onmessage = (ev) => {
+      const raw = String(ev.data);
+      if (raw === 'pong') return;
+      try {
+        const assembled = this.chunkAssembler.feed(raw);
+        if (!assembled) return;
+        const parsed = JSON.parse(assembled) as P2pPacket | { type: '__RELAY_STATUS__'; peerConnected?: boolean };
+        if (parsed.type === '__RELAY_STATUS__') {
+          if (parsed.peerConnected) {
+            if (!this.connectedOnce) {
+              this.connectedOnce = true;
+              this.callbacks.onStatusChange('connected', '云端中继通道已建立（跨网/4G/5G 手机直连可用）');
+              this.startHeartbeat();
+            }
+          } else if (this.connectedOnce) {
+            this.stopHeartbeat();
+            this.callbacks.onStatusChange('closed', '好友已退出房间或网络断开');
+          }
+          return;
+        }
+        const pkt = parsed as P2pPacket;
+        if (pkt.type === 'PING') {
+          this.send({ type: 'PONG', ts: pkt.ts });
+          return;
+        }
+        if (pkt.type === 'PONG') {
+          this.callbacks.onLatency?.(Math.max(1, Date.now() - pkt.ts));
+          return;
+        }
+        this.callbacks.onPacket(pkt);
+      } catch {
+        // Ignore malformed packets
+      }
+    };
+
+    ws.onerror = () => {
+      if (!this.closedManually) {
+        this.callbacks.onStatusChange('error', '云端中继通道连接异常');
+      }
+    };
+
+    ws.onclose = () => {
+      this.stopHeartbeat();
+      if (!this.closedManually) {
+        this.callbacks.onStatusChange('closed', '云端中继通道已关闭');
+      }
+    };
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.pingTimer = window.setInterval(() => {
+      this.send({ type: 'PING', ts: Date.now() });
+    }, 3000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingTimer !== null) {
+      window.clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  send(packet: P2pPacket): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      const json = JSON.stringify(packet);
+      const frames = splitP2pWireMessage(json, 14_000);
+      for (const frame of frames) {
+        this.ws.send(frame);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  close(): void {
+    this.closedManually = true;
+    this.stopHeartbeat();
+    this.chunkAssembler.clear();
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      try {
+        this.ws.close(1000, 'closed');
+      } catch {
+        /* ignore */
+      }
+      this.ws = null;
+    }
+  }
+}
+
+export interface RoomCapabilities {
+  available: boolean;
+  wsRelay: boolean;
+}
+
+export async function probeRoomCapabilities(): Promise<RoomCapabilities> {
   try {
     const res = await fetch('/api/p2p-signal?action=ping');
-    if (!res.ok) return false;
-    const data = (await res.json()) as { ok?: boolean };
-    return Boolean(data.ok);
+    if (!res.ok) return { available: false, wsRelay: false };
+    const data = (await res.json()) as { ok?: boolean; wsRelay?: boolean };
+    return {
+      available: Boolean(data.ok),
+      wsRelay: Boolean(data.ok && data.wsRelay),
+    };
   } catch {
-    return false;
+    return { available: false, wsRelay: false };
   }
+}
+
+export async function probeRoomSignaling(): Promise<boolean> {
+  const caps = await probeRoomCapabilities();
+  return caps.available;
 }
 
 export async function publishRoomOffer(roomCode: string, offerToken: string): Promise<void> {
