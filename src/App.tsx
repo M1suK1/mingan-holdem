@@ -1,28 +1,49 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Bot, History, Shield, Sliders, Users } from 'lucide-react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type WheelEvent,
+} from 'react';
 import {
   DEFAULT_CONFIG,
+  type Card,
   type ContractExpression,
   type GameAction,
   type GameConfig,
   type GameState,
+  type HackSkillId,
 } from './engine/types.ts';
 import {
   applyAction,
-  computeBattleSituation,
+  computeThreeRaisePresets,
   createInitialState,
+  formatRank,
+  formatSuitLabel,
   getBetDiff,
   getCurrentRaiseCap,
+  getHackSkillCost,
+  getHalfStackRaiseAmount,
   getHiddenBoardCount,
+  getLegalRaiseRange,
   getMaxRaisesAllowed,
   getNextSwapFee,
-  getRemainingSuitStats,
+  getVisibleBoardCard,
+  getVisibleHandCard,
+  isActionLegal,
+  otherPlayer,
   startNextHand,
 } from './engine/gameEngine.ts';
 import { evaluateVisibleHandSummary } from './engine/evaluator.ts';
 import {
   FALLBACK_CONTRACT_CHARACTER,
   deriveAiStyleFromCharacter,
+  resolveCharacterPortrait,
   type ContractCardSummary,
   type ContractCharacter,
 } from './engine/contractCards.ts';
@@ -36,17 +57,32 @@ import {
   requestLlmPokerDecision,
   requestOpponentChatReply,
   saveLlmConfigToStorage,
-  type ChatMessage,
   type LlmCallLog,
   type LlmConfig,
 } from './engine/llmClient.ts';
 import { LocalAiAgent } from './engine/aiAgent.ts';
-import { CyberBackdrop, SITUATION_META } from './components/CyberBackdrop.tsx';
-import { NetrunnerBrandLogo } from './components/CyberIcons.tsx';
-import { ComputePoolBar, PixelActionVfxOverlay } from './components/ComputePoolBar.tsx';
-import { OpponentTerminal } from './components/OpponentTerminal.tsx';
-import { CyberTableArena } from './components/CyberTableArena.tsx';
-import { NeuralCommPanel } from './components/NeuralCommPanel.tsx';
+import { CyberBackdrop } from './components/CyberBackdrop.tsx';
+import { ComputePoolBar } from './components/ComputePoolBar.tsx';
+import { CyberCard3D } from './components/CyberCard3D.tsx';
+import {
+  PixelBroadcastIcon,
+  PixelChatIcon,
+  PixelFlipSuitIcon,
+  PixelGearIcon,
+  PixelHoldIcon,
+  PixelMenuIcon,
+  PixelMinusOneIcon,
+  PixelNodesIcon,
+  PixelPlusOneIcon,
+  PixelRestartIcon,
+  PixelScanIcon,
+  PixelSendIcon,
+  PixelSeverIcon,
+  PixelSurgeIcon,
+  PixelSwitchUserIcon,
+  PixelSyncIcon,
+  PixelTierIcon,
+} from './components/CyberIcons.tsx';
 import {
   ConfirmCyberModal,
   CyberToastHub,
@@ -58,20 +94,96 @@ const LlmTerminalModal = lazy(() => import('./components/LlmTerminalModal.tsx'))
 const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.tsx'));
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
 
-const PHASE_LABELS: Record<GameState['phase'], string> = {
-  early: '前期 · 3~4暗牌',
-  mid: '中期 · 1~2暗牌',
-  river: '终局 · 河牌圈',
-  showdown: '终局核验',
-};
+const SETTINGS_MENU_ITEMS: Array<{
+  id: string;
+  keyName: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
+  label: string;
+  note: string;
+  icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
+}> = [
+  { id: 'menu-contracts', keyName: 'contracts', label: '契约档案', note: '切换夜糖事务所角色与立绘', icon: 'contracts' },
+  { id: 'menu-llm', keyName: 'llm', label: 'LLM 链路', note: '配置在线大模型神经接入', icon: 'llm' },
+  { id: 'menu-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与博弈细则', icon: 'rules' },
+  { id: 'menu-audit', keyName: 'audit', label: '对局流水', note: '查看历史出牌与动作日志', icon: 'audit' },
+  { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
+];
+
+const BACK_PORTRAIT_STREAMS = [
+  { left: '6%', tokens: '01001101  0x7F  SYN::ACK  B_08', dur: '11s', delay: '-1s' },
+  { left: '19%', tokens: 'HEX::2E88  110010  MEM::04  BIT', dur: '14s', delay: '-5s' },
+  { left: '33%', tokens: '0xA4  HASH::0040  ICE::LINK  101', dur: '10s', delay: '-3s' },
+  { left: '49%', tokens: '00110101  NET::BUS  0x1C  PORT', dur: '15s', delay: '-7s' },
+  { left: '63%', tokens: 'PKT::PINK  110101  NODE_01  CRC', dur: '12s', delay: '-2s' },
+  { left: '77%', tokens: '10101100  ALLOC::09  0x9E  ACK', dur: '13s', delay: '-6s' },
+  { left: '91%', tokens: '01110010  ROOT::SYS  0x00  END', dur: '10.5s', delay: '-4s' },
+];
+
+const FRONT_PORTRAIT_STREAMS = [
+  { left: '22%', tokens: '0xFF  OVR::SYNC  0101', dur: '9.5s', delay: '-2s', accent: false },
+  { left: '57%', tokens: 'STREAM::P12  1011  0x7A', dur: '11.5s', delay: '-5.5s', accent: true },
+  { left: '82%', tokens: '0110  LINK::LIVE  CRC', dur: '8.8s', delay: '-1.5s', accent: false },
+];
+
+const MOSAIC_FLICKER_TILES = Array.from({ length: 96 }, (_, i) => {
+  const mod = (i * 7 + Math.floor(i / 12) * 3) % 11;
+  return mod === 0 ? 't1' : mod === 2 ? 't2' : mod === 5 ? 't3' : mod === 8 ? 't4' : '';
+});
+
+const MOSAIC_FLOOD_CELLS = Array.from({ length: 140 }, (_, i) => {
+  const m = (i * 5 + Math.floor(i / 14) * 7) % 9;
+  return m <= 1 ? 'pink' : m <= 3 ? 'cyan' : m <= 6 ? 'void' : '';
+});
+
+const FIXED_CRUSHED_DOCK_H = 28;
 
 type ActiveModal =
   | { type: 'none' }
+  | { type: 'settings-menu' }
   | { type: 'contracts' }
   | { type: 'llm' }
   | { type: 'protocol'; tab: 'rules' | 'suits' | 'audit' }
   | { type: 'tuning' }
   | { type: 'confirm-reset' };
+
+interface ChatItem {
+  id: string;
+  sender: 'opponent' | 'human';
+  speaker: string;
+  text: string;
+  crushed: boolean;
+  anim?: 'player-rising';
+  riseDy?: number;
+}
+
+interface FloatingBubbleState {
+  id: string;
+  speaker: string;
+  text: string;
+  contactDy: number;
+  dropDy: number;
+}
+
+type QueuedChatTask =
+  | { kind: 'opponent'; speaker: string; text: string }
+  | { kind: 'human'; text: string };
+
+interface SwapFlightCard {
+  rect: { left: number; top: number; width: number; height: number };
+  dx: number;
+  dy: number;
+  card?: Card;
+  faceDown: boolean;
+  isOwnPrivate?: boolean;
+}
+
+interface SwapFlightState {
+  id: string;
+  actor: 'human' | 'ai';
+  handIndex: number;
+  boardIndex: number;
+  handToBoard: SwapFlightCard;
+  boardToHand: SwapFlightCard;
+}
 
 export function App() {
   const [character, setCharacter] = useState<ContractCharacter>(FALLBACK_CONTRACT_CHARACTER);
@@ -89,47 +201,60 @@ export function App() {
   const [isAiThinking, setIsAiThinking] = useState(false);
 
   const [selectedHandIndex, setSelectedHandIndex] = useState<number | null>(null);
+  const [draggedHandIndex, setDraggedHandIndex] = useState<number | null>(null);
+  const [dragOverBoardIndex, setDragOverBoardIndex] = useState<number | null>(null);
+  const [showRaiseTiers, setShowRaiseTiers] = useState(false);
+  const [scanMode, setScanMode] = useState(false);
+  const [holdProgress, setHoldProgress] = useState(0);
   const [activeModal, setActiveModal] = useState<ActiveModal>({ type: 'none' });
+  const [activeMenuId, setActiveMenuId] = useState('menu-contracts');
+
+  // VFX state & optional manual test override inside Settings
+  const [roundLossFlicker, setRoundLossFlicker] = useState(false);
+  const [aiRoundLossFlicker, setAiRoundLossFlicker] = useState(false);
+  const [vfxTestMode, setVfxTestMode] = useState<'auto' | 'low' | 'bankrupt'>('auto');
+  const [swapFlight, setSwapFlight] = useState<SwapFlightState | null>(null);
+  const [scanVfx, setScanVfx] = useState<{
+    id: string;
+    rect: { left: number; top: number; width: number; height: number };
+    caught: boolean;
+  } | null>(null);
+
+  const holdIntervalRef = useRef<number | null>(null);
+  const lastHandledScanIdRef = useRef<string | null>(null);
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
-  const [isSendingChat, setIsSendingChat] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: 'welcome-sys',
-      sender: 'system',
-      speakerName: '系统内核',
-      text: 'PIXEL-OS 桌面已就绪：点暗牌直接免费翻牌，点己方明牌再点暗牌互换；双花色牌型已按真实概率重排。',
-      timestamp: Date.now(),
-      tag: 'system',
-    },
-    {
-      id: 'welcome-char',
-      sender: 'opponent',
-      speakerName: `${FALLBACK_CONTRACT_CHARACTER.name} // ${FALLBACK_CONTRACT_CHARACTER.codename}`,
-      text: FALLBACK_CONTRACT_CHARACTER.quote,
-      expression: 'smile',
-      timestamp: Date.now(),
-      tag: 'chat',
-    },
-  ]);
-
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
-  const pushToast = useCallback(
-    (tone: CyberToast['tone'], title: string, detail?: string) => {
-      const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((item) => item.id !== id));
-      }, 4000);
+  // Chat Stack & FIFO Bubble Queue
+  const [messages, setMessages] = useState<ChatItem[]>([
+    {
+      id: 'init-msg-1',
+      sender: 'opponent',
+      speaker: FALLBACK_CONTRACT_CHARACTER.name,
+      text: '协议连接建立。直接拖牌互换或点击暗牌翻开，让我看看你的牌序。',
+      crushed: false,
     },
-    []
-  );
+  ]);
+  const [crushingActive, setCrushingActive] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [enteringId, setEnteringId] = useState<string | null>(null);
+  const [floatingBubble, setFloatingBubble] = useState<FloatingBubbleState | null>(null);
+  const [chatDraft, setChatDraft] = useState('');
+  const [queuedCount, setQueuedCount] = useState(0);
 
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((item) => item.id !== id));
-  }, []);
+  const chatPanelRef = useRef<HTMLElement | null>(null);
+  const chatFeedRef = useRef<HTMLDivElement | null>(null);
+  const activeStackRef = useRef<HTMLDivElement | null>(null);
+
+  const queueRef = useRef<QueuedChatTask[]>([]);
+  const isAnimatingRef = useRef(false);
+  const timersRef = useRef<number[]>([]);
+  const wheelAccumRef = useRef(0);
+  const hasBootedRef = useRef(false);
+  const lastHandledSwapIdRef = useRef<string | null>(null);
+  const lastHandledShowdownHandRef = useRef<number>(0);
 
   const agentRef = useRef(
     new LocalAiAgent('ai', DEFAULT_CONFIG.aiStyle, FALLBACK_CONTRACT_CHARACTER)
@@ -140,6 +265,31 @@ export function App() {
   latestLlmRef.current = llmConfig;
   const latestCharRef = useRef(character);
   latestCharRef.current = character;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const charNameRef = useRef(character.name);
+  charNameRef.current = character.name;
+
+  const pushToast = useCallback(
+    (tone: CyberToast['tone'], title: string, detail?: string) => {
+      const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((item) => item.id !== id));
+      }, 3600);
+    },
+    []
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(fn, ms);
+    timersRef.current.push(id);
+    return id;
+  }, []);
 
   useEffect(() => {
     agentRef.current.setStyle(state.config.aiStyle);
@@ -177,26 +327,273 @@ export function App() {
     };
   }, []);
 
-  // Global Escape handler
+  const getWindowCapacity = useCallback(() => {
+    const feedH = chatFeedRef.current?.clientHeight ?? 460;
+    return Math.max(3, Math.floor((feedH - FIXED_CRUSHED_DOCK_H - 18) / 78));
+  }, []);
+
+  const willOverflowStack = useCallback(() => {
+    const feedEl = chatFeedRef.current;
+    const stackEl = activeStackRef.current;
+    const currentMsgs = messagesRef.current;
+    const uncrushed = currentMsgs.filter((m) => !m.crushed);
+    if (!feedEl || !stackEl || uncrushed.length === 0) return false;
+
+    const crushedCount = currentMsgs.length - uncrushed.length;
+    const dockH = crushedCount > 0 ? FIXED_CRUSHED_DOCK_H + 6 : 0;
+    return stackEl.offsetHeight + 78 >= feedEl.clientHeight - dockH - 14;
+  }, []);
+
+  const computeCoupledDropMetrics = useCallback((willCrush: boolean, text: string) => {
+    const panelH = chatPanelRef.current?.clientHeight ?? 520;
+    const headerH = 31;
+    const formH = 43;
+    const feedBottomPad = 8;
+    const estLines = Math.max(1, Math.ceil(text.length / 17));
+    const estBubbleH = 34 + estLines * 17;
+
+    const currentMsgs = messagesRef.current;
+    const crushedCount = currentMsgs.filter((m) => m.crushed).length;
+    const currentStackH = activeStackRef.current?.offsetHeight ?? 0;
+    const feedBottomY = panelH - formH - feedBottomPad;
+
+    if (willCrush) {
+      const currentDockH = crushedCount > 0 ? FIXED_CRUSHED_DOCK_H + 6 : 0;
+      const stackTopY = feedBottomY - currentDockH - currentStackH;
+      const contactTopY = stackTopY - estBubbleH;
+      const contactDy = Math.max(headerH + 8 - 42, Math.round(contactTopY - 42));
+
+      const landingTopY = feedBottomY - (FIXED_CRUSHED_DOCK_H + 6) - estBubbleH;
+      const dropDy = Math.max(contactDy + 24, Math.round(landingTopY - 42));
+      return { contactDy, dropDy };
+    }
+
+    const gap = currentMsgs.some((m) => !m.crushed) ? 8 : 0;
+    const dockH = crushedCount > 0 ? FIXED_CRUSHED_DOCK_H + 6 : 0;
+    const landingTopY = feedBottomY - dockH - currentStackH - gap - estBubbleH;
+    const dropDy = Math.max(headerH + 8, Math.round(landingTopY - 42));
+    const contactDy = Math.round(dropDy * 0.48);
+    return { contactDy, dropDy };
+  }, []);
+
+  // Strict FIFO Speech Queue
+  const processNextTask = useCallback(() => {
+    if (isAnimatingRef.current) return;
+    const next = queueRef.current.shift();
+    setQueuedCount(queueRef.current.length);
+    if (!next) return;
+
+    isAnimatingRef.current = true;
+    setHistoryOffset(0);
+    setEnteringId(null);
+
+    scheduleTimeout(() => {
+      if (next.kind === 'opponent') {
+        const id = `opp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const willCrush = willOverflowStack();
+        const { contactDy, dropDy } = computeCoupledDropMetrics(willCrush, next.text);
+
+        setFloatingBubble({
+          id,
+          speaker: next.speaker,
+          text: next.text,
+          contactDy,
+          dropDy,
+        });
+
+        if (willCrush) {
+          scheduleTimeout(() => {
+            setCrushingActive(true);
+          }, 2183);
+        }
+
+        scheduleTimeout(() => {
+          setFloatingBubble(null);
+          setCrushingActive(false);
+          setMessages((prev) => {
+            const base = willCrush ? prev.map((m) => (m.crushed ? m : { ...m, crushed: true })) : prev;
+            return [
+              ...base,
+              {
+                id,
+                sender: 'opponent',
+                speaker: next.speaker,
+                text: next.text,
+                crushed: false,
+              },
+            ];
+          });
+          isAnimatingRef.current = false;
+          processNextTask();
+        }, 2950);
+      } else {
+        const id = `ply-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const willCrush = willOverflowStack();
+
+        const spawnHumanRise = (riseDy: number, crushPrev: boolean) => {
+          setCrushingActive(false);
+          setMessages((prev) => {
+            const base = crushPrev ? prev.map((m) => (m.crushed ? m : { ...m, crushed: true })) : prev;
+            return [
+              ...base,
+              {
+                id,
+                sender: 'human',
+                speaker: '潜行黑客',
+                text: next.text,
+                crushed: false,
+                anim: 'player-rising',
+                riseDy,
+              },
+            ];
+          });
+
+          scheduleTimeout(() => {
+            isAnimatingRef.current = false;
+            processNextTask();
+          }, 560);
+        };
+
+        if (willCrush) {
+          setCrushingActive(true);
+          scheduleTimeout(() => {
+            spawnHumanRise(48, true);
+          }, 767);
+        } else {
+          const stackH = activeStackRef.current?.offsetHeight ?? 0;
+          spawnHumanRise(stackH + 48, false);
+        }
+      }
+    }, 30);
+  }, [computeCoupledDropMetrics, scheduleTimeout, willOverflowStack]);
+
+  const enqueueTask = useCallback(
+    (task: QueuedChatTask) => {
+      queueRef.current.push(task);
+      setQueuedCount(queueRef.current.length);
+      processNextTask();
+    },
+    [processNextTask]
+  );
+
+  // One-shot opening speech on mount
+  useEffect(() => {
+    if (hasBootedRef.current) return;
+    hasBootedRef.current = true;
+
+    const boot = window.setTimeout(() => {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: FALLBACK_CONTRACT_CHARACTER.name,
+        text: FALLBACK_CONTRACT_CHARACTER.quote,
+      });
+    }, 450);
+
+    return () => {
+      window.clearTimeout(boot);
+      for (const id of timersRef.current) {
+        window.clearTimeout(id);
+      }
+      timersRef.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reset raise panel & transient modes on turn/action changes
+  useEffect(() => {
+    setShowRaiseTiers(false);
+    setScanMode(false);
+    setHoldProgress(0);
+    if (holdIntervalRef.current !== null) {
+      window.clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  }, [state.handNumber, state.actionHistory.length, state.currentTurn]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (activeModal.type !== 'none') {
           setActiveModal({ type: 'none' });
-        } else if (selectedHandIndex !== null) {
+        } else {
+          setShowRaiseTiers(false);
+          setScanMode(false);
           setSelectedHandIndex(null);
+          setDraggedHandIndex(null);
+          setDragOverBoardIndex(null);
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeModal.type, selectedHandIndex]);
+  }, [activeModal.type]);
+
+  // Dual-Card Smooth Swap Flight Animation (Triggers for BOTH Player AND Opponent swaps!)
+  useEffect(() => {
+    const evt = state.lastAction;
+    if (!evt || evt.type !== 'swap') return;
+    if (evt.handIndex === undefined || evt.boardIndex === undefined) return;
+    if (lastHandledSwapIdRef.current === evt.id) return;
+    lastHandledSwapIdRef.current = evt.id;
+
+    const handEl = document.getElementById(
+      evt.actor === 'human'
+        ? `human-hand-card-${evt.handIndex}`
+        : `opponent-hand-card-${evt.handIndex}`
+    );
+    const boardEl = document.getElementById(`board-node-card-${evt.boardIndex}`);
+    if (!handEl || !boardEl) return;
+
+    const handRect = handEl.getBoundingClientRect();
+    const boardRect = boardEl.getBoundingClientRect();
+
+    const boardCard = state.board[evt.boardIndex]?.card;
+    const handCard = state.players[evt.actor].hand[evt.handIndex]?.card;
+    const hideHandFace =
+      evt.actor === 'ai' && state.phase !== 'showdown' && !state.config.revealOpponentHidden;
+
+    setSwapFlight({
+      id: evt.id,
+      actor: evt.actor,
+      handIndex: evt.handIndex,
+      boardIndex: evt.boardIndex,
+      handToBoard: {
+        rect: {
+          left: handRect.left,
+          top: handRect.top,
+          width: handRect.width,
+          height: handRect.height,
+        },
+        dx: boardRect.left - handRect.left,
+        dy: boardRect.top - handRect.top,
+        card: boardCard,
+        faceDown: false,
+      },
+      boardToHand: {
+        rect: {
+          left: boardRect.left,
+          top: boardRect.top,
+          width: boardRect.width,
+          height: boardRect.height,
+        },
+        dx: handRect.left - boardRect.left,
+        dy: handRect.top - boardRect.top,
+        card: hideHandFace ? undefined : handCard,
+        faceDown: hideHandFace,
+        isOwnPrivate: evt.actor === 'human',
+      },
+    });
+
+    const timer = window.setTimeout(() => {
+      setSwapFlight((curr) => (curr?.id === evt.id ? null : curr));
+    }, 580);
+
+    return () => window.clearTimeout(timer);
+  }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
 
   // AI Turn Scheduler
   useEffect(() => {
-    if (state.phase === 'showdown' || state.currentTurn !== 'ai') {
-      return;
-    }
+    if (state.phase === 'showdown' || state.currentTurn !== 'ai') return;
 
     let cancelled = false;
     setIsAiThinking(true);
@@ -220,19 +617,11 @@ export function App() {
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
           setActiveExpression(llmDecision.expression);
-          setChatMessages((prev) => [
-            ...prev.slice(-38),
-            {
-              id: `ai-act-${Date.now()}`,
-              sender: 'opponent',
-              speakerName: `${char.name} // ${char.codename}`,
-              text: llmDecision.reply,
-              expression: llmDecision.expression,
-              timestamp: Date.now(),
-              tag: 'action',
-              fromLlm: true,
-            },
-          ]);
+          enqueueTask({
+            kind: 'opponent',
+            speaker: char.name,
+            text: llmDecision.reply,
+          });
           setState((prev) => {
             if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
             return applyAction(prev, llmDecision.action);
@@ -243,27 +632,17 @@ export function App() {
         const decision = await agentRef.current.decide(snapshot);
         if (cancelled) return;
         setActiveExpression(decision.dialogue.expression);
-        setChatMessages((prev) => [
-          ...prev.slice(-38),
-          {
-            id: `ai-act-${Date.now()}`,
-            sender: 'opponent',
-            speakerName: decision.dialogue.speaker,
-            text: decision.dialogue.text,
-            expression: decision.dialogue.expression,
-            timestamp: Date.now(),
-            tag: 'action',
-            fromLlm: false,
-          },
-        ]);
+        enqueueTask({
+          kind: 'opponent',
+          speaker: char.name,
+          text: decision.dialogue.text,
+        });
         setState((prev) => {
           if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
           return applyAction(prev, decision.action);
         });
       } finally {
-        if (!cancelled) {
-          setIsAiThinking(false);
-        }
+        if (!cancelled) setIsAiThinking(false);
       }
     }, state.config.aiDelayMs);
 
@@ -278,153 +657,173 @@ export function App() {
     state.justCalledThisTurn,
     state.actionHistory.length,
     state.config.aiDelayMs,
+    enqueueTask,
   ]);
 
-  // Showdown reaction
+  // Scan action laser sweep VFX + toast feedback (Triggers for BOTH Player & Opponent!)
+  useEffect(() => {
+    const evt = state.lastAction;
+    if (!evt || evt.type !== 'scan') return;
+    if (lastHandledScanIdRef.current === evt.id) return;
+    lastHandledScanIdRef.current = evt.id;
+
+    if (evt.targetKind !== undefined && evt.targetIndex !== undefined) {
+      let targetId: string;
+      if (evt.targetKind === 'board') {
+        targetId = `board-node-card-${evt.targetIndex}`;
+      } else {
+        targetId =
+          evt.actor === 'human'
+            ? `opponent-hand-card-${evt.targetIndex}`
+            : `human-hand-card-${evt.targetIndex}`;
+      }
+      const targetEl = document.getElementById(targetId);
+      if (targetEl) {
+        const rect = targetEl.getBoundingClientRect();
+        setScanVfx({
+          id: evt.id,
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          caught: Boolean(evt.caught),
+        });
+        window.setTimeout(() => {
+          setScanVfx((curr) => (curr?.id === evt.id ? null : curr));
+        }, 980);
+      }
+    }
+
+    if (evt.caught) {
+      pushToast(
+        evt.actor === 'human' ? 'success' : 'error',
+        evt.actor === 'human' ? '扫描抓获对端篡改！' : `${character.name} 扫描抓获了我方篡改！`,
+        evt.label
+      );
+    } else {
+      pushToast(
+        'info',
+        evt.actor === 'human' ? '扫描核验完成：未被篡改' : `${character.name} 扫描未发现异常`,
+        `已预支 ${evt.amount ?? state.config.scanCost} 算力至奖池`
+      );
+    }
+  }, [state.lastAction, state.config.scanCost, character.name, pushToast]);
+
+  // Showdown reaction + Round Loss Mosaic Flicker (Both Player & Opponent!)
   useEffect(() => {
     if (state.phase !== 'showdown' || !state.result) return;
+    if (lastHandledShowdownHandRef.current === state.handNumber) return;
+    lastHandledShowdownHandRef.current = state.handNumber;
+
     const res = state.result;
     const expr: ContractExpression =
       res.winner === 'ai' ? 'smile' : res.winner === 'human' ? 'sad' : 'surprise';
     setActiveExpression(expr);
-    setChatMessages((prev) => [
-      ...prev.slice(-38),
-      {
-        id: `showdown-msg-${state.handNumber}`,
-        sender: 'opponent',
-        speakerName: `${character.name} // ${character.codename}`,
-        text:
-          res.winner === 'ai'
-            ? `算力池 ${res.potWon} 已被我全数接管。下一局还要继续接入吗？`
-            : res.winner === 'human'
-              ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
-              : `完全同分平局？一人一半回收算力池，下一局再见真章。`,
-        expression: expr,
-        timestamp: Date.now(),
-        tag: 'action',
-      },
-    ]);
-  }, [state.phase, state.result, state.handNumber, character.name, character.codename]);
 
-  const handleSwitchContractFile = async (fileName: string) => {
-    setIsLoadingCard(true);
-    try {
-      const nextChar = await loadContractCharacterByFile(fileName);
-      const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
-      setCharacter(nextChar);
-      setActiveExpression('smile');
-      setState((prev) => ({
-        ...prev,
-        config: { ...prev.config, aiStyle: suggestedStyle },
-        players: {
-          ...prev.players,
-          ai: { ...prev.players.ai, name: nextChar.name },
-        },
-      }));
-      setChatMessages((prev) => [
-        ...prev.slice(-38),
-        {
-          id: `switch-${Date.now()}`,
-          sender: 'opponent',
-          speakerName: `${nextChar.name} // ${nextChar.codename}`,
-          text: nextChar.quote || `契约窗口已重绘为我的专属频段，来过两招吧。`,
-          expression: 'smile',
-          timestamp: Date.now(),
-          tag: 'chat',
-        },
-      ]);
-      pushToast(
-        'success',
-        `已切换对手为「${nextChar.name}」`,
-        `专属特征色窗口 ${nextChar.color} 已加载`
-      );
-      setActiveModal({ type: 'none' });
-    } catch (err) {
-      pushToast('error', '读取契约卡失败', err instanceof Error ? err.message : '未知错误');
-    } finally {
-      setIsLoadingCard(false);
+    if (res.winner === 'ai') {
+      setRoundLossFlicker(true);
+      window.setTimeout(() => setRoundLossFlicker(false), 1200);
+    } else if (res.winner === 'human') {
+      setAiRoundLossFlicker(true);
+      window.setTimeout(() => setAiRoundLossFlicker(false), 1200);
     }
-  };
 
-  const handleImportJsonCard = (rawJson: string, fileName: string) => {
-    try {
-      const imported = registerImportedContractCard(rawJson, fileName);
-      setCatalog((prev) => [
-        imported,
-        ...prev.filter((item) => item.fileName !== imported.fileName),
-      ]);
-      setCharacter(imported);
-      setActiveExpression('smile');
-      setState((prev) => ({
-        ...prev,
-        players: {
-          ...prev.players,
-          ai: { ...prev.players.ai, name: imported.name },
-        },
-      }));
-      pushToast('success', `契约卡导入成功：${imported.name}`, `包含 ${imported.expressionCount} 张表情差分`);
-    } catch (err) {
-      pushToast(
-        'error',
-        '契约卡格式校验未通过',
-        err instanceof Error ? err.message : '请上传有效的 night-sugar/girl-card JSON 文件'
-      );
+    const line =
+      res.reason === 'scan-caught'
+        ? res.winner === 'human'
+          ? `切……居然被你扫出底层篡改了？算力池 ${res.potWon} 归你，这手技能也被封印了。`
+          : `抓到你偷偷改牌了哦！直接判负并封印技能，奖池 ${res.potWon} 我收下了。`
+        : res.winner === 'ai'
+          ? `算力池 ${res.potWon} 已被我全数接管。下一局还要继续接入吗？`
+          : res.winner === 'human'
+            ? `漂亮的牌序博弈……这 ${res.potWon} 算力归你了，下一把我会改写策略。`
+            : `完全同分平局？一人一半回收算力池，下一局再见真章。`;
+
+    enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+  }, [state.phase, state.result, state.handNumber, character.name, enqueueTask]);
+
+  const cancelHoldHalfRaise = useCallback(() => {
+    if (holdIntervalRef.current !== null) {
+      window.clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
     }
-  };
-
-  const handleSendChatMessage = async (text: string) => {
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      sender: 'human',
-      speakerName: '潜行黑客',
-      text,
-      timestamp: Date.now(),
-      tag: 'chat',
-    };
-    setChatMessages((prev) => [...prev.slice(-38), userMsg]);
-    setIsSendingChat(true);
-
-    try {
-      const res = await requestOpponentChatReply({
-        character,
-        state,
-        llmConfig,
-        chatHistory: [...chatMessages, userMsg],
-        userText: text,
-      });
-
-      if (res.logEntry) {
-        setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
-      }
-      if (res.errorMsg) {
-        pushToast('warn', '在线 LLM 响应异常，已平滑回退本地人格', res.errorMsg);
-      }
-
-      setActiveExpression(res.expression);
-      setChatMessages((prev) => [
-        ...prev.slice(-38),
-        {
-          id: `r-${Date.now()}`,
-          sender: 'opponent',
-          speakerName: `${character.name} // ${character.codename}`,
-          text: res.reply,
-          expression: res.expression,
-          timestamp: Date.now(),
-          tag: 'chat',
-          fromLlm: res.fromLlm,
-        },
-      ]);
-    } finally {
-      setIsSendingChat(false);
-    }
-  };
+    setHoldProgress(0);
+  }, []);
 
   const executeHumanAction = (action: GameAction) => {
+    cancelHoldHalfRaise();
     setSelectedHandIndex(null);
+    setDraggedHandIndex(null);
+    setDragOverBoardIndex(null);
+    setShowRaiseTiers(false);
+    setScanMode(false);
     setState((prev) => applyAction(prev, action));
   };
 
-  // Direct-Click Step 1 for Swap: Click own open hand card
+  const startHoldHalfRaise = (halfAmt: number) => {
+    if (halfAmt <= 0 || holdIntervalRef.current !== null) return;
+    const startMs = Date.now();
+    const durationMs = 720;
+    setHoldProgress(4);
+    holdIntervalRef.current = window.setInterval(() => {
+      const pct = Math.min(100, Math.round(((Date.now() - startMs) / durationMs) * 100));
+      setHoldProgress(pct);
+      if (pct >= 100) {
+        if (holdIntervalRef.current !== null) {
+          window.clearInterval(holdIntervalRef.current);
+          holdIntervalRef.current = null;
+        }
+        setHoldProgress(0);
+        executeHumanAction({ type: 'raise', amount: halfAmt, isHalfStack: true });
+      }
+    }, 24);
+  };
+
+  const handleExecuteHack = (skill: HackSkillId) => {
+    if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
+    if (getBetDiff(state, 'human') > 0) {
+      pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能使用黑客或扫描技能');
+      return;
+    }
+    if (state.players.human.sealedSkills.includes(skill)) {
+      pushToast('error', '该黑客技能已被封印', '本局对抗中无法再次使用该篡改协议');
+      return;
+    }
+    if (selectedHandIndex === null) {
+      pushToast('warn', '请先点击一张己方明牌', '黑客技能仅可对当前手上的公开明牌使用');
+      return;
+    }
+    const action: GameAction = { type: 'hack', handIndex: selectedHandIndex, skill };
+    if (!isActionLegal(state, action)) {
+      const hc = state.players.human.hand[selectedHandIndex];
+      const cost = getHackSkillCost(state, skill);
+      if (state.players.human.chips < cost) {
+        pushToast('warn', `算力不足（需预支 ${cost}）`);
+      } else if (!hc || hc.visibility !== 'open') {
+        pushToast('warn', '仅可对己方公开明牌使用篡改技能');
+      } else {
+        pushToast('warn', skill === 'plus-one' ? '当前已是最大点数 A' : '当前已是最小点数 2');
+      }
+      return;
+    }
+    setState((prev) => applyAction(prev, action));
+    pushToast('info', '黑客协议注入成功', '改变结果仅己方可见，且可继续交换或行动');
+  };
+
+  const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
+    if (!scanMode || state.currentTurn !== 'human' || state.phase === 'showdown') return;
+    if (getBetDiff(state, 'human') > 0) {
+      setScanMode(false);
+      pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能进行扫描');
+      return;
+    }
+    const action: GameAction = { type: 'scan', targetKind, targetIndex };
+    if (!isActionLegal(state, action)) {
+      pushToast('warn', '该节点本轮已扫描过或算力不足');
+      setScanMode(false);
+      return;
+    }
+    setScanMode(false);
+    setState((prev) => applyAction(prev, action));
+  };
+
   const handleSelectHumanCard = (handIndex: number) => {
     if (state.currentTurn !== 'human' || state.phase === 'showdown' || state.phase === 'river') {
       return;
@@ -435,7 +834,7 @@ export function App() {
       pushToast(
         'warn',
         '请先补齐跟注差额',
-        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可选牌互换。`
+        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可拖拽或点牌互换。`
       );
       return;
     }
@@ -453,7 +852,7 @@ export function App() {
       pushToast(
         'warn',
         `换牌门票不足（需 ${swapFee} 算力）`,
-        '当前剩余算力不足换牌，可直接点击上方未翻开暗牌免费翻牌。'
+        '可直接点击上方未翻开暗牌免费翻牌。'
       );
       return;
     }
@@ -461,9 +860,6 @@ export function App() {
     setSelectedHandIndex(handIndex);
   };
 
-  // Direct-Click Board Hidden Card:
-  // - If own open card is selected -> Immediate Swap!
-  // - Otherwise -> Immediate 1-Click Free Flip!
   const handleSelectBoardSlot = (boardIndex: number) => {
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     const slot = state.board[boardIndex];
@@ -475,7 +871,7 @@ export function App() {
       pushToast(
         'warn',
         '请先补齐跟注差额',
-        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可直接点击暗牌翻牌或互换。`
+        `右侧点击「跟注 +${paid}」（不消耗行动权），随后即可直接翻牌或互换。`
       );
       return;
     }
@@ -498,242 +894,1431 @@ export function App() {
     executeHumanAction({ type: 'flip', boardIndex });
   };
 
+  // Drag-and-Drop Swap Handlers
+  const handleHandDragStart = (handIndex: number, e: DragEvent<HTMLDivElement>) => {
+    if (state.currentTurn !== 'human' || state.phase === 'showdown' || state.phase === 'river') {
+      e.preventDefault();
+      return;
+    }
+    const diff = getBetDiff(state, 'human');
+    if (diff > 0) {
+      e.preventDefault();
+      pushToast('warn', '请先补齐跟注差额', '补齐跟注后即可拖拽手牌与暗牌互换');
+      return;
+    }
+    const hc = state.players.human.hand[handIndex];
+    const swapFee = getNextSwapFee(state, 'human');
+    if (!hc || hc.visibility !== 'open' || hc.lockedFromSwap || state.players.human.chips < swapFee) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData('text/plain', String(handIndex));
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedHandIndex(handIndex);
+    setSelectedHandIndex(null);
+  };
+
+  const handleBoardDrop = (boardIndex: number, e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('text/plain');
+    const handIdx = raw !== '' ? Number(raw) : draggedHandIndex;
+    setDraggedHandIndex(null);
+    setDragOverBoardIndex(null);
+
+    if (handIdx === null || !Number.isInteger(handIdx)) return;
+    if (state.currentTurn !== 'human' || state.phase === 'showdown' || state.phase === 'river') return;
+    const slot = state.board[boardIndex];
+    if (!slot || slot.isOpen) return;
+    if (getBetDiff(state, 'human') > 0) return;
+
+    const swapFee = getNextSwapFee(state, 'human');
+    if (state.players.human.chips < swapFee) {
+      pushToast('warn', `换牌门票不足（需 ${swapFee}）`);
+      return;
+    }
+
+    executeHumanAction({
+      type: 'swap',
+      handIndex: handIdx,
+      boardIndex,
+    });
+  };
+
   const handleNextHand = () => {
     setSelectedHandIndex(null);
+    setShowRaiseTiers(false);
     setActiveExpression('calm');
     setState((prev) => startNextHand(prev));
   };
 
   const performFullReset = (customConfig?: GameConfig) => {
     const cfg = customConfig ?? state.config;
+    for (const id of timersRef.current) {
+      window.clearTimeout(id);
+    }
+    timersRef.current = [];
+    queueRef.current = [];
+    isAnimatingRef.current = false;
+    setQueuedCount(0);
+    setFloatingBubble(null);
+    setCrushingActive(false);
+    setHistoryOffset(0);
     setSelectedHandIndex(null);
+    setDraggedHandIndex(null);
+    setShowRaiseTiers(false);
+    setVfxTestMode('auto');
+    setRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
+    lastHandledShowdownHandRef.current = 0;
     setState(
       createInitialState({
         config: cfg,
         opponentName: character.name,
       })
     );
-    pushToast('info', '像素战场已重置', `双方初始算力恢复为 ${cfg.startingChips}`);
+    setMessages([
+      {
+        id: `reset-${Date.now()}`,
+        sender: 'opponent',
+        speaker: character.name,
+        text: '战局已重置。新的算力注入完成，请出牌。',
+        crushed: false,
+      },
+    ]);
   };
 
-  const situation = useMemo(() => computeBattleSituation(state), [state]);
-  const sitMeta = SITUATION_META[situation];
-  const suitStats = useMemo(() => getRemainingSuitStats(state, 'human'), [state]);
+  const handleSwitchContractFile = async (fileName: string) => {
+    setIsLoadingCard(true);
+    try {
+      const nextChar = await loadContractCharacterByFile(fileName);
+      const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
+      setCharacter(nextChar);
+      setActiveExpression('smile');
+      setState((prev) => ({
+        ...prev,
+        config: { ...prev.config, aiStyle: suggestedStyle },
+        players: {
+          ...prev.players,
+          ai: { ...prev.players.ai, name: nextChar.name },
+        },
+      }));
+      enqueueTask({
+        kind: 'opponent',
+        speaker: nextChar.name,
+        text: nextChar.quote || `契约窗口已切换至我的频段——我是${nextChar.name}。`,
+      });
+      pushToast('success', `已切换对手为「${nextChar.name}」`);
+      setActiveModal({ type: 'none' });
+    } catch (err) {
+      pushToast('error', '读取契约卡失败', err instanceof Error ? err.message : '未知错误');
+    } finally {
+      setIsLoadingCard(false);
+    }
+  };
 
-  const openBoardCards = useMemo(
+  const handleQuickSwitchOpponent = async () => {
+    if (catalog.length <= 1) {
+      setActiveModal({ type: 'contracts' });
+      return;
+    }
+    const currIdx = catalog.findIndex((c) => c.fileName === character.fileName);
+    const nextCard = catalog[(currIdx + 1) % catalog.length];
+    await handleSwitchContractFile(nextCard.fileName);
+  };
+
+  const handleImportJsonCard = (rawJson: string, fileName: string) => {
+    try {
+      const imported = registerImportedContractCard(rawJson, fileName);
+      setCatalog((prev) => [
+        imported,
+        ...prev.filter((item) => item.fileName !== imported.fileName),
+      ]);
+      setCharacter(imported);
+      setActiveExpression('smile');
+      setState((prev) => ({
+        ...prev,
+        players: {
+          ...prev.players,
+          ai: { ...prev.players.ai, name: imported.name },
+        },
+      }));
+      pushToast('success', `契约卡导入成功：${imported.name}`);
+    } catch (err) {
+      pushToast(
+        'error',
+        '契约卡格式校验未通过',
+        err instanceof Error ? err.message : '请上传有效的 night-sugar/girl-card JSON'
+      );
+    }
+  };
+
+  const handleSendChat = async () => {
+    const trimmed = chatDraft.trim();
+    if (!trimmed) return;
+    setChatDraft('');
+
+    enqueueTask({ kind: 'human', text: trimmed });
+
+    const res = await requestOpponentChatReply({
+      character,
+      state: latestStateRef.current,
+      llmConfig,
+      chatHistory: [],
+      userText: trimmed,
+    });
+    if (res.logEntry) {
+      setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
+    }
+    setActiveExpression(res.expression);
+    enqueueTask({
+      kind: 'opponent',
+      speaker: character.name,
+      text: res.reply,
+    });
+  };
+
+  const handleReplayBubble = () => {
+    const sample =
+      character.voice?.samples?.[0] ??
+      character.quote ??
+      '数据流正常，准备下一手博弈。';
+    enqueueTask({ kind: 'opponent', speaker: character.name, text: sample });
+  };
+
+  // Live Hand Summaries (Respecting hidden tamper isolation: opponent only sees unmodified cards!)
+  const openBoardCardsForHuman = useMemo(
     () =>
       state.board
         .filter((b) => b.isOpen || state.config.revealOpponentHidden)
-        .map((b) => b.card),
-    [state.board, state.config.revealOpponentHidden]
+        .map((b) => getVisibleBoardCard(b, 'human', state.phase === 'showdown' || state.config.revealOpponentHidden)),
+    [state.board, state.config.revealOpponentHidden, state.phase]
   );
 
   const humanSummary = useMemo(() => {
-    const known = [...state.players.human.hand.map((h) => h.card), ...openBoardCards];
+    const known = [...state.players.human.hand.map((h) => h.card), ...openBoardCardsForHuman];
     return evaluateVisibleHandSummary(known, 0);
-  }, [state.players.human.hand, openBoardCards]);
+  }, [state.players.human.hand, openBoardCardsForHuman]);
 
   const opponentSummary = useMemo(() => {
     const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
     const knownAi = state.players.ai.hand
       .filter((h) => revealAll || h.visibility === 'open')
-      .map((h) => h.card);
+      .map((h) => getVisibleHandCard(h, 'human', 'ai', revealAll));
     const hiddenAiCount = state.players.ai.hand.length - knownAi.length;
-    return evaluateVisibleHandSummary([...knownAi, ...openBoardCards], hiddenAiCount);
-  }, [state.players.ai.hand, openBoardCards, state.phase, state.config.revealOpponentHidden]);
+    return evaluateVisibleHandSummary([...knownAi, ...openBoardCardsForHuman], hiddenAiCount);
+  }, [state.players.ai.hand, openBoardCardsForHuman, state.phase, state.config.revealOpponentHidden]);
 
-  const hiddenBoardCount = getHiddenBoardCount(state);
-  const diff = getBetDiff(state, 'human');
+  // Sliding Window Math for Chat
+  const crushedCount = messages.filter((m) => m.crushed).length;
+  const windowCap = getWindowCapacity();
+  const bottomIdx = Math.max(0, crushedCount - historyOffset);
+  const topIdx =
+    historyOffset === 0
+      ? messages.length - 1
+      : Math.min(messages.length - 1, bottomIdx + windowCap - 1);
+  const hiddenBelow = messages.slice(0, bottomIdx);
+  const windowItems = messages.slice(bottomIdx, Math.min(messages.length, topIdx + 2));
+
+  const handleFeedWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (crushedCount === 0 || isAnimatingRef.current) return;
+    if (
+      (e.deltaY > 0 && wheelAccumRef.current < 0) ||
+      (e.deltaY < 0 && wheelAccumRef.current > 0)
+    ) {
+      wheelAccumRef.current = 0;
+    }
+    wheelAccumRef.current += e.deltaY;
+
+    if (wheelAccumRef.current >= 45) {
+      wheelAccumRef.current = 0;
+      setHistoryOffset((prev) => {
+        if (prev >= crushedCount) return prev;
+        const nextOffset = prev + 1;
+        const enteringMsg = messagesRef.current[crushedCount - nextOffset];
+        if (enteringMsg) setEnteringId(enteringMsg.id);
+        return nextOffset;
+      });
+    } else if (wheelAccumRef.current <= -45) {
+      wheelAccumRef.current = 0;
+      setEnteringId(null);
+      setHistoryOffset((prev) => Math.max(0, prev - 1));
+    }
+  };
+
+  // Game State Derivations
+  const human = state.players.human;
+  const ai = state.players.ai;
   const isShowdown = state.phase === 'showdown';
   const isHumanTurn = state.currentTurn === 'human' && !isShowdown;
+  const diff = getBetDiff(state, 'human');
+  const paid = Math.min(diff, human.chips);
+  const willBeAllIn = human.chips - paid === 0 || ai.allIn;
+  const hiddenCount = getHiddenBoardCount(state);
+  const swapFee = getNextSwapFee(state, 'human');
+  const raiseRange = getLegalRaiseRange(state, 'human', diff > 0 ? paid : 0);
+  const raisePresets = raiseRange.allowed
+    ? computeThreeRaisePresets(raiseRange.min, raiseRange.max)
+    : [];
+  const halfRaiseAmt = getHalfStackRaiseAmount(state, 'human');
+  const raiseCap = getCurrentRaiseCap(state);
+  const maxRaises = getMaxRaisesAllowed(state);
+  const revealAllAi = isShowdown || state.config.revealOpponentHidden;
+  const evt = state.lastAction;
 
-  let poolStatusLabel = '对端回合';
-  let poolStatusWarn = false;
-  if (isShowdown && state.result) {
-    poolStatusLabel =
-      state.result.winner === 'tie'
-        ? '平局分池'
-        : state.result.winner === 'human'
-          ? '我方获胜'
-          : '对端获胜';
-  } else if (isHumanTurn) {
-    if (diff > 0) {
-      poolStatusLabel = `待跟注 +${Math.min(diff, state.players.human.chips)}`;
-      poolStatusWarn = true;
-    } else if (selectedHandIndex !== null) {
-      poolStatusLabel = '点暗牌互换';
-    } else {
-      poolStatusLabel = '我方回合';
-    }
-  }
+  // Damage & Defeat VFX State (Applies to BOTH Human and Opponent!)
+  const isBankrupt =
+    vfxTestMode === 'bankrupt' ||
+    (isShowdown && (human.chips === 0 || ai.chips === 0));
+  const isAiLowCompute =
+    !isBankrupt &&
+    (vfxTestMode === 'low' || (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
+  const isHumanLowCompute =
+    !isBankrupt &&
+    (vfxTestMode === 'low' || (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
+  const isLowCompute = isAiLowCompute || isHumanLowCompute;
+
+  const portraitSrc = resolveCharacterPortrait(
+    character,
+    activeExpression,
+    llmConfig.overloadPersona
+  );
+  const accentColor = llmConfig.overloadPersona
+    ? '#FF4757'
+    : character.color || '#FF2E88';
+
+  const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
+  const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
+  const boardWinIds = new Set(
+    state.result?.winner === 'human'
+      ? (state.result.humanEval?.bestFive.map((c) => c.id) ?? [])
+      : state.result?.winner === 'ai'
+        ? (state.result.aiEval?.bestFive.map((c) => c.id) ?? [])
+        : []
+  );
 
   return (
-    <div className="cyber-app-shell">
-      <CyberBackdrop situation={situation} pot={state.pot} />
+    <div className="lc-shell">
+      <CyberBackdrop situation={isBankrupt ? 'breach' : isLowCompute ? 'overclock' : 'recon'} pot={state.pot} />
 
-      {/* Top Pixel-OS Taskbar Window */}
-      <header className="px-taskbar">
-        <div className="topbar-left">
-          <div className="brand-cluster">
-            <NetrunnerBrandLogo size={26} />
-            <div>
-              <h1 className="brand-title-main">黑域协议 PIXEL-OS</h1>
-              <div className="brand-sub-code">{sitMeta.code}</div>
+      {/* Centered & Aligned 3x3 Tactical Stage */}
+      <main className="lc-stage-grid" aria-label="牌桌主视区">
+        {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
+        <aside className="lc-pool-slot" aria-label="算力池计量栏">
+          <ComputePoolBar
+            pot={state.pot}
+            startingChips={state.config.startingChips}
+            lastAction={state.lastAction}
+          />
+        </aside>
+
+        {/* COL 1, ROW 3: Bottom-Left 3-Button System Stack */}
+        <div className="lc-left-action-stack" role="group" aria-label="系统快捷控制栏">
+          <button
+            id="hud-btn-settings"
+            type="button"
+            className="lc-stack-btn"
+            onClick={() => setActiveModal({ type: 'settings-menu' })}
+            aria-label="打开集成设置菜单"
+          >
+            <span className="lc-btn-inline">
+              <PixelGearIcon size={15} />
+              设置
+            </span>
+            <span className="lc-stack-sub">系统菜单</span>
+          </button>
+
+          <button
+            id="hud-btn-quick-restart"
+            type="button"
+            className="lc-stack-btn amber"
+            onClick={() => performFullReset()}
+          >
+            <span className="lc-btn-inline">
+              <PixelRestartIcon size={15} />
+              快速重开
+            </span>
+            <span className="lc-stack-sub">重置牌桌</span>
+          </button>
+
+          <button
+            id="hud-btn-switch-char"
+            type="button"
+            className="lc-stack-btn pink"
+            onClick={handleQuickSwitchOpponent}
+          >
+            <span className="lc-btn-inline">
+              <PixelSwitchUserIcon size={15} />
+              换人
+            </span>
+            <span className="lc-stack-sub">切换对手</span>
+          </button>
+        </div>
+
+        {/* COL 2, ROW 1: Enlarged Opponent Window + Layered Vertical Data Streams + Docked 3 Cards */}
+        <section
+          className={`lc-hud-box lc-opponent-zone ${isLowCompute ? 'is-low-compute' : ''} ${
+            isBankrupt ? 'is-bankrupt' : ''
+          }`}
+          style={{ '--char-accent': accentColor } as CSSProperties}
+          aria-label="对手状态与手牌区"
+        >
+          <header className="lc-opp-topbar">
+            <div className="lc-opp-name">
+              <span className="lc-opp-dot" aria-hidden="true" />
+              <span>
+                {character.name} [{character.title}]
+              </span>
+            </div>
+            <span className="lc-opp-codename">
+              {isAiThinking ? 'THINKING...' : character.codename.toUpperCase()}
+            </span>
+          </header>
+
+          <div className="lc-opp-portrait-layer">
+            {/* Layer 1 (z:1): Majority of Vertical Data Streams BEHIND Portrait */}
+            <div className="lc-opp-streams-back" aria-hidden="true">
+              {BACK_PORTRAIT_STREAMS.map((s, idx) => (
+                <div
+                  key={idx}
+                  className="lc-opp-stream-col"
+                  style={{ left: s.left, animationDuration: s.dur, animationDelay: s.delay }}
+                >
+                  <span>{s.tokens}</span>
+                  <span>{s.tokens}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Layer 2 (z:2): Character Portrait Cutout */}
+            <img
+              src={portraitSrc}
+              alt={`${character.name}半身立绘`}
+              className="lc-opp-portrait-img"
+              width={550}
+              height={420}
+            />
+
+            {/* Layer 3 (z:3): Minority of Vertical Data Streams IN FRONT of Portrait */}
+            <div className="lc-opp-streams-front" aria-hidden="true">
+              {FRONT_PORTRAIT_STREAMS.map((s, idx) => (
+                <div
+                  key={idx}
+                  className={`lc-opp-stream-col ${s.accent ? 'accent' : ''}`}
+                  style={{ left: s.left, animationDuration: s.dur, animationDelay: s.delay }}
+                >
+                  <span>{s.tokens}</span>
+                  <span>{s.tokens}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="lc-opp-portrait-fade" aria-hidden="true" />
+
+            {/* Damage Effect 1B: Opponent Single-Round Defeat Mosaic Hit */}
+            {aiRoundLossFlicker && (
+              <div className="lc-opp-mosaic-hit" aria-hidden="true">
+                {MOSAIC_FLICKER_TILES.slice(0, 80).map((cls, i) => (
+                  <span key={i} className={`lc-mosaic-tile ${cls}`} />
+                ))}
+              </div>
+            )}
+
+            {/* Damage Effect 3: Bankrupt (0 Compute) Mosaic Engulfment */}
+            {isBankrupt && (
+              <>
+                <div className="lc-mosaic-flood-overlay" aria-hidden="true">
+                  {MOSAIC_FLOOD_CELLS.map((tone, i) => (
+                    <span key={i} className={`lc-mosaic-flood-cell ${tone}`} />
+                  ))}
+                </div>
+                <div className="lc-bankrupt-banner" aria-hidden="true">
+                  {human.chips === 0 ? 'COMPUTE DEPLETED // SYSTEM CRASH' : 'TARGET BROKEN // ROOT TAKEOVER'}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="lc-opp-cards-dock">
+            <div className="lc-status-strip">
+              <span className="lc-micro-tag pink">
+                对端：{opponentSummary.label} · {opponentSummary.detail}
+              </span>
+              <span className="lc-micro-tag">可用算力 {ai.chips}</span>
+            </div>
+
+            <div className="lc-cards-row">
+              {ai.hand.map((hc, idx) => {
+                const isPrivate = hc.visibility === 'private';
+                const showFace = !isPrivate || revealAllAi;
+                const visibleCard = getVisibleHandCard(hc, 'human', 'ai', revealAllAi);
+                const isSwappingHidden = Boolean(
+                  swapFlight && swapFlight.actor === 'ai' && swapFlight.handIndex === idx
+                );
+                const alreadyScanned = state.scannedKeys.includes(`human:hand:${idx}`);
+                const canScanCard =
+                  scanMode && isHumanTurn && !alreadyScanned && human.chips >= state.config.scanCost;
+
+                const aiTamperLabel =
+                  revealAllAi &&
+                  hc.originalCard &&
+                  (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
+                    ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
+                    : undefined;
+
+                return (
+                  <CyberCard3D
+                    key={`ai-hand-${idx}`}
+                    id={`opponent-hand-card-${idx}`}
+                    card={showFace ? visibleCard : undefined}
+                    faceDown={!showFace}
+                    size="sm"
+                    backCode="暗码"
+                    isSwappingHidden={isSwappingHidden}
+                    tamperLabel={aiTamperLabel}
+                    isScanTarget={canScanCard}
+                    isScannedClean={alreadyScanned}
+                    justActed={Boolean(
+                      !isSwappingHidden &&
+                        evt &&
+                        evt.actor === 'ai' &&
+                        evt.type === 'swap' &&
+                        evt.handIndex === idx
+                    )}
+                    isWinner={
+                      isShowdown && state.result?.winner === 'ai' && aiWinIds.has(hc.card.id)
+                    }
+                    actionHint={canScanCard ? `点击扫描 ${character.name} 手牌 #${idx + 1}（预支 ${state.config.scanCost}）` : undefined}
+                    onClick={canScanCard ? () => handleExecuteScan('hand', idx) : undefined}
+                  />
+                );
+              })}
             </div>
           </div>
+        </section>
 
-          <div className="telemetry-pills" aria-label="实时战况遥测">
-            <span className="cyber-badge cyan">
-              第 #{state.handNumber} 局 · {PHASE_LABELS[state.phase]}
+        {/* COL 2, ROW 2: 4 Community Cards (Direct Flip + Click-Swap + Drag-Drop Target) */}
+        <section className="lc-hud-box lc-board-zone" aria-label="公共加密节点区">
+          <div className="lc-board-header">
+            <span className="lc-board-title">
+              <PixelNodesIcon size={13} />
+              BOARD // 公共加密节点
             </span>
-            <span
-              className={`cyber-badge ${
-                situation === 'breach'
-                  ? 'danger'
-                  : situation === 'overclock'
-                    ? 'warn'
-                    : 'pink'
-              }`}
-            >
-              <Shield size={12} aria-hidden="true" />
-              战况：{sitMeta.label}（防火墙 {sitMeta.firewallPct}%）
-            </span>
-            <span className="cyber-badge">
-              暗牌 {hiddenBoardCount}/4 · 限注 {getCurrentRaiseCap(state)} · 加注{' '}
-              {state.raisesInSubPhase}/{getMaxRaisesAllowed(state)}
+            <span className="lc-micro-tag cyan">
+              剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}
             </span>
           </div>
-        </div>
 
-        <nav className="topbar-nav" aria-label="系统功能窗口导航">
-          <button
-            id="nav-btn-contracts"
-            type="button"
-            className={`os-nav-btn ${activeModal.type === 'contracts' ? 'active' : ''}`}
-            onClick={() => setActiveModal({ type: 'contracts' })}
-          >
-            <Users size={14} aria-hidden="true" />
-            契约档案 ({catalog.length})
-          </button>
-
-          <button
-            id="nav-btn-llm"
-            type="button"
-            className={`os-nav-btn ${
-              activeModal.type === 'llm' || llmConfig.enabled ? 'highlight' : ''
-            }`}
-            onClick={() => setActiveModal({ type: 'llm' })}
-          >
-            <Bot size={14} aria-hidden="true" />
-            LLM链路
-          </button>
-
-          <button
-            id="nav-btn-rules"
-            type="button"
-            className={`os-nav-btn ${
-              activeModal.type === 'protocol' && activeModal.tab !== 'audit' ? 'active' : ''
-            }`}
-            onClick={() => setActiveModal({ type: 'protocol', tab: 'suits' })}
-          >
-            <BookOpen size={14} aria-hidden="true" />
-            概率与规则
-          </button>
-
-          <button
-            id="nav-btn-audit"
-            type="button"
-            className={`os-nav-btn ${
-              activeModal.type === 'protocol' && activeModal.tab === 'audit' ? 'active' : ''
-            }`}
-            onClick={() => setActiveModal({ type: 'protocol', tab: 'audit' })}
-          >
-            <History size={14} aria-hidden="true" />
-            流水日志
-          </button>
-
-          <button
-            id="nav-btn-tuning"
-            type="button"
-            className={`os-nav-btn ${
-              activeModal.type === 'tuning' || state.config.revealOpponentHidden ? 'active' : ''
-            }`}
-            onClick={() => setActiveModal({ type: 'tuning' })}
-          >
-            <Sliders size={14} aria-hidden="true" />
-            数值调优
-          </button>
-        </nav>
-      </header>
-
-      {/* Multi-Window Pixel Desktop Workspace */}
-      <main className="px-desktop-grid">
-        {/* Left Window: Compute Pool Column Bar + Flying Data Packet */}
-        <ComputePoolBar
-          pot={state.pot}
-          startingChips={state.config.startingChips}
-          lastAction={state.lastAction}
-          statusLabel={poolStatusLabel}
-          statusWarn={poolStatusWarn}
-        />
-
-        {/* Center Stack: [Opp Cards + Colored Portrait Window] -> [4 Board Cards Window] -> [My Cards + Right 3-Tier Action Window] */}
-        <div className="center-windows-stack">
-          <OpponentTerminal
-            state={state}
-            character={character}
-            opponentSummary={opponentSummary}
-            activeExpression={activeExpression}
-            overloadMode={llmConfig.overloadPersona}
-            isAiTurn={state.currentTurn === 'ai' && !isShowdown}
-            isAiThinking={isAiThinking}
-            llmEnabled={llmConfig.enabled}
-            onSelectExpression={(expr) => setActiveExpression(expr)}
-            onToggleOverload={() => {
-              const next = { ...llmConfig, overloadPersona: !llmConfig.overloadPersona };
-              setLlmConfig(next);
-              saveLlmConfigToStorage(next);
-              pushToast(
-                next.overloadPersona ? 'warn' : 'info',
-                next.overloadPersona
-                  ? `${character.name}：过载态窗口已激活`
-                  : `${character.name}：恢复专属特征色窗口`
+          <div className="lc-cards-row">
+            {state.board.map((slot) => {
+              const isHidden = !slot.isOpen;
+              const clickableHidden = isHumanTurn && isHidden && !scanMode;
+              const showFace = slot.isOpen || (isHidden && state.config.revealOpponentHidden);
+              const visibleBoardCard = getVisibleBoardCard(slot, 'human', revealAllAi);
+              const isDropTarget = draggedHandIndex !== null && clickableHidden && diff === 0;
+              const isDropHover = isDropTarget && dragOverBoardIndex === slot.index;
+              const isSwappingHidden = Boolean(
+                swapFlight && swapFlight.boardIndex === slot.index
               );
-            }}
-            onOpenArchive={() => setActiveModal({ type: 'contracts' })}
-          />
+              const alreadyScannedBoard = state.scannedKeys.includes(`human:board:${slot.index}`);
+              const canScanBoard =
+                scanMode &&
+                isHumanTurn &&
+                slot.isOpen &&
+                slot.swappedBy === 'ai' &&
+                !alreadyScannedBoard &&
+                human.chips >= state.config.scanCost;
 
-          <CyberTableArena
-            state={state}
-            selectedHandIndex={selectedHandIndex}
-            humanSummary={humanSummary}
-            onSelectHumanCard={handleSelectHumanCard}
-            onSelectBoardSlot={handleSelectBoardSlot}
-            onClearSelection={() => setSelectedHandIndex(null)}
-            onExecuteAction={executeHumanAction}
-            onNextHand={handleNextHand}
-            onRequestResetMatch={() => setActiveModal({ type: 'confirm-reset' })}
-          />
+              const boardTamperLabel =
+                (slot.swappedBy === 'human' || revealAllAi) &&
+                slot.originalCard &&
+                (slot.card.rank !== slot.originalCard.rank ||
+                  slot.card.suit !== slot.originalCard.suit)
+                  ? `原:${formatSuitLabel(slot.originalCard.suit)}${formatRank(slot.originalCard.rank)}`
+                  : undefined;
+
+              const hint = canScanBoard
+                ? `点击扫描对端换出的节点 #${slot.index + 1}（预支 ${state.config.scanCost}）`
+                : !clickableHidden
+                  ? undefined
+                  : draggedHandIndex !== null
+                    ? `松手将手牌 #${draggedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
+                    : selectedHandIndex !== null
+                      ? `点击将手牌 #${selectedHandIndex + 1} 与节点 #${slot.index + 1} 互换（门票 ${swapFee}）`
+                      : `点击直接免费翻开节点 #${slot.index + 1}`;
+
+              return (
+                <CyberCard3D
+                  key={`board-slot-${slot.index}`}
+                  id={`board-node-card-${slot.index}`}
+                  card={showFace ? visibleBoardCard : undefined}
+                  faceDown={!showFace}
+                  size="md"
+                  backCode={`节点0${slot.index + 1}`}
+                  targetable={clickableHidden && diff === 0}
+                  isDropTarget={isDropTarget}
+                  isDropHover={isDropHover}
+                  isSwappingHidden={isSwappingHidden}
+                  swapSource={slot.source === 'swapped-in' ? slot.swappedBy : undefined}
+                  tamperLabel={boardTamperLabel}
+                  isScanTarget={canScanBoard}
+                  isScannedClean={alreadyScannedBoard}
+                  justActed={Boolean(
+                    !isSwappingHidden &&
+                      evt &&
+                      (evt.type === 'flip' || evt.type === 'swap') &&
+                      evt.boardIndex === slot.index
+                  )}
+                  isWinner={isShowdown && boardWinIds.has(slot.card.id)}
+                  actionHint={hint}
+                  onClick={
+                    canScanBoard
+                      ? () => handleExecuteScan('board', slot.index)
+                      : clickableHidden
+                        ? () => handleSelectBoardSlot(slot.index)
+                        : undefined
+                  }
+                  onDragOver={
+                    clickableHidden && diff === 0
+                      ? (e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverBoardIndex !== slot.index) {
+                            setDragOverBoardIndex(slot.index);
+                          }
+                        }
+                      : undefined
+                  }
+                  onDragLeave={
+                    clickableHidden
+                      ? () => {
+                          if (dragOverBoardIndex === slot.index) {
+                            setDragOverBoardIndex(null);
+                          }
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    clickableHidden && diff === 0
+                      ? (e) => handleBoardDrop(slot.index, e)
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+
+          <div className="lc-board-hint">
+            {!isHumanTurn
+              ? isShowdown
+                ? `第 #${state.handNumber} 局结算：${
+                    state.result?.winner === 'human'
+                      ? '我方胜出'
+                      : state.result?.winner === 'ai'
+                        ? `${character.name}胜出`
+                        : '平局分池'
+                  }`
+                : `等待 ${character.name} 行动...`
+              : scanMode
+                ? `扫描模式激活：点击上方 ${character.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
+                : diff > 0
+                  ? `遭遇加注：请先点击右侧「跟注 +${paid}」（不消耗行动）`
+                  : draggedHandIndex !== null
+                    ? `拖拽手牌 #${draggedHandIndex + 1}：松手放到任意暗牌即可互换（门票 ${swapFee}）`
+                    : selectedHandIndex !== null
+                      ? `已选中明牌 #${selectedHandIndex + 1}：可点击暗牌互换，或点下方黑客技能篡改`
+                      : '点暗牌=翻牌 ｜ 拖拽或先点己方明牌=互换/黑客篡改'}
+          </div>
+        </section>
+
+        {/* COL 2, ROW 3: Player 3 Cards + 1-Line Hacker & Scan Skill Bar */}
+        <section
+          className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
+          aria-label="己方手牌序列区"
+        >
+          <div className="lc-status-strip" style={{ width: '100%' }}>
+            <span className="lc-micro-tag cyan">
+              己方：{humanSummary.label} · {humanSummary.detail}
+            </span>
+            <span className="lc-micro-tag">可用算力 {human.chips}</span>
+          </div>
+
+          <div className="lc-cards-row">
+            {human.hand.map((hc, idx) => {
+              const isPrivate = hc.visibility === 'private';
+              const canSelectOpen = isHumanTurn && !isPrivate;
+              const canDrag =
+                isHumanTurn &&
+                state.phase !== 'river' &&
+                !isPrivate &&
+                !hc.lockedFromSwap &&
+                hiddenCount > 0 &&
+                diff === 0 &&
+                human.chips >= swapFee;
+              const isSwappingHidden = Boolean(
+                swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
+              );
+              const tamperLabel =
+                hc.originalCard &&
+                (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
+                  ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
+                  : undefined;
+
+              return (
+                <CyberCard3D
+                  key={`human-hand-${idx}`}
+                  id={`human-hand-card-${idx}`}
+                  card={hc.card}
+                  faceDown={false}
+                  size="lg"
+                  isOwnPrivate={isPrivate}
+                  selected={selectedHandIndex === idx}
+                  draggable={canDrag}
+                  isDragSource={draggedHandIndex === idx}
+                  isSwappingHidden={isSwappingHidden}
+                  tamperLabel={tamperLabel}
+                  justActed={Boolean(
+                    !isSwappingHidden &&
+                      evt &&
+                      ((evt.actor === 'human' && evt.type === 'swap' && evt.handIndex === idx) ||
+                        (evt.actor === 'human' && evt.type === 'hack' && evt.handIndex === idx))
+                  )}
+                  isWinner={
+                    isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
+                  }
+                  actionHint={
+                    isPrivate
+                      ? '己方私有暗牌（不可换出，不可篡改）'
+                      : canDrag
+                        ? '拖拽至暗牌互换；点击选中后可用黑客技能或点暗牌互换'
+                        : canSelectOpen
+                          ? '点击选中明牌以使用黑客技能'
+                          : undefined
+                  }
+                  onClick={canSelectOpen ? () => handleSelectHumanCard(idx) : undefined}
+                  onDragStart={canDrag ? (e) => handleHandDragStart(idx, e) : undefined}
+                  onDragEnd={() => {
+                    setDraggedHandIndex(null);
+                    setDragOverBoardIndex(null);
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Hacker Skills (+1 / -1 / Flip Suit) + Universal Scan Bar */}
+          <div className="lc-hack-bar" role="group" aria-label="黑客与扫描技能栏">
+            {(
+              [
+                {
+                  id: 'hack-btn-plus-one',
+                  skill: 'plus-one' as const,
+                  label: '+1',
+                  cost: state.config.hackPlusCost,
+                  icon: <PixelPlusOneIcon size={12} />,
+                },
+                {
+                  id: 'hack-btn-minus-one',
+                  skill: 'minus-one' as const,
+                  label: '-1',
+                  cost: state.config.hackMinusCost,
+                  icon: <PixelMinusOneIcon size={12} />,
+                },
+                {
+                  id: 'hack-btn-flip-suit',
+                  skill: 'flip-suit' as const,
+                  label: '反色',
+                  cost: state.config.hackFlipSuitCost,
+                  icon: <PixelFlipSuitIcon size={12} />,
+                },
+              ] as const
+            ).map((btn) => {
+              const isSealed = human.sealedSkills.includes(btn.skill);
+              const usedThisTurn = state.usedHackThisTurn;
+              const disabled = !isHumanTurn || diff > 0 || isSealed || usedThisTurn || human.chips < btn.cost;
+              return (
+                <button
+                  key={btn.skill}
+                  id={btn.id}
+                  type="button"
+                  className={`lc-hack-btn ${isSealed ? 'is-sealed' : ''}`}
+                  disabled={disabled}
+                  onClick={() => handleExecuteHack(btn.skill)}
+                  title={
+                    diff > 0
+                      ? '遭遇加注，请先在右侧跟注后再使用技能'
+                      : isSealed
+                        ? '此技能已被扫描抓获封印'
+                        : usedThisTurn
+                          ? '黑客技能每回合限用 1 次'
+                          : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                  }
+                >
+                  {btn.icon}
+                  <span>{isSealed ? '封印' : usedThisTurn ? '已用' : btn.label}</span>
+                  {!isSealed && !usedThisTurn && <span className="lc-hack-cost">{btn.cost}</span>}
+                </button>
+              );
+            })}
+
+            <button
+              id="hack-btn-scan-toggle"
+              type="button"
+              className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
+              disabled={!isHumanTurn || diff > 0 || state.usedScanThisTurn || human.chips < state.config.scanCost}
+              onClick={() => setScanMode((s) => !s)}
+              title={
+                diff > 0
+                  ? '遭遇加注，请先在右侧跟注后再进行扫描'
+                  : state.usedScanThisTurn
+                    ? '扫描技能每回合限用 1 次'
+                    : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${state.config.scanCost}，每回合限 1 次）`
+              }
+            >
+              <PixelScanIcon size={12} />
+              <span>{state.usedScanThisTurn ? '已用' : scanMode ? '取消' : '扫描'}</span>
+              {!state.usedScanThisTurn && <span className="lc-hack-cost">{state.config.scanCost}</span>}
+            </button>
+          </div>
+
+          <div className="lc-player-footer">
+            <span>PRIV=私有暗牌 · MOD=篡改仅己方可见</span>
+            <span>换牌门票：{swapFee}</span>
+          </div>
+        </section>
+
+        {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel */}
+        <aside
+          className="lc-right-upper-col"
+          style={{ '--char-accent': accentColor } as CSSProperties}
+          aria-label="右侧通讯栏"
+        >
+          <section
+            ref={chatPanelRef}
+            className="lc-hud-box lc-chat-panel"
+            aria-label="聊天堆积栏"
+          >
+            <header className="lc-chat-header">
+              <span className="lc-chat-title">
+                <PixelChatIcon size={13} />
+                CHAT // 通讯栏
+              </span>
+              <div className="lc-chat-actions">
+                {queuedCount > 0 && (
+                  <span className="lc-micro-tag" style={{ padding: '1px 5px', fontSize: 9.5 }}>
+                    队列 {queuedCount}
+                  </span>
+                )}
+                <button
+                  id="chat-btn-replay-bubble"
+                  type="button"
+                  className="lc-chat-replay-btn"
+                  onClick={handleReplayBubble}
+                  title="触发一次对手气泡弹出-悬浮-压底跌落"
+                >
+                  <PixelBroadcastIcon size={12} />
+                  发言
+                </button>
+              </div>
+            </header>
+
+            {floatingBubble && (
+              <div
+                key={floatingBubble.id}
+                className="lc-speech-bubble"
+                style={
+                  {
+                    '--contact-dy': `${floatingBubble.contactDy}px`,
+                    '--drop-dy': `${floatingBubble.dropDy}px`,
+                  } as CSSProperties
+                }
+                aria-live="polite"
+              >
+                <svg
+                  viewBox="0 0 12 16"
+                  shapeRendering="crispEdges"
+                  className="lc-speech-pointer"
+                  aria-hidden="true"
+                >
+                  <path d="M12 0V16H8V12H4V9H0V7H4V4H8V0H12Z" fill={accentColor} />
+                  <path d="M12 2V14H9V11H6V9H3V7H6V5H9V2H12Z" fill="#0B0911" />
+                </svg>
+                <div className="lc-chat-meta opponent">
+                  <span>{floatingBubble.speaker}</span>
+                  <span>OPP</span>
+                </div>
+                <div>{floatingBubble.text}</div>
+              </div>
+            )}
+
+            <div
+              ref={chatFeedRef}
+              className="lc-chat-feed"
+              onWheel={handleFeedWheel}
+              role="log"
+              aria-live="polite"
+            >
+              {(hiddenBelow.length > 0 || historyOffset > 0) && (
+                <div className="lc-crushed-dock" aria-label="压缩历史状态栏">
+                  <div className="lc-crushed-slivers">
+                    {hiddenBelow.slice(-3).map((old) => (
+                      <div key={old.id} className={`lc-crushed-sliver ${old.sender}`} />
+                    ))}
+                  </div>
+                  <div className="lc-crushed-caption">
+                    <span>
+                      {hiddenBelow.length > 0
+                        ? `历史压缩 x${hiddenBelow.length}`
+                        : '已达最早历史'}
+                    </span>
+                    <span>
+                      {historyOffset === 0
+                        ? '向下滚查看'
+                        : historyOffset >= crushedCount
+                          ? '向上滚返回'
+                          : `${historyOffset}/${crushedCount} · 滚轮翻阅`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div ref={activeStackRef} className="lc-active-stack">
+                {windowItems.map((msg, localIdx) => {
+                  const globalIdx = bottomIdx + localIdx;
+                  const isScrolledAbove = globalIdx > topIdx;
+                  const isCrushingNow = crushingActive && !msg.crushed;
+                  const isEnteringBottom = enteringId === msg.id;
+
+                  return (
+                    <article
+                      key={msg.id}
+                      className={`lc-chat-msg ${msg.sender} ${msg.anim ?? ''} ${
+                        isCrushingNow ? 'is-crushing-now' : ''
+                      } ${isScrolledAbove ? 'is-scrolled-above' : ''} ${
+                        isEnteringBottom ? 'enter-from-bottom' : ''
+                      }`}
+                      style={
+                        msg.riseDy !== undefined
+                          ? ({ '--rise-dy': `${msg.riseDy}px` } as CSSProperties)
+                          : undefined
+                      }
+                    >
+                      <div className="lc-chat-msg-inner">
+                        <div className={`lc-chat-meta ${msg.sender}`}>
+                          <span>{msg.speaker}</span>
+                          <span>{msg.sender === 'opponent' ? 'OPP' : 'YOU'}</span>
+                        </div>
+                        <div>{msg.text}</div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+
+            <form
+              className="lc-chat-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendChat();
+              }}
+            >
+              <label
+                htmlFor="chat-input-preview"
+                style={{
+                  position: 'absolute',
+                  width: 1,
+                  height: 1,
+                  overflow: 'hidden',
+                  clip: 'rect(0,0,0,0)',
+                }}
+              >
+                输入聊天消息
+              </label>
+              <input
+                id="chat-input-preview"
+                type="text"
+                className="lc-chat-input"
+                placeholder={`向 ${character.name} 发送消息...`}
+                value={chatDraft}
+                maxLength={120}
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSendChat();
+                  }
+                }}
+              />
+              <button
+                id="chat-btn-send-preview"
+                type="submit"
+                className="lc-chat-send-btn"
+                disabled={!chatDraft.trim()}
+              >
+                <PixelSendIcon size={13} />
+                发送
+              </button>
+            </form>
+          </section>
+        </aside>
+
+        {/* COL 3, ROW 3: Right-Side 3 Vertically Stacked Tactical Action Boxes */}
+        <div className="lc-action-stack" role="group" aria-label="右侧战术指令栏">
+          {isShowdown && state.result ? (
+            <>
+              {human.chips > 0 && ai.chips > 0 ? (
+                <button
+                  id="action-btn-next-hand"
+                  type="button"
+                  className="lc-stack-btn"
+                  onClick={handleNextHand}
+                >
+                  <span className="lc-btn-inline">
+                    <PixelSyncIcon size={15} />
+                    下一局协议
+                  </span>
+                  <span className="lc-stack-sub">第 #{state.handNumber + 1} 局</span>
+                </button>
+              ) : (
+                <button
+                  id="action-btn-match-restart"
+                  type="button"
+                  className="lc-stack-btn pink"
+                  onClick={() => performFullReset()}
+                >
+                  <span className="lc-btn-inline">
+                    <PixelRestartIcon size={15} />
+                    {human.chips > 0 ? '完胜！重开' : '算力归零！重开'}
+                  </span>
+                  <span className="lc-stack-sub">恢复 {state.config.startingChips}</span>
+                </button>
+              )}
+
+              <button
+                id="action-btn-showdown-summary"
+                type="button"
+                className="lc-stack-btn amber"
+                onClick={() => setActiveModal({ type: 'protocol', tab: 'audit' })}
+              >
+                <span className="lc-btn-inline">
+                  <PixelMenuIcon kind="audit" size={15} />
+                  {state.result.reason === 'showdown' &&
+                  state.result.humanEval &&
+                  state.result.aiEval
+                    ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
+                    : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : character.name}弃牌`}
+                </span>
+                <span className="lc-stack-sub">奖池 {state.result.potWon}</span>
+              </button>
+
+              <button
+                id="action-btn-showdown-reset"
+                type="button"
+                className="lc-stack-btn danger"
+                onClick={() => setActiveModal({ type: 'confirm-reset' })}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSeverIcon size={14} />
+                  重置整场
+                </span>
+                <span className="lc-stack-sub">清空进度</span>
+              </button>
+            </>
+          ) : !isHumanTurn ? (
+            <>
+              <button id="action-btn-ai-wait-1" type="button" className="lc-stack-btn" disabled>
+                <span className="lc-btn-inline">
+                  <PixelSyncIcon size={15} />
+                  对端推演中
+                </span>
+                <span className="lc-stack-sub">{character.name} 回合</span>
+              </button>
+              <button id="action-btn-ai-wait-2" type="button" className="lc-stack-btn pink" disabled>
+                <span className="lc-btn-inline">
+                  <PixelSurgeIcon size={15} />
+                  加注锁定
+                </span>
+                <span className="lc-stack-sub">上限 {raiseCap}</span>
+              </button>
+              <button id="action-btn-ai-wait-3" type="button" className="lc-stack-btn danger" disabled>
+                <span className="lc-btn-inline">
+                  <PixelSeverIcon size={14} />
+                  等待响应
+                </span>
+                <span className="lc-stack-sub">请稍候</span>
+              </button>
+            </>
+          ) : showRaiseTiers && raiseRange.allowed ? (
+            <>
+              <div className="lc-raise-tiers-mini-row">
+                {raisePresets.map((amt, tierIdx) => (
+                  <button
+                    key={amt}
+                    id={`raise-tier-btn-${tierIdx}`}
+                    type="button"
+                    className={`lc-stack-btn ${tierIdx === raisePresets.length - 1 ? 'amber' : 'pink'}`}
+                    onClick={() => executeHumanAction({ type: 'raise', amount: amt })}
+                  >
+                    <span className="lc-btn-inline">
+                      <PixelTierIcon level={(tierIdx + 1) as 1 | 2 | 3} size={13} />+{amt}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                id="raise-btn-hold-half"
+                type="button"
+                className="lc-stack-btn amber lc-hold-btn"
+                disabled={halfRaiseAmt <= 0}
+                onPointerDown={() => startHoldHalfRaise(halfRaiseAmt)}
+                onPointerUp={cancelHoldHalfRaise}
+                onPointerLeave={cancelHoldHalfRaise}
+                onPointerCancel={cancelHoldHalfRaise}
+                onKeyDown={(e) => {
+                  if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                    e.preventDefault();
+                    startHoldHalfRaise(halfRaiseAmt);
+                  }
+                }}
+                onKeyUp={cancelHoldHalfRaise}
+                title="长按 0.72 秒投入当前自身一半算力"
+              >
+                <div className="lc-hold-fill" style={{ width: `${holdProgress}%` }} aria-hidden="true" />
+                <span className="lc-btn-inline">
+                  <PixelHoldIcon size={15} />
+                  长按半数 +{halfRaiseAmt}
+                </span>
+                <span className="lc-stack-sub">
+                  {holdProgress > 0 ? `充能 ${holdProgress}%` : '按住 0.7s 投入 50%'}
+                </span>
+              </button>
+
+              <button
+                id="raise-tier-btn-back-cancel"
+                type="button"
+                className="lc-stack-btn"
+                onClick={() => {
+                  cancelHoldHalfRaise();
+                  setShowRaiseTiers(false);
+                }}
+              >
+                <span className="lc-btn-inline">
+                  <PixelMenuIcon kind="back" size={14} />
+                  返回指令
+                </span>
+                <span className="lc-stack-sub">取消加注</span>
+              </button>
+            </>
+          ) : diff > 0 ? (
+            <>
+              <button
+                id="lc-action-btn-call"
+                type="button"
+                className="lc-stack-btn"
+                onClick={() => executeHumanAction({ type: 'call' })}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSyncIcon size={15} />
+                  {state.phase === 'river'
+                    ? `跟注摊牌 +${paid}`
+                    : willBeAllIn
+                      ? `全下跟注 +${paid}`
+                      : `跟注 +${paid}`}
+                </span>
+                <span className="lc-stack-sub">
+                  {state.phase === 'river' || willBeAllIn ? '亮牌核验' : '不消耗行动'}
+                </span>
+              </button>
+
+              <button
+                id="lc-action-btn-open-reraise"
+                type="button"
+                className="lc-stack-btn pink"
+                disabled={!raiseRange.allowed || willBeAllIn}
+                onClick={() => setShowRaiseTiers(true)}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSurgeIcon size={15} />
+                  反加注
+                </span>
+                <span className="lc-stack-sub">
+                  {raiseRange.allowed && !willBeAllIn ? '三档定额' : '已达上限'}
+                </span>
+              </button>
+
+              <button
+                id="lc-action-btn-fold"
+                type="button"
+                className="lc-stack-btn danger"
+                onClick={() => executeHumanAction({ type: 'fold' })}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSeverIcon size={14} />
+                  弃牌断连
+                </span>
+                <span className="lc-stack-sub">放弃奖池</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                id="action-btn-primary-turn"
+                type="button"
+                className="lc-stack-btn"
+                disabled={state.phase !== 'river' && !state.justCalledThisTurn}
+                onClick={() =>
+                  executeHumanAction({
+                    type: state.phase === 'river' ? 'check' : 'end-turn',
+                  })
+                }
+              >
+                <span className="lc-btn-inline">
+                  <PixelSyncIcon size={15} />
+                  {state.phase === 'river' ? '静默过牌' : '结束回合'}
+                </span>
+                <span className="lc-stack-sub">
+                  {state.phase === 'river'
+                    ? '0 算力'
+                    : state.justCalledThisTurn
+                      ? '保留跟注移交'
+                      : '请点牌翻/换或加注'}
+                </span>
+              </button>
+
+              <button
+                id="lc-action-btn-open-raise"
+                type="button"
+                className="lc-stack-btn pink"
+                disabled={!raiseRange.allowed}
+                onClick={() => {
+                  setSelectedHandIndex(null);
+                  setShowRaiseTiers(true);
+                }}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSurgeIcon size={15} />
+                  加注施压
+                </span>
+                <span className="lc-stack-sub">
+                  {raiseRange.allowed
+                    ? `三档 (${state.raisesInSubPhase}/${maxRaises})`
+                    : '翻/换牌后重置'}
+                </span>
+              </button>
+
+              <button
+                id="action-btn-fold-idle"
+                type="button"
+                className="lc-stack-btn danger"
+                onClick={() => executeHumanAction({ type: 'fold' })}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSeverIcon size={14} />
+                  弃牌断连
+                </span>
+                <span className="lc-stack-sub">放弃奖池</span>
+              </button>
+            </>
+          )}
         </div>
-
-        {/* Right Windows: Suit Probability Radar Window + Neural Comm Window */}
-        <NeuralCommPanel
-          suitStats={suitStats}
-          showDeckTracker={state.config.showDeckTracker}
-          messages={chatMessages}
-          isSendingChat={isSendingChat}
-          llmEnabled={llmConfig.enabled}
-          opponentName={character.name}
-          onSendMessage={handleSendChatMessage}
-          onOpenLlmModal={() => setActiveModal({ type: 'llm' })}
-        />
       </main>
 
-      <PixelActionVfxOverlay event={state.lastAction} />
+      {/* Dual-Card Smooth Swap Flight Layer (Player & Opponent!) */}
+      {swapFlight && (
+        <div className="lc-swap-flight-layer" aria-hidden="true">
+          <div
+            className="lc-swap-flight-card"
+            style={
+              {
+                left: swapFlight.handToBoard.rect.left,
+                top: swapFlight.handToBoard.rect.top,
+                width: swapFlight.handToBoard.rect.width,
+                height: swapFlight.handToBoard.rect.height,
+                '--fly-dx': `${swapFlight.handToBoard.dx}px`,
+                '--fly-dy': `${swapFlight.handToBoard.dy}px`,
+              } as CSSProperties
+            }
+          >
+            <FlightCardShell
+              card={swapFlight.handToBoard.card}
+              faceDown={false}
+              isOwnPrivate={false}
+            />
+          </div>
+
+          <div
+            className="lc-swap-flight-card"
+            style={
+              {
+                left: swapFlight.boardToHand.rect.left,
+                top: swapFlight.boardToHand.rect.top,
+                width: swapFlight.boardToHand.rect.width,
+                height: swapFlight.boardToHand.rect.height,
+                '--fly-dx': `${swapFlight.boardToHand.dx}px`,
+                '--fly-dy': `${swapFlight.boardToHand.dy}px`,
+              } as CSSProperties
+            }
+          >
+            <FlightCardShell
+              card={swapFlight.boardToHand.card}
+              faceDown={swapFlight.boardToHand.faceDown}
+              isOwnPrivate={swapFlight.boardToHand.isOwnPrivate}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Laser Scan Sweep VFX Overlay (Both Player & Opponent Scans!) */}
+      {scanVfx && (
+        <div
+          key={scanVfx.id}
+          className={`lc-scan-beam-overlay ${scanVfx.caught ? 'caught' : ''}`}
+          style={{
+            left: scanVfx.rect.left - 3,
+            top: scanVfx.rect.top - 3,
+            width: scanVfx.rect.width + 6,
+            height: scanVfx.rect.height + 6,
+          }}
+          aria-hidden="true"
+        >
+          <div className="lc-scan-grid" />
+          <div className="lc-scan-laser" />
+          <span className="lc-scan-result-tag">
+            {scanVfx.caught ? 'TAMPERED!' : 'VERIFIED'}
+          </span>
+        </div>
+      )}
+
+      {/* Damage Effect 1: Single Round Defeat Mosaic Flicker Overlay */}
+      {roundLossFlicker && (
+        <div className="lc-mosaic-flicker-overlay" aria-hidden="true">
+          {MOSAIC_FLICKER_TILES.map((cls, i) => (
+            <span key={i} className={`lc-mosaic-tile ${cls}`} />
+          ))}
+        </div>
+      )}
+
       <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
 
+      {/* Integrated Settings Menu Overlay */}
+      {activeModal.type === 'settings-menu' && (
+        <div
+          className="lc-settings-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="系统集成设置菜单"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveModal({ type: 'none' });
+          }}
+        >
+          <div className="lc-settings-menu">
+            <div style={{ textAlign: 'center' }}>
+              <h2 className="lc-glitch-title">系统设置</h2>
+              <div className="lc-glitch-sub">&lt; CODE : MINGAN &gt;</div>
+            </div>
+
+            <div className="lc-menu-list" role="menu">
+              {SETTINGS_MENU_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  id={item.id}
+                  type="button"
+                  role="menuitem"
+                  className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
+                  onMouseEnter={() => setActiveMenuId(item.id)}
+                  onClick={() => {
+                    if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
+                    else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
+                    else if (item.keyName === 'rules') setActiveModal({ type: 'protocol', tab: 'suits' });
+                    else if (item.keyName === 'audit') setActiveModal({ type: 'protocol', tab: 'audit' });
+                    else if (item.keyName === 'tuning') setActiveModal({ type: 'tuning' });
+                  }}
+                >
+                  <PixelMenuIcon kind={item.icon} size={15} />
+                  {item.label}
+                </button>
+              ))}
+              <button
+                id="menu-close-back"
+                type="button"
+                role="menuitem"
+                className="lc-menu-item"
+                onClick={() => setActiveModal({ type: 'none' })}
+              >
+                <PixelMenuIcon kind="back" size={15} />
+                返回牌局
+              </button>
+            </div>
+
+            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides */}
+            <div className="lc-vfx-strip">
+              <span className="lc-menu-note">战损与危机特效即时预览（含对手受击）</span>
+              <div className="lc-vfx-btn-row">
+                <button
+                  id="vfx-test-round-loss"
+                  type="button"
+                  className={`lc-vfx-chip ${roundLossFlicker ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveModal({ type: 'none' });
+                    setRoundLossFlicker(true);
+                    setAiRoundLossFlicker(true);
+                    window.setTimeout(() => {
+                      setRoundLossFlicker(false);
+                      setAiRoundLossFlicker(false);
+                    }, 1200);
+                  }}
+                >
+                  单轮败北闪烁
+                </button>
+                <button
+                  id="vfx-test-low-compute"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'low' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'low' ? 'auto' : 'low'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'low' ? '关闭红流警报' : '低算力红流'}
+                </button>
+                <button
+                  id="vfx-test-bankrupt"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'bankrupt' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'bankrupt' ? 'auto' : 'bankrupt'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'bankrupt' ? '恢复立绘' : '归零淹没扭曲'}
+                </button>
+                <button
+                  id="vfx-test-reset"
+                  type="button"
+                  className="lc-vfx-chip"
+                  onClick={() => {
+                    setVfxTestMode('auto');
+                    setRoundLossFlicker(false);
+                    setAiRoundLossFlicker(false);
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  恢复正常
+                </button>
+              </div>
+            </div>
+
+            <div className="lc-menu-note">
+              {SETTINGS_MENU_ITEMS.find((i) => i.id === activeMenuId)?.note ??
+                '支持拖拽手牌至暗牌互换'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
         {activeModal.type === 'contracts' && (
           <ContractArchiveModal
@@ -797,6 +2382,63 @@ export function App() {
           onCancel={() => setActiveModal({ type: 'none' })}
         />
       )}
+    </div>
+  );
+}
+
+function FlightCardShell({
+  card,
+  faceDown,
+  isOwnPrivate,
+}: {
+  card?: Card;
+  faceDown: boolean;
+  isOwnPrivate?: boolean;
+}) {
+  if (faceDown || !card) {
+    return (
+      <div className="px-card-face px-card-back" style={{ transform: 'none' }}>
+        <div className="px-back-grid-icon" aria-hidden="true">
+          <span />
+        </div>
+        <span className="px-back-code">SWAP</span>
+      </div>
+    );
+  }
+  const isPink = card.suit === 'P';
+  const rankTxt = formatRank(card.rank);
+  const hexCode = `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}`;
+  return (
+    <div
+      className={`px-card-face px-card-front ${isPink ? 'suit-P' : 'suit-B'} ${
+        isOwnPrivate ? 'own-private-blink' : ''
+      }`}
+    >
+      <div className="px-card-hud-top">
+        <span className="px-card-hex">{hexCode}</span>
+        {isOwnPrivate ? (
+          <span className="px-card-priv-tag">PRIV</span>
+        ) : (
+          <span className="px-card-mini-dot" />
+        )}
+      </div>
+      <div className="px-card-hero-stage">
+        <span
+          className={`px-card-hero-rank ${isPink ? 'rank-pink' : 'rank-cyan'} ${
+            rankTxt === '10' ? 'is-ten' : ''
+          }`}
+        >
+          {rankTxt}
+        </span>
+      </div>
+      <div className="px-card-hud-bot">
+        <span className="px-card-suit-bar" />
+        <span className="px-card-pips">
+          <i />
+          <i />
+          <i />
+        </span>
+      </div>
     </div>
   );
 }
