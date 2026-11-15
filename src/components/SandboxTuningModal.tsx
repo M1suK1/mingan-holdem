@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { RotateCcw, Sliders, X } from 'lucide-react';
 import {
   DEFAULT_CONFIG,
+  type AiDifficulty,
   type AiStyle,
   type BattleSituation,
   type GameConfig,
@@ -137,6 +138,25 @@ export default function SandboxTuningModal({
                 <option value="breach">阶段四：全下核心熔断</option>
                 <option value="victory">结算态：破译接管</option>
                 <option value="disconnect">结算态：链路受阻</option>
+              </select>
+            </div>
+
+            <div className="form-field-row">
+              <label htmlFor="tuning-select-aidifficulty">本地 AI 博弈难度</label>
+              <select
+                id="tuning-select-aidifficulty"
+                className="cyber-select"
+                value={draft.aiDifficulty ?? 'auto'}
+                onChange={(e) => {
+                  const aiDifficulty = e.target.value as AiDifficulty;
+                  setDraft((p) => ({ ...p, aiDifficulty }));
+                  onApplyLive({ aiDifficulty });
+                }}
+              >
+                <option value="auto">自动随追捕威胁度递增（T1新兵 / T2标准 / T3+大师）</option>
+                <option value="rookie">T1 · 协议新兵（休闲启发式，较少改牌扫描）</option>
+                <option value="standard">T2 · 战术猎手（结合黑粉分布与收益判断）</option>
+                <option value="master">T3 · 协议裁决者（蒙特卡洛胜率+精准改牌+嫌疑扫描）</option>
               </select>
             </div>
 

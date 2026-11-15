@@ -88,7 +88,7 @@ import {
   type LlmCallLog,
   type LlmConfig,
 } from './engine/llmClient.ts';
-import { LocalAiAgent } from './engine/aiAgent.ts';
+import { LocalAiAgent, resolveEffectiveAiDifficulty } from './engine/aiAgent.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
@@ -395,10 +395,16 @@ export function App() {
     return id;
   }, []);
 
+  const effectiveAiDifficulty = useMemo(
+    () => resolveEffectiveAiDifficulty(state.config.aiDifficulty, dossier.threatLevel),
+    [state.config.aiDifficulty, dossier.threatLevel]
+  );
+
   useEffect(() => {
     agentRef.current.setStyle(state.config.aiStyle);
+    agentRef.current.setDifficulty(effectiveAiDifficulty);
     agentRef.current.setCharacter(character);
-  }, [state.config.aiStyle, character]);
+  }, [state.config.aiStyle, effectiveAiDifficulty, character]);
 
   // Load Night-Sugar-Office Contract Catalog & Default Character
   useEffect(() => {
@@ -1680,7 +1686,13 @@ export function App() {
             <span className="lc-opp-codename">
               {isAiThinking
                 ? 'THINKING...'
-                : `${EXPRESSION_META[activeExpression].label} · R${campaign.roundIndex} · T${dossier.threatLevel}`}
+                : `${EXPRESSION_META[activeExpression].label} · ${
+                    effectiveAiDifficulty === 'master'
+                      ? '大师'
+                      : effectiveAiDifficulty === 'standard'
+                        ? '标准'
+                        : '新兵'
+                  } · R${campaign.roundIndex}/T${dossier.threatLevel}`}
             </span>
           </header>
 
