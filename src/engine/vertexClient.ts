@@ -48,7 +48,7 @@ export type VertexCallResult =
 export const DEFAULT_VERTEX_LOCATION = 'us-central1';
 export const VERTEX_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token';
-const THINKING_TOKEN_RESERVE = 16_384;
+const THINKING_TOKEN_RESERVE = 32_768;
 const MAX_OUTPUT_TOKENS = 65_536;
 
 export function normalizeServiceAccountText(text: string): string {
@@ -354,15 +354,18 @@ export async function vertexChat(
   const systemText = systemParts.join('\n\n');
   const model = normalizeVertexModel(input.model);
 
-  const buildPayload = (variant: ThinkingVariant, noReserve = false) => {
+  const buildPayload = (variant: ThinkingVariant, capMax?: number) => {
     const generationConfig: Record<string, unknown> = {};
     if (params.temperature !== undefined) generationConfig.temperature = params.temperature;
     if (params.topP !== undefined) generationConfig.topP = params.topP;
-    if (params.maxTokens !== undefined) {
+    const baseTokens = Math.max(4096, params.maxTokens ?? 8000);
+    if (capMax !== undefined) {
+      generationConfig.maxOutputTokens = capMax;
+    } else {
       generationConfig.maxOutputTokens =
-        variant === 'off' || noReserve
-          ? params.maxTokens
-          : Math.min(params.maxTokens + THINKING_TOKEN_RESERVE, MAX_OUTPUT_TOKENS);
+        variant === 'off'
+          ? baseTokens
+          : Math.min(baseTokens + THINKING_TOKEN_RESERVE, MAX_OUTPUT_TOKENS);
     }
     const tc = thinkingConfigOf(variant);
     if (tc) generationConfig.thinkingConfig = tc;
@@ -432,7 +435,7 @@ export async function vertexChat(
         attempt = await send('v1beta1', buildPayload(variant));
       }
       if (!attempt.ok && attempt.status === 400 && /maxOutputTokens/i.test(attempt.message)) {
-        attempt = await send('v1', buildPayload(variant, true));
+        attempt = await send('v1', buildPayload(variant, Math.min(8192, Math.max(4096, params.maxTokens ?? 8000))));
       }
       if (!attempt.ok) {
         if (attempt.status === 400 && /thinking|thought/i.test(attempt.message) && variant !== 'off') {
@@ -467,6 +470,10 @@ export async function vertexChat(
 
       if (!text.trim()) {
         const block = attempt.body.promptFeedback?.blockReason;
+        // 思维链烧光额度导致 MAX_TOKENS 且无正文时，自动降级至后续档位（含非思考模式 off）重试！
+        if (!block && cand?.finishReason === 'MAX_TOKENS' && variant !== 'off') {
+          continue;
+        }
         return {
           ok: false,
           message: block

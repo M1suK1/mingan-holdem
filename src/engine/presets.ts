@@ -226,7 +226,7 @@ export function builtinPresets(): ChatPreset[] {
       settings: {
         temperature: 0.78,
         topP: 0.95,
-        maxTokens: 1024,
+        maxTokens: 8000,
         presencePenalty: 0.15,
         frequencyPenalty: 0.15,
         maxContext: 12000,
@@ -246,7 +246,7 @@ export function builtinPresets(): ChatPreset[] {
       settings: {
         temperature: 0.75,
         topP: 0.92,
-        maxTokens: 1024,
+        maxTokens: 8000,
         presencePenalty: 0.1,
         frequencyPenalty: 0.1,
         maxContext: 12000,
@@ -470,10 +470,31 @@ export function loadPresets(): ChatPreset[] {
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed) || parsed.length === 0) return defaults;
-    const valid = parsed.filter(
-      (p): p is ChatPreset =>
-        Boolean(p && typeof p === 'object' && typeof (p as ChatPreset).id === 'string' && Array.isArray((p as ChatPreset).prompts))
-    );
+    const contractById = new Map(CONTRACT_PROMPTS.map((c) => [c.id, c]));
+    const valid = parsed
+      .filter(
+        (p): p is ChatPreset =>
+          Boolean(p && typeof p === 'object' && typeof (p as ChatPreset).id === 'string' && Array.isArray((p as ChatPreset).prompts))
+      )
+      .map((p) => {
+        // 自动升级旧存档里过低的 maxTokens（1024）与旧版单句契约
+        const nextMax =
+          typeof p.settings?.maxTokens === 'number' && p.settings.maxTokens < 4096
+            ? 8000
+            : p.settings?.maxTokens ?? 8000;
+        const nextPrompts = p.prompts.map((entry) => {
+          const latestContract = contractById.get(entry.id);
+          if (latestContract && entry.contract && /不超过(85|65|75)字/.test(entry.content)) {
+            return { ...entry, content: latestContract.content, defaultContent: latestContract.content };
+          }
+          return entry;
+        });
+        return {
+          ...p,
+          settings: { ...p.settings, maxTokens: nextMax },
+          prompts: nextPrompts,
+        };
+      });
     return valid.length > 0 ? valid : defaults;
   } catch {
     return defaults;
@@ -616,7 +637,7 @@ export function importPresetJson(source: string): {
     settings: {
       temperature: Number(raw.temp_openai ?? raw.temperature) || 0.78,
       topP: Number(raw.top_p_openai ?? raw.top_p) || 0.95,
-      maxTokens: Number(raw.openai_max_tokens ?? raw.max_tokens) || 1024,
+      maxTokens: Math.max(4096, Number(raw.openai_max_tokens ?? raw.max_tokens) || 8000),
       presencePenalty: Number(raw.pres_pen_openai ?? raw.presence_penalty) || 0.15,
       frequencyPenalty: Number(raw.freq_pen_openai ?? raw.frequency_penalty) || 0.15,
       maxContext: Number(raw.openai_max_context ?? raw.max_context) || 12000,

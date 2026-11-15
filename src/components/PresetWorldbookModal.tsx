@@ -476,7 +476,7 @@ export default function PresetWorldbookModal({
                           ...activePreset,
                           settings: {
                             ...activePreset.settings,
-                            maxTokens: Math.max(128, Number(e.target.value) || 1024),
+                            maxTokens: Math.max(128, Number(e.target.value) || 8000),
                           },
                         })
                       }

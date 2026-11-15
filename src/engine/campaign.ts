@@ -15,8 +15,8 @@ export function createCoreVirtualEntity(playerCodename = 'ZERO-BYTE'): VirtualEn
     codename: playerCodename,
     isCore: true,
     pursuerRole: '被通缉的潜行黑客（本体核心）',
-    virtualPortrait: '/assets/opponent-portrait.webp',
-    realityPortrait: '/assets/opponent-portrait.webp',
+    virtualPortrait: '/assets/opponent-halfbody.webp',
+    realityPortrait: '/assets/opponent-halfbody.webp',
     accentColor: '#00F0FF',
   };
 }
@@ -186,9 +186,14 @@ export function loadCampaignState(): CampaignState {
       return createInitialCampaign();
     }
     const base = createInitialCampaign(parsed.playerCodename || 'ZERO-BYTE');
+    const migratedCore =
+      parsed.coreEntity.virtualPortrait === '/assets/opponent-portrait.webp'
+        ? { ...parsed.coreEntity, virtualPortrait: '/assets/opponent-halfbody.webp' }
+        : parsed.coreEntity;
     return {
       ...base,
       ...parsed,
+      coreEntity: migratedCore,
       capturedEntities: Array.isArray(parsed.capturedEntities) ? parsed.capturedEntities : [],
       acquiredSkills: Array.isArray(parsed.acquiredSkills) ? parsed.acquiredSkills : [],
       defeatedPursuers: Array.isArray(parsed.defeatedPursuers) ? parsed.defeatedPursuers : [],

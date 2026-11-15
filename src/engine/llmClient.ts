@@ -72,7 +72,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
   vertexSecret: '',
   temperature: 0.75,
   topP: 0.95,
-  maxTokens: 1024,
+  maxTokens: 8000,
   thinking: true,
   overloadPersona: true,
   customSystemPrompt: '',
@@ -118,7 +118,11 @@ export function loadSavedLlmConfig(): LlmConfig {
     const raw = window.localStorage.getItem(LLM_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_LLM_CONFIG };
     const parsed = JSON.parse(raw) as Partial<LlmConfig>;
-    return { ...DEFAULT_LLM_CONFIG, ...parsed };
+    const merged = { ...DEFAULT_LLM_CONFIG, ...parsed };
+    if (typeof merged.maxTokens === 'number' && merged.maxTokens < 4096) {
+      merged.maxTokens = 8000;
+    }
+    return merged;
   } catch {
     return { ...DEFAULT_LLM_CONFIG };
   }
@@ -374,9 +378,10 @@ export async function callOpenAiCompatible(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 22000);
+  const timeoutId = setTimeout(() => controller.abort(), 32000);
+  const initialTokens = Math.max(4096, presetSettings?.maxTokens ?? config.maxTokens ?? 8000);
 
-  try {
+  const sendOnce = async (maxTok: number) => {
     const res = await fetch(url, {
       method: 'POST',
       headers,
@@ -384,7 +389,7 @@ export async function callOpenAiCompatible(
         model: config.model.trim() || 'deepseek-chat',
         temperature: presetSettings?.temperature ?? config.temperature,
         top_p: presetSettings?.topP ?? config.topP ?? 0.95,
-        max_tokens: presetSettings?.maxTokens ?? config.maxTokens ?? 1024,
+        max_tokens: maxTok,
         messages,
       }),
       signal: controller.signal,
@@ -396,13 +401,24 @@ export async function callOpenAiCompatible(
     }
 
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
     };
-    const content = data.choices?.[0]?.message?.content?.trim() ?? '';
-    if (!content) {
-      throw new Error('模型返回内容为空');
+    const choice = data.choices?.[0];
+    return {
+      content: choice?.message?.content?.trim() ?? '',
+      finishReason: choice?.finish_reason,
+    };
+  };
+
+  try {
+    let attempt = await sendOnce(initialTokens);
+    if ((!attempt.content || attempt.finishReason === 'length') && initialTokens < 16384) {
+      attempt = await sendOnce(Math.min(32768, initialTokens * 2));
     }
-    return { content, durationMs: Date.now() - t0 };
+    if (!attempt.content) {
+      throw new Error(`模型返回内容为空${attempt.finishReason ? ` (${attempt.finishReason})` : ''}`);
+    }
+    return { content: attempt.content, durationMs: Date.now() - t0 };
   } finally {
     clearTimeout(timeoutId);
   }

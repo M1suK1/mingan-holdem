@@ -35,6 +35,7 @@ import {
   describeVertexCredential,
   normalizeVertexModel,
   parseVertexServiceAccount,
+  vertexChat,
   vertexTarget,
 } from '../src/engine/vertexClient.ts';
 import {
@@ -249,6 +250,45 @@ describe('Google Vertex AI credential & endpoint helpers', () => {
     const express = vertexTarget({ model: 'gemini-2.5-flash', expressKey: 'AIza123' });
     assert.equal(express.url.startsWith('https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent?key=AIza123'), true);
     assert.equal(normalizeVertexModel('google/gemini-2.5-pro'), 'gemini-2.5-pro');
+  });
+
+  it('uses >=8000 default maxTokens in presets and falls back to non-thinking when Vertex hits MAX_TOKENS with empty text', async () => {
+    const presets = builtinPresets();
+    assert.ok(presets[0].settings.maxTokens >= 8000);
+
+    const origFetch = globalThis.fetch;
+    let callIdx = 0;
+    globalThis.fetch = (async () => {
+      callIdx += 1;
+      if (callIdx === 1) {
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: 'thinking...', thought: true }] }, finishReason: 'MAX_TOKENS' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '{"segments":[{"kind":"speech","text":"已恢复"}],"expression":"calm"}' }] }, finishReason: 'STOP' }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as typeof fetch;
+
+    try {
+      const res = await vertexChat(
+        { model: 'gemini-2.5-flash', secret: 'AIzaTestKey123' },
+        [{ role: 'user', content: 'hi' }],
+        { maxTokens: 8000, thinking: true }
+      );
+      assert.equal(res.ok, true);
+      if (res.ok) {
+        assert.ok(res.text.includes('已恢复'));
+      }
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });
 
