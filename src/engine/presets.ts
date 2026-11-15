@@ -226,7 +226,7 @@ export function builtinPresets(): ChatPreset[] {
       settings: {
         temperature: 0.78,
         topP: 0.95,
-        maxTokens: 8000,
+        maxTokens: 0,
         presencePenalty: 0.15,
         frequencyPenalty: 0.15,
         maxContext: 12000,
@@ -246,7 +246,7 @@ export function builtinPresets(): ChatPreset[] {
       settings: {
         temperature: 0.75,
         topP: 0.92,
-        maxTokens: 8000,
+        maxTokens: 0,
         presencePenalty: 0.1,
         frequencyPenalty: 0.1,
         maxContext: 12000,
@@ -477,11 +477,13 @@ export function loadPresets(): ChatPreset[] {
           Boolean(p && typeof p === 'object' && typeof (p as ChatPreset).id === 'string' && Array.isArray((p as ChatPreset).prompts))
       )
       .map((p) => {
-        // 自动升级旧存档里过低的 maxTokens（1024）与旧版单句契约
+        // 自动将旧存档预设的默认输出上限升至 0（不限制思维链长度）并刷新旧版单句契约
         const nextMax =
-          typeof p.settings?.maxTokens === 'number' && p.settings.maxTokens < 4096
-            ? 8000
-            : p.settings?.maxTokens ?? 8000;
+          typeof p.settings?.maxTokens === 'number' &&
+          p.settings.maxTokens > 0 &&
+          p.settings.maxTokens <= 8000
+            ? 0
+            : p.settings?.maxTokens ?? 0;
         const nextPrompts = p.prompts.map((entry) => {
           const latestContract = contractById.get(entry.id);
           if (latestContract && entry.contract && /不超过(85|65|75)字/.test(entry.content)) {
@@ -637,7 +639,7 @@ export function importPresetJson(source: string): {
     settings: {
       temperature: Number(raw.temp_openai ?? raw.temperature) || 0.78,
       topP: Number(raw.top_p_openai ?? raw.top_p) || 0.95,
-      maxTokens: Math.max(4096, Number(raw.openai_max_tokens ?? raw.max_tokens) || 8000),
+      maxTokens: Number(raw.openai_max_tokens ?? raw.max_tokens) || 0,
       presencePenalty: Number(raw.pres_pen_openai ?? raw.presence_penalty) || 0.15,
       frequencyPenalty: Number(raw.freq_pen_openai ?? raw.frequency_penalty) || 0.15,
       maxContext: Number(raw.openai_max_context ?? raw.max_context) || 12000,

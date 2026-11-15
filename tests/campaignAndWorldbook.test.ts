@@ -252,15 +252,18 @@ describe('Google Vertex AI credential & endpoint helpers', () => {
     assert.equal(normalizeVertexModel('google/gemini-2.5-pro'), 'gemini-2.5-pro');
   });
 
-  it('uses >=8000 default maxTokens in presets and falls back to non-thinking when Vertex hits MAX_TOKENS with empty text', async () => {
+  it('leaves thinking budget uncapped (0 or 65536) and falls back to non-thinking when Vertex hits MAX_TOKENS with empty text', async () => {
     const presets = builtinPresets();
-    assert.ok(presets[0].settings.maxTokens >= 8000);
+    assert.ok(presets[0].settings.maxTokens === 0 || presets[0].settings.maxTokens >= 8000);
 
     const origFetch = globalThis.fetch;
     let callIdx = 0;
-    globalThis.fetch = (async () => {
+    let firstMaxOutput = 0;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
       callIdx += 1;
+      const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
       if (callIdx === 1) {
+        firstMaxOutput = bodyObj.generationConfig?.maxOutputTokens ?? 0;
         return new Response(
           JSON.stringify({
             candidates: [{ content: { parts: [{ text: 'thinking...', thought: true }] }, finishReason: 'MAX_TOKENS' }],
@@ -280,8 +283,9 @@ describe('Google Vertex AI credential & endpoint helpers', () => {
       const res = await vertexChat(
         { model: 'gemini-2.5-flash', secret: 'AIzaTestKey123' },
         [{ role: 'user', content: 'hi' }],
-        { maxTokens: 8000, thinking: true }
+        { maxTokens: 0, thinking: true }
       );
+      assert.equal(firstMaxOutput, 65536);
       assert.equal(res.ok, true);
       if (res.ok) {
         assert.ok(res.text.includes('已恢复'));

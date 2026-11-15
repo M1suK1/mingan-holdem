@@ -72,7 +72,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
   vertexSecret: '',
   temperature: 0.75,
   topP: 0.95,
-  maxTokens: 8000,
+  maxTokens: 0,
   thinking: true,
   overloadPersona: true,
   customSystemPrompt: '',
@@ -119,8 +119,8 @@ export function loadSavedLlmConfig(): LlmConfig {
     if (!raw) return { ...DEFAULT_LLM_CONFIG };
     const parsed = JSON.parse(raw) as Partial<LlmConfig>;
     const merged = { ...DEFAULT_LLM_CONFIG, ...parsed };
-    if (typeof merged.maxTokens === 'number' && merged.maxTokens < 4096) {
-      merged.maxTokens = 8000;
+    if (typeof merged.maxTokens === 'number' && merged.maxTokens > 0 && merged.maxTokens <= 8000) {
+      merged.maxTokens = 0;
     }
     return merged;
   } catch {
@@ -378,20 +378,28 @@ export async function callOpenAiCompatible(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 32000);
-  const initialTokens = Math.max(4096, presetSettings?.maxTokens ?? config.maxTokens ?? 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const thinkingEnabled = presetSettings?.thinking ?? config.thinking ?? true;
+  const configuredMax = presetSettings?.maxTokens ?? config.maxTokens ?? 0;
 
   const sendOnce = async (maxTok: number) => {
+    const payload: Record<string, unknown> = {
+      model: config.model.trim() || 'deepseek-chat',
+      temperature: presetSettings?.temperature ?? config.temperature,
+      top_p: presetSettings?.topP ?? config.topP ?? 0.95,
+      messages,
+    };
+    // 思维链开启或设为 0（不限制）时，不发送 max_tokens，避免推理代理/思维链被长度截断
+    if (!thinkingEnabled && maxTok > 0) {
+      payload.max_tokens = maxTok;
+    } else if (maxTok > 0 && configuredMax > 0) {
+      payload.max_tokens = maxTok;
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: config.model.trim() || 'deepseek-chat',
-        temperature: presetSettings?.temperature ?? config.temperature,
-        top_p: presetSettings?.topP ?? config.topP ?? 0.95,
-        max_tokens: maxTok,
-        messages,
-      }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
 
@@ -411,9 +419,30 @@ export async function callOpenAiCompatible(
   };
 
   try {
-    let attempt = await sendOnce(initialTokens);
-    if ((!attempt.content || attempt.finishReason === 'length') && initialTokens < 16384) {
-      attempt = await sendOnce(Math.min(32768, initialTokens * 2));
+    let attempt = await sendOnce(configuredMax);
+    if (!attempt.content || attempt.finishReason === 'length') {
+      // 被截断时去掉 max_tokens 限制重试一次
+      const retryPayload: Record<string, unknown> = {
+        model: config.model.trim() || 'deepseek-chat',
+        temperature: presetSettings?.temperature ?? config.temperature,
+        top_p: presetSettings?.topP ?? config.topP ?? 0.95,
+        messages,
+      };
+      const res2 = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(retryPayload),
+        signal: controller.signal,
+      });
+      if (res2.ok) {
+        const d2 = (await res2.json()) as {
+          choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+        };
+        const c2 = d2.choices?.[0];
+        if (c2?.message?.content?.trim()) {
+          attempt = { content: c2.message.content.trim(), finishReason: c2.finish_reason };
+        }
+      }
     }
     if (!attempt.content) {
       throw new Error(`模型返回内容为空${attempt.finishReason ? ` (${attempt.finishReason})` : ''}`);
@@ -455,7 +484,7 @@ export async function dispatchModelCall(params: {
       {
         temperature: preset?.settings.temperature ?? config.temperature,
         topP: preset?.settings.topP ?? config.topP ?? 0.95,
-        maxTokens: preset?.settings.maxTokens ?? config.maxTokens ?? 1024,
+        maxTokens: preset?.settings.maxTokens ?? config.maxTokens ?? 0,
         thinking: preset?.settings.thinking ?? config.thinking ?? true,
       }
     );
@@ -588,7 +617,7 @@ export async function requestOpponentChatReply(params: {
         presetName: rt.preset.name,
         worldbookHits: composed.worldbookHits.map((h) => `${h.name}(${h.reason === 'constant' ? '常驻' : '关键词'})`),
         requestSections: composed.sections,
-        rawPreview: out.content.slice(0, 400),
+        rawPreview: out.content.slice(0, 4000),
         reasoning: out.reasoning,
       },
     };
@@ -718,7 +747,7 @@ export async function requestEncounterDialogue(params: {
         presetName: rt.preset.name,
         worldbookHits: composed.worldbookHits.map((h) => h.name),
         requestSections: composed.sections,
-        rawPreview: out.content.slice(0, 400),
+        rawPreview: out.content.slice(0, 4000),
         reasoning: out.reasoning,
       },
     };
@@ -874,7 +903,7 @@ export async function requestLlmPokerDecision(params: {
         presetName: rt.preset.name,
         worldbookHits: composed.worldbookHits.map((h) => h.name),
         requestSections: composed.sections,
-        rawPreview: out.content.slice(0, 400),
+        rawPreview: out.content.slice(0, 4000),
         reasoning: out.reasoning,
       },
     };

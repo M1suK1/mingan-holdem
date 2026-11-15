@@ -48,7 +48,6 @@ export type VertexCallResult =
 export const DEFAULT_VERTEX_LOCATION = 'us-central1';
 export const VERTEX_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token';
-const THINKING_TOKEN_RESERVE = 32_768;
 const MAX_OUTPUT_TOKENS = 65_536;
 
 export function normalizeServiceAccountText(text: string): string {
@@ -358,14 +357,13 @@ export async function vertexChat(
     const generationConfig: Record<string, unknown> = {};
     if (params.temperature !== undefined) generationConfig.temperature = params.temperature;
     if (params.topP !== undefined) generationConfig.topP = params.topP;
-    const baseTokens = Math.max(4096, params.maxTokens ?? 8000);
     if (capMax !== undefined) {
-      generationConfig.maxOutputTokens = capMax;
-    } else {
-      generationConfig.maxOutputTokens =
-        variant === 'off'
-          ? baseTokens
-          : Math.min(baseTokens + THINKING_TOKEN_RESERVE, MAX_OUTPUT_TOKENS);
+      if (capMax > 0) generationConfig.maxOutputTokens = capMax;
+    } else if (variant !== 'off') {
+      // 开启思维链时不人为压低上限，直接使用 Vertex 最大 65536 额度避免 MAX_TOKENS 截断思考
+      generationConfig.maxOutputTokens = MAX_OUTPUT_TOKENS;
+    } else if (params.maxTokens && params.maxTokens > 0) {
+      generationConfig.maxOutputTokens = Math.max(4096, params.maxTokens);
     }
     const tc = thinkingConfigOf(variant);
     if (tc) generationConfig.thinkingConfig = tc;
@@ -435,7 +433,10 @@ export async function vertexChat(
         attempt = await send('v1beta1', buildPayload(variant));
       }
       if (!attempt.ok && attempt.status === 400 && /maxOutputTokens/i.test(attempt.message)) {
-        attempt = await send('v1', buildPayload(variant, Math.min(8192, Math.max(4096, params.maxTokens ?? 8000))));
+        attempt = await send('v1', buildPayload(variant, 32768));
+        if (!attempt.ok && attempt.status === 400 && /maxOutputTokens/i.test(attempt.message)) {
+          attempt = await send('v1', buildPayload(variant, 0));
+        }
       }
       if (!attempt.ok) {
         if (attempt.status === 400 && /thinking|thought/i.test(attempt.message) && variant !== 'off') {
@@ -468,19 +469,25 @@ export async function vertexChat(
           }
         : undefined;
 
-      if (!text.trim()) {
+      if (!text.trim() || (cand?.finishReason === 'MAX_TOKENS' && variant !== 'off')) {
         const block = attempt.body.promptFeedback?.blockReason;
-        // 思维链烧光额度导致 MAX_TOKENS 且无正文时，自动降级至后续档位（含非思考模式 off）重试！
+        // 思维链耗尽或输出被 MAX_TOKENS 截断时，继续尝试下一档位（含非思考模式 off）
         if (!block && cand?.finishReason === 'MAX_TOKENS' && variant !== 'off') {
+          if (text.trim() && !fallback) {
+            fallback = { ok: true, text, reasoning, finish: cand?.finishReason, usage };
+            fallbackVariant = variant;
+          }
           continue;
         }
-        return {
-          ok: false,
-          message: block
-            ? `请求被 Vertex 安全策略拦截 (${block})`
-            : `Vertex 返回正文为空 (${cand?.finishReason ?? 'UNKNOWN'})`,
-          reasoning,
-        };
+        if (!text.trim()) {
+          return {
+            ok: false,
+            message: block
+              ? `请求被 Vertex 安全策略拦截 (${block})`
+              : `Vertex 返回正文为空 (${cand?.finishReason ?? 'UNKNOWN'})`,
+            reasoning,
+          };
+        }
       }
 
       if (reasoning) {

@@ -461,13 +461,13 @@ export default function PresetWorldbookModal({
                     />
                   </label>
                   <label className="lc-pwb-param">
-                    <span>最大输出 Tokens</span>
+                    <span>最大输出 Tokens（0 = 不限思维链）</span>
                     <input
                       id="pwb-input-max-tokens"
                       type="number"
-                      min={128}
-                      max={16384}
-                      step={64}
+                      min={0}
+                      max={65536}
+                      step={512}
                       className="cyber-text-input"
                       disabled={!isEditable}
                       value={activePreset.settings.maxTokens}
@@ -476,7 +476,7 @@ export default function PresetWorldbookModal({
                           ...activePreset,
                           settings: {
                             ...activePreset.settings,
-                            maxTokens: Math.max(128, Number(e.target.value) || 8000),
+                            maxTokens: Math.max(0, Number(e.target.value) || 0),
                           },
                         })
                       }
