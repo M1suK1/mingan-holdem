@@ -1836,7 +1836,7 @@ export function App() {
               <img
                 src={activeDisguise.virtualPortrait}
                 alt={activeDisguise.name}
-                className="lc-avatar-only-img"
+                className={`lc-avatar-only-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
               />
             </button>
 
