@@ -88,6 +88,7 @@ export interface ChatMessage {
   sender: 'human' | 'opponent' | 'system';
   speakerName: string;
   text: string;
+  msgKind?: 'speech' | 'thought';
   expression?: ContractExpression;
   timestamp: number;
   tag?: 'action' | 'chat' | 'probe' | 'system';
@@ -139,36 +140,122 @@ export function saveLlmConfigToStorage(cfg: LlmConfig): void {
 
 /**
  * 严格遵循信息隔离原则序列化牌桌态势：
- * 绝不向 AI/LLM 泄露玩家私有暗牌或玩家未公开黑客篡改结果。
+ * - 绝不向 AI/LLM 泄露玩家私有暗牌或玩家未公开黑客篡改结果
+ * - 完整提供本局与前几轮算力投入、胜负战绩、已公开/己方修改及脱敏动作流水
  */
 export function serializeStateForLlm(state: GameState): string {
   const ai = state.players.ai;
   const human = state.players.human;
+  const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+
   const boardSummary = state.board
-    .map((b, i) => `槽#${i + 1}:${b.isOpen ? formatCardShort(getVisibleBoardCard(b, 'ai', false)) : '加密暗牌'}`)
+    .map((b, i) => {
+      if (!b.isOpen && !revealAll) return `槽#${i + 1}:加密暗牌`;
+      const visible = getVisibleBoardCard(b, 'ai', revealAll);
+      const swapTag =
+        b.source === 'swapped-in'
+          ? b.swappedBy === 'ai'
+            ? '(我方换入)'
+            : '(玩家换入)'
+          : '';
+      const selfTamper =
+        (b.swappedBy === 'ai' || revealAll) && b.originalCard && b.tamperedBy?.length
+          ? `[已改牌:原${formatCardShort(b.originalCard)}]`
+          : '';
+      return `槽#${i + 1}:${formatCardShort(visible)}${swapTag}${selfTamper}`;
+    })
     .join(' | ');
+
   const aiHand = ai.hand
-    .map((h, i) => `手牌#${i + 1}:${formatCardShort(h.card)}(${h.visibility === 'open' ? '公开' : '私有加密'})`)
-    .join(' ');
-  const humanHand = human.hand
-    .map((h, i) =>
-      `手牌#${i + 1}:${
-        h.visibility === 'open'
-          ? `${formatCardShort(getVisibleHandCard(h, 'ai', 'human', false))}(公开)`
-          : '未知加密暗牌'
-      }`
-    )
+    .map((h, i) => {
+      const tamperTag =
+        h.originalCard && h.tamperedBy?.length
+          ? `[已改牌:原${formatCardShort(h.originalCard)}]`
+          : '';
+      return `手牌#${i + 1}:${formatCardShort(h.card)}(${
+        h.visibility === 'open' ? '公开' : '私有加密'
+      })${tamperTag}`;
+    })
     .join(' ');
 
+  const humanHand = human.hand
+    .map((h, i) => {
+      if (h.visibility !== 'open' && !revealAll) {
+        return `手牌#${i + 1}:未知加密暗牌`;
+      }
+      const visible = getVisibleHandCard(h, 'ai', 'human', revealAll);
+      const exposedTamper =
+        revealAll && h.originalCard && h.tamperedBy?.length
+          ? `[摊牌揭露改牌:原${formatCardShort(h.originalCard)}]`
+          : '';
+      return `手牌#${i + 1}:${formatCardShort(visible)}(公开)${exposedTamper}`;
+    })
+    .join(' ');
+
+  const safeActions = state.actionHistory
+    .filter((a) => !(a.actor === 'human' && a.summary.includes('终端篡改')))
+    .slice(-8)
+    .map((a) => `- [${a.phase}] ${a.summary}`)
+    .join('\n');
+
+  const pastLines = (state.pastHands ?? []).map((p) => {
+    const winLabel =
+      p.winner === 'ai' ? '我方胜' : p.winner === 'human' ? '玩家胜' : '平局';
+    const reasonLabel =
+      p.reason === 'scan-caught'
+        ? '扫描抓获篡改'
+        : p.reason === 'fold'
+          ? '对手弃牌'
+          : '摊牌比牌';
+    const catTxt =
+      p.aiHandCategory && p.humanHandCategory
+        ? ` | 牌型:我方[${p.aiHandCategory}] vs 玩家[${p.humanHandCategory}]`
+        : '';
+    const tamperNotes: string[] = [];
+    if (p.humanHadTamper) tamperNotes.push('玩家曾篡改牌面(已暴露)');
+    if (p.aiHadTamper) tamperNotes.push('我方曾使用改牌');
+    const tamperTxt = tamperNotes.length ? ` | 改牌:${tamperNotes.join('、')}` : '';
+    return `- 第#${p.handNumber}局：${winLabel}(${reasonLabel}) | 奖池${p.potWon}（我方累计投入${p.committedByAi} vs 玩家累计投入${p.committedByHuman}）${catTxt}${tamperTxt}`;
+  });
+
+  const aiScanned = state.scannedKeys
+    .filter((k) => k.startsWith('ai:'))
+    .map((k) => k.replace(/^ai:/, ''))
+    .join(', ');
+
   return [
-    `[局数:#${state.handNumber} | 阶段:${state.phase} | 奖池:${state.pot}]`,
-    `追捕者(${ai.name})算力筹码:${ai.chips} 已下注:${ai.roundBet} | 通缉黑客(玩家)筹码:${human.chips} 已下注:${human.roundBet}`,
+    `[当前局:#${state.handNumber} | 阶段:${state.phase} | 奖池:${state.pot}]`,
+    `追捕者(${ai.name})剩余算力:${ai.chips} | 本段已下注:${ai.roundBet} | 本局累计投入:${ai.totalCommitted}`,
+    `通缉黑客(玩家)剩余算力:${human.chips} | 本段已下注:${human.roundBet} | 本局累计投入:${human.totalCommitted}`,
     `追捕者手牌: ${aiHand}`,
     `玩家可见手牌: ${humanHand}`,
     `中央节点池(4张): ${boardSummary}`,
     `当前需补差额:${getBetDiff(state, 'ai')} | 本段已加注次数:${state.raisesInSubPhase}`,
-    `技能权限: 本回合已用黑客改牌=${state.usedHackThisTurn ? '是' : '否'} | 本回合已用扫描=${state.usedScanThisTurn ? '是' : '否'} | 我方被封技能=${ai.sealedSkills.join(',') || '无'}`,
-  ].join('\n');
+    `技能与扫描状态: 本回合已用改牌=${state.usedHackThisTurn ? '是' : '否'} | 本回合已用扫描=${state.usedScanThisTurn ? '是' : '否'} | 已扫描目标=[${aiScanned || '无'}] | 我方被封技能=${ai.sealedSkills.join(',') || '无'} | 玩家被封技能=${human.sealedSkills.join(',') || '无'}`,
+    safeActions ? `本局近期动作流水:\n${safeActions}` : '',
+    pastLines.length ? `前几轮交锋战绩:\n${pastLines.join('\n')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function formatChatHistoryForLlm(
+  chatHistory: ChatMessage[] = [],
+  limit = 16
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return chatHistory
+    .filter((m) => m.text.trim().length > 0)
+    .slice(-limit)
+    .map((m) => {
+      if (m.sender === 'human') {
+        return { role: 'user' as const, content: m.text.trim() };
+      }
+      const kindTag = m.msgKind === 'thought' ? '[心理想法]' : '[发言]';
+      return {
+        role: 'assistant' as const,
+        content: `${m.speakerName} ${kindTag}：${m.text.trim()}`,
+      };
+    });
 }
 
 export function buildCharacterSystemPrompt(
@@ -565,10 +652,7 @@ export async function requestOpponentChatReply(params: {
   }
 
   const rt = resolveRuntimeContext(params);
-  const recentMsgs = chatHistory.slice(-6).map((m) => ({
-    role: (m.sender === 'human' ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: m.text,
-  }));
+  const recentMsgs = formatChatHistoryForLlm(chatHistory);
 
   const extraNote = llmConfig.customSystemPrompt.trim()
     ? `\n【附加导演指令】${llmConfig.customSystemPrompt.trim()}`
@@ -657,6 +741,7 @@ export async function requestEncounterDialogue(params: {
   llmConfig: LlmConfig;
   campaign: CampaignState;
   dossier: PursuerDossier;
+  chatHistory?: ChatMessage[];
   preset?: ChatPreset;
   worldbook?: WorldbookEntry[];
   detailNote?: string;
@@ -716,6 +801,7 @@ export async function requestEncounterDialogue(params: {
     triggerText: `${eventKind} ${dossier.faction} 虚拟实体 诱饵 通缉`,
     tableSummary: serializeStateForLlm(state),
     taskContext: eventDescMap[eventKind],
+    historyMessages: formatChatHistoryForLlm(params.chatHistory),
     overloadPersona: llmConfig.overloadPersona,
   });
 
@@ -827,6 +913,7 @@ export async function requestLlmPokerDecision(params: {
   character: ContractCharacter;
   state: GameState;
   llmConfig: LlmConfig;
+  chatHistory?: ChatMessage[];
   campaign?: CampaignState;
   dossier?: PursuerDossier;
   preset?: ChatPreset;
@@ -858,6 +945,7 @@ export async function requestLlmPokerDecision(params: {
     triggerText: `决策 ${state.phase} 博弈 加注 黑客技能 扫描`,
     tableSummary: serializeStateForLlm(state),
     taskContext: `可选合法动作（请择一输出）：${legalHints.join(' 或 ')}${extraNote}`,
+    historyMessages: formatChatHistoryForLlm(params.chatHistory),
     overloadPersona: llmConfig.overloadPersona,
   });
 

@@ -83,6 +83,7 @@ import {
   requestOpponentChatReply,
   saveLlmConfigToStorage,
   type ChatDialogueSegment,
+  type ChatMessage,
   type LlmCallLog,
   type LlmConfig,
 } from './engine/llmClient.ts';
@@ -288,6 +289,36 @@ export function App() {
   latestPresetRef.current = activePreset;
   const latestWorldbookRef = useRef(worldbook);
   latestWorldbookRef.current = worldbook;
+
+  const buildChatHistorySnapshot = useCallback((): ChatMessage[] => {
+    const settled: ChatMessage[] = messagesRef.current.map((m, idx) => ({
+      id: m.id,
+      sender: m.sender,
+      speakerName: m.speaker,
+      text: m.text,
+      msgKind: m.msgKind,
+      timestamp: idx,
+    }));
+    const pending: ChatMessage[] = queueRef.current.map((q, idx) =>
+      q.kind === 'human'
+        ? {
+            id: `q-h-${idx}`,
+            sender: 'human',
+            speakerName: '潜行黑客',
+            text: q.text,
+            timestamp: settled.length + idx,
+          }
+        : {
+            id: `q-o-${idx}`,
+            sender: 'opponent',
+            speakerName: q.speaker,
+            text: q.text,
+            msgKind: q.msgKind,
+            timestamp: settled.length + idx,
+          }
+    );
+    return [...settled, ...pending].slice(-16);
+  }, []);
 
   // Chat Stack & FIFO Bubble Queue
   const [messages, setMessages] = useState<ChatItem[]>([
@@ -696,6 +727,7 @@ export function App() {
           character: char,
           state: snapshot,
           llmConfig: cfg,
+          chatHistory: buildChatHistorySnapshot(),
           campaign: latestCampaignRef.current,
           dossier: latestDossierRef.current,
           preset: latestPresetRef.current,
@@ -746,6 +778,8 @@ export function App() {
     state.actionHistory.length,
     state.config.aiDelayMs,
     enqueueTask,
+    enqueueOpponentSegments,
+    buildChatHistorySnapshot,
   ]);
 
   // Scan action laser sweep VFX + toast feedback (Triggers for BOTH Player & Opponent!)
@@ -843,6 +877,7 @@ export function App() {
         llmConfig: latestLlmRef.current,
         campaign: winnerCamp,
         dossier: currDossier,
+        chatHistory: buildChatHistorySnapshot(),
         preset: latestPresetRef.current,
         worldbook: latestWorldbookRef.current,
       }).then((enc) => {
@@ -870,6 +905,7 @@ export function App() {
         llmConfig: latestLlmRef.current,
         campaign: loserCamp,
         dossier: currDossier,
+        chatHistory: buildChatHistorySnapshot(),
         preset: latestPresetRef.current,
         worldbook: latestWorldbookRef.current,
         detailNote: activeEnt.name,
@@ -881,7 +917,7 @@ export function App() {
         }
       });
     }
-  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, enqueueOpponentSegments, scheduleTimeout]);
+  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, enqueueOpponentSegments, scheduleTimeout, buildChatHistorySnapshot]);
 
   const cancelHoldHalfRaise = useCallback(() => {
     if (holdIntervalRef.current !== null) {
@@ -1240,6 +1276,7 @@ export function App() {
       llmConfig: latestLlmRef.current,
       campaign: nextCamp,
       dossier: nextDossier,
+      chatHistory: buildChatHistorySnapshot(),
       preset: latestPresetRef.current,
       worldbook: latestWorldbookRef.current,
     });
@@ -1320,15 +1357,8 @@ export function App() {
     if (!trimmed) return;
     setChatDraft('');
 
+    const historySnapshot = buildChatHistorySnapshot();
     enqueueTask({ kind: 'human', text: trimmed });
-
-    const historySnapshot = messagesRef.current.slice(-6).map((m) => ({
-      id: m.id,
-      sender: m.sender,
-      speakerName: m.speaker,
-      text: m.text,
-      timestamp: Date.now(),
-    }));
 
     const res = await requestOpponentChatReply({
       character,
@@ -2710,6 +2740,7 @@ export function App() {
             state={state}
             activePreset={activePreset}
             worldbook={worldbook}
+            chatHistory={buildChatHistorySnapshot()}
             logs={llmLogs}
             onSaveConfig={(next) => {
               setLlmConfig(next);

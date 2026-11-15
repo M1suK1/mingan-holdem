@@ -80,6 +80,7 @@ export const PROMPT_MACRO_HINTS: Array<{ key: string; label: string; hint: strin
   { key: 'player', label: '通缉黑客档案', hint: '玩家代号、通缉等级与当前伪装/诱饵状态' },
   { key: 'table', label: '牌桌脱敏报文', hint: '当前手牌/公共牌/筹码/差额（严格过滤暗牌）' },
   { key: 'skills', label: '技能状态', hint: '玩家已掠夺技能与双方被封印技能' },
+  { key: 'history', label: '聊天记录', hint: '近期玩家与追捕者的完整通讯对话及心理独白' },
   { key: 'context', label: '本次指令上下文', hint: '具体请求的目标（合法动作清单/玩家发言等）' },
   { key: 'user', label: '玩家代号', hint: '玩家黑客代号' },
 ];
@@ -204,6 +205,15 @@ function defaultEntries(): PromptEntry[] {
         '根据【本次指令上下文】描述的事件节点（遭遇拦截 / 实体被夺 / 诱饵脱逃 / 剥离玩家本体）发表极具角色辨识度的终局或开场发言。',
     },
     {
+      id: 'entry-chat-history',
+      name: '历史聊天与心理记忆',
+      scope: 'shared',
+      role: 'system',
+      enabled: true,
+      builtin: true,
+      content: '【牌桌近期对话历史】\n{{history}}',
+    },
+    {
       id: 'entry-task-context',
       name: '本次请求上下文',
       scope: 'shared',
@@ -288,10 +298,19 @@ export function buildMacroDictionary(params: {
   worldbookText: string;
   tableSummary: string;
   taskContext: string;
+  historyText?: string;
   overloadPersona?: boolean;
 }): Record<string, string> {
-  const { character, dossier, campaign, worldbookText, tableSummary, taskContext, overloadPersona } =
-    params;
+  const {
+    character,
+    dossier,
+    campaign,
+    worldbookText,
+    tableSummary,
+    taskContext,
+    historyText,
+    overloadPersona,
+  } = params;
   const disguise = getActiveDisguiseEntity(campaign);
   const ownedNames = campaign.acquiredSkills
     .map((id) => getSkillById(id)?.name ?? id)
@@ -342,6 +361,7 @@ export function buildMacroDictionary(params: {
     disguise: `${disguise.name}（${disguise.isCore ? '本体' : '诱饵'}）`,
     skills: `玩家已掠夺技能：${ownedNames || '无'}`,
     table: tableSummary,
+    history: historyText?.trim() || '（本场尚无历史聊天记录）',
     context: taskContext,
     user: campaign.playerCodename,
   };
@@ -394,6 +414,10 @@ export function composePresetPrompt(params: {
     preset.settings.worldbookBudget ?? WORLDBOOK_BUDGET
   );
 
+  const historyText = historyMessages
+    .map((h) => (h.role === 'user' ? `玩家：${h.content}` : h.content))
+    .join('\n');
+
   const dict = buildMacroDictionary({
     character,
     dossier,
@@ -401,6 +425,7 @@ export function composePresetPrompt(params: {
     worldbookText: wbRes.text,
     tableSummary,
     taskContext,
+    historyText,
     overloadPersona,
   });
 
@@ -424,6 +449,8 @@ export function composePresetPrompt(params: {
   const sections: Array<{ label: string; text: string }> = [];
   const messages: Array<{ role: PromptRole; content: string }> = [];
 
+  const hasHistoryEntry = normalEntries.some((e) => e.id === 'entry-chat-history' || e.content.includes('{{history}}'));
+
   for (const entry of normalEntries) {
     const resolved = applyRegexScripts(
       resolveMacros(entry.content, dict),
@@ -432,7 +459,7 @@ export function composePresetPrompt(params: {
     ).trim();
     if (!resolved) continue;
     sections.push({ label: `${entry.name} [${entry.role}]`, text: resolved });
-    if (entry.id === 'entry-task-context' && historyMessages.length > 0) {
+    if (!hasHistoryEntry && entry.id === 'entry-task-context' && historyMessages.length > 0) {
       for (const h of historyMessages) {
         messages.push(h);
       }
@@ -491,6 +518,20 @@ export function loadPresets(): ChatPreset[] {
           }
           return entry;
         });
+        if (!nextPrompts.some((e) => e.id === 'entry-chat-history' || e.content.includes('{{history}}'))) {
+          const taskIdx = nextPrompts.findIndex((e) => e.id === 'entry-task-context');
+          const historyEntry: PromptEntry = {
+            id: 'entry-chat-history',
+            name: '历史聊天与心理记忆',
+            scope: 'shared',
+            role: 'system',
+            enabled: true,
+            builtin: true,
+            content: '【牌桌近期对话历史】\n{{history}}',
+          };
+          if (taskIdx >= 0) nextPrompts.splice(taskIdx, 0, historyEntry);
+          else nextPrompts.push(historyEntry);
+        }
         return {
           ...p,
           settings: { ...p.settings, maxTokens: nextMax },

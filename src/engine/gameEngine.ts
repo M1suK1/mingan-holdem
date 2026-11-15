@@ -8,6 +8,7 @@ import {
   type GameState,
   type HackSkillId,
   type HandCard,
+  type HandRoundSummary,
   type Phase,
   type PlayerId,
   type PlayerState,
@@ -268,6 +269,7 @@ export interface CreateStateOptions {
   chips?: Record<PlayerId, number>;
   sealedSkills?: Record<PlayerId, HackSkillId[]>;
   playerAcquiredSkills?: string[];
+  pastHands?: HandRoundSummary[];
   opponentName?: string;
   deckOverride?: Card[];
   rng?: () => number;
@@ -368,6 +370,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     usedProtocolSkillThisHand: false,
     peekedBoardIndices: [],
     frozenBoardIndices: [],
+    pastHands: [...(options.pastHands ?? [])],
     lastAction: {
       id: makeEventId(),
       type: 'deal',
@@ -396,6 +399,35 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
 
 export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>): GameState {
   const nextTieStarter: PlayerId = prev.tieStarter === 'human' ? 'ai' : 'human';
+  const nextPastHands = [...(prev.pastHands ?? [])];
+
+  if (prev.result) {
+    const humanExposedTamper =
+      prev.result.reason !== 'fold' &&
+      (prev.players.human.hand.some((h) => Boolean(h.tamperedBy?.length)) ||
+        prev.board.some((b) => b.swappedBy === 'human' && Boolean(b.tamperedBy?.length)));
+
+    const aiTampered =
+      prev.players.ai.hand.some((h) => Boolean(h.tamperedBy?.length)) ||
+      prev.board.some((b) => b.swappedBy === 'ai' && Boolean(b.tamperedBy?.length));
+
+    nextPastHands.push({
+      handNumber: prev.handNumber,
+      winner: prev.result.winner,
+      reason: prev.result.reason,
+      potWon: prev.result.potWon,
+      committedByHuman: prev.players.human.totalCommitted,
+      committedByAi: prev.players.ai.totalCommitted,
+      humanEndChips: prev.players.human.chips,
+      aiEndChips: prev.players.ai.chips,
+      humanHandCategory: prev.result.humanEval?.categoryName,
+      aiHandCategory: prev.result.aiEval?.categoryName,
+      humanHadTamper: humanExposedTamper,
+      aiHadTamper: aiTampered,
+      sealedSkills: prev.result.sealedSkills,
+    });
+  }
+
   return createInitialState({
     config: newConfig ? { ...prev.config, ...newConfig } : prev.config,
     handNumber: prev.handNumber + 1,
@@ -410,6 +442,7 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
       ai: [...prev.players.ai.sealedSkills],
     },
     playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])],
+    pastHands: nextPastHands.slice(-12),
   });
 }
 

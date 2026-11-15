@@ -43,7 +43,7 @@ import {
   parseDialogueSegments,
   serializeStateForLlm,
 } from '../src/engine/llmClient.ts';
-import { applyAction, createInitialState, getEffectiveHackCost, getEffectiveScanCost, getNextSwapFee, isActionLegal } from '../src/engine/gameEngine.ts';
+import { applyAction, createInitialState, getEffectiveHackCost, getEffectiveScanCost, getNextSwapFee, isActionLegal, startNextHand } from '../src/engine/gameEngine.ts';
 import { DEFAULT_CONFIG } from '../src/engine/types.ts';
 
 describe('Campaign: virtual entities, disguise decoy escape, skill loot & failure ending', () => {
@@ -225,6 +225,51 @@ describe('Worldbook & Editable Presets (night-sugar-office pattern)', () => {
     assert.ok(!text.includes('粉A'));
     assert.ok(!text.includes('黑3'));
     assert.ok(text.includes('黑2'));
+  });
+
+  it('preserves pastHands summaries across startNextHand and injects chat history + past round facts into LLM prompt without leaking hidden human hacks', () => {
+    let h1 = createInitialState({ config: DEFAULT_CONFIG, opponentName: '银狼' });
+    h1.currentTurn = 'human';
+    h1.players.human.hand[0].visibility = 'open';
+    h1.players.human.hand[0].card = { id: 'h-test', suit: 'B', rank: 5 };
+    h1 = applyAction(h1, { type: 'hack', handIndex: 0, skill: 'plus-one' });
+    h1 = applyAction(h1, { type: 'raise', amount: 20 });
+    h1 = applyAction(h1, { type: 'fold' }); // AI folds -> reason fold -> human hack NOT exposed
+
+    const h2 = startNextHand(h1);
+    assert.equal(h2.pastHands.length, 1);
+    assert.equal(h2.pastHands[0].handNumber, 1);
+    assert.equal(h2.pastHands[0].winner, 'human');
+    assert.equal(h2.pastHands[0].committedByHuman, 70); // ante 10 + hack 40 + raise 20
+    assert.equal(h2.pastHands[0].humanHadTamper, false); // fold does not expose hidden hack
+
+    const llmText = serializeStateForLlm(h2);
+    assert.ok(llmText.includes('前几轮交锋战绩'));
+    assert.ok(llmText.includes('第#1局'));
+    assert.ok(llmText.includes('玩家累计投入70'));
+    assert.ok(!llmText.includes('终端篡改'));
+
+    const preset = builtinPresets()[0];
+    const camp = createInitialCampaign('GHOST-7');
+    const dossier = buildPursuerDossier(FALLBACK_CONTRACT_CHARACTER, 1);
+    const wb = syncDynamicWorldbookEntries(builtinWorldbook(), camp, FALLBACK_CONTRACT_CHARACTER, dossier);
+    const composed = composePresetPrompt({
+      preset,
+      scope: 'decision',
+      worldbook: wb,
+      character: FALLBACK_CONTRACT_CHARACTER,
+      dossier,
+      campaign: camp,
+      triggerText: '聊天记录',
+      tableSummary: llmText,
+      taskContext: '决定下一步操作',
+      historyMessages: [
+        { role: 'user', content: '上一轮我故意诱你弃牌的。' },
+        { role: 'assistant', content: '银狼 [发言]：哼，别得意太早。' },
+      ],
+    });
+    assert.ok(composed.system.includes('上一轮我故意诱你弃牌的'));
+    assert.ok(composed.system.includes('第#1局'));
   });
 });
 

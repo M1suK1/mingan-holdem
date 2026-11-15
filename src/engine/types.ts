@@ -216,6 +216,22 @@ export interface ShowdownResult {
   sealedSkills?: HackSkillId[];
 }
 
+export interface HandRoundSummary {
+  handNumber: number;
+  winner: PlayerId | 'tie';
+  reason: 'fold' | 'showdown' | 'scan-caught';
+  potWon: number;
+  committedByHuman: number;
+  committedByAi: number;
+  humanEndChips: number;
+  aiEndChips: number;
+  humanHandCategory?: string;
+  aiHandCategory?: string;
+  humanHadTamper: boolean;
+  aiHadTamper: boolean;
+  sealedSkills?: HackSkillId[];
+}
+
 export interface GameState {
   handNumber: number;
   config: GameConfig;
@@ -240,6 +256,7 @@ export interface GameState {
   frozenBoardIndices: number[];
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
+  pastHands: HandRoundSummary[];
   result?: ShowdownResult;
 }
 

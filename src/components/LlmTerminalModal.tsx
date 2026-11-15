@@ -30,7 +30,9 @@ import {
 } from '../engine/vertexClient.ts';
 import {
   dispatchModelCall,
+  formatChatHistoryForLlm,
   serializeStateForLlm,
+  type ChatMessage,
   type LlmAuthMode,
   type LlmCallLog,
   type LlmConfig,
@@ -45,6 +47,7 @@ interface LlmTerminalModalProps {
   state: GameState;
   activePreset: ChatPreset;
   worldbook: WorldbookEntry[];
+  chatHistory: ChatMessage[];
   logs: LlmCallLog[];
   onSaveConfig: (next: LlmConfig) => void;
   onAppendLog: (entry: LlmCallLog) => void;
@@ -71,6 +74,7 @@ export default function LlmTerminalModal({
   state,
   activePreset,
   worldbook,
+  chatHistory,
   logs,
   onSaveConfig,
   onAppendLog,
@@ -100,6 +104,7 @@ export default function LlmTerminalModal({
     taskContext: draft.customSystemPrompt.trim()
       ? `（测试预览）附加指令：${draft.customSystemPrompt.trim()}`
       : '（测试预览）追捕者准备回应通缉黑客的通讯试探',
+    historyMessages: formatChatHistoryForLlm(chatHistory),
     overloadPersona: draft.overloadPersona,
   });
 
