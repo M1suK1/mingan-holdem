@@ -488,6 +488,8 @@ function pickSmartScanAction(
   const actor = state.players[actorId];
   const oppId = otherPlayer(actorId);
   const opp = state.players[oppId];
+  // If opponent hasn't acted yet this hand, no tampered card can exist — skip scanning
+  if (!state.actionHistory.some((e) => e.actor === oppId)) return null;
   const scanCost = getEffectiveScanCost(state, actorId);
   const chipBuffer = cheatProfile === 'auditor' ? 20 : difficulty === 'master' ? 60 : 160;
   if (actor.chips < scanCost + chipBuffer) return null;
@@ -495,11 +497,9 @@ function pickSmartScanAction(
   const targets: Array<{ targetKind: 'hand' | 'board'; targetIndex: number; weight: number }> = [];
 
   opp.hand.forEach((h, idx) => {
+    if (h.visibility !== 'open') return;
     if (state.scannedKeys.includes(`${actorId}:hand:${idx}`)) return;
-    let weight = h.visibility === 'open' ? 1.2 : 1.0;
-    if (cheatProfile === 'disruptor' && h.visibility === 'private') weight += 1.5;
-    else if (h.visibility === 'private' && state.phase === 'river') weight += 0.6;
-    targets.push({ targetKind: 'hand', targetIndex: idx, weight });
+    targets.push({ targetKind: 'hand', targetIndex: idx, weight: 1.2 });
   });
 
   state.board.forEach((slot) => {

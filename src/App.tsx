@@ -3681,6 +3681,7 @@ export function App() {
                 const canScanCard =
                   scanMode &&
                   isHumanTurn &&
+                  !isPrivate &&
                   !alreadyScanned &&
                   human.chips >= getEffectiveScanCost(state, 'human');
 

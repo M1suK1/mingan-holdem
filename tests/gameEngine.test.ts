@@ -295,4 +295,19 @@ describe('gameEngine: non-consuming call & core holdem rules', () => {
     assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 }), true);
     assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'plus-one' }), false);
   });
+
+  it('restricts hand scan to open hand cards only and blocks scanning private hand cards', () => {
+    let state = setupDeterministicState();
+    assert.equal(state.currentTurn, 'human');
+    // Human swaps hand[0] with hidden board[1] -> human hand[0] becomes private
+    state = applyAction(state, { type: 'swap', handIndex: 0, boardIndex: 1 });
+    assert.equal(state.currentTurn, 'ai');
+    assert.equal(state.players.human.hand[0].visibility, 'private');
+    assert.equal(state.players.human.hand[1].visibility, 'open');
+
+    // AI cannot scan human's private hand[0], CAN scan open hand[1] and open swapped board[1]
+    assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 0 }), false);
+    assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'hand', targetIndex: 1 }), true);
+    assert.equal(isActionLegal(state, { type: 'scan', targetKind: 'board', targetIndex: 1 }), true);
+  });
 });

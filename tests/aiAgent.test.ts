@@ -276,4 +276,38 @@ describe('aiAgent: legality and full-hand self-play', () => {
       }
     }
   });
+
+  it('AI never scans on opening turn when acting first before human moves, and never targets private hand cards', async () => {
+    const startAiFirst = createInitialState({
+      config: { ...DEFAULT_CONFIG, aiDelayMs: 0 },
+      tieStarter: 'ai',
+    });
+    const forcedAiFirst = { ...startAiFirst, currentTurn: 'ai' as const };
+    // Even an aggressive auditor master AI with rng() === 0 must NOT scan before human has acted
+    const auditorAi = new LocalAiAgent(
+      'ai',
+      'balanced',
+      FALLBACK_CONTRACT_CHARACTER,
+      () => 0,
+      'master',
+      'conservative',
+      'auditor'
+    );
+    const openingDec = await auditorAi.decide(forcedAiFirst);
+    assert.notEqual(openingDec.action.type, 'scan');
+
+    // Once human swaps all 3 hand cards? If human has 1 private and 2 open, AI scan never picks the private one
+    let afterHumanSwap = applyAction(
+      { ...startAiFirst, currentTurn: 'human' as const },
+      { type: 'swap', handIndex: 0, boardIndex: 1 }
+    );
+    afterHumanSwap.players.human.hand[1].visibility = 'private';
+    afterHumanSwap.players.human.hand[2].visibility = 'private';
+    // Only board[1] (swapped by human) is scannable; no private hand card can ever be picked
+    const scanOrOther = await auditorAi.decide(afterHumanSwap);
+    assert.ok(isActionLegal(afterHumanSwap, scanOrOther.action));
+    if (scanOrOther.action.type === 'scan') {
+      assert.equal(scanOrOther.action.targetKind, 'board');
+    }
+  });
 });

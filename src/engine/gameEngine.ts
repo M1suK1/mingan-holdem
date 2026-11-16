@@ -664,7 +664,8 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     const scanKey = `${actorId}:${action.targetKind}:${action.targetIndex}`;
     if (state.scannedKeys.includes(scanKey)) return false;
     if (action.targetKind === 'hand') {
-      return Boolean(opp.hand[action.targetIndex]);
+      const hCard = opp.hand[action.targetIndex];
+      return Boolean(hCard && hCard.visibility === 'open');
     }
     const slot = state.board[action.targetIndex];
     return Boolean(slot && slot.isOpen && slot.swappedBy === oppId);

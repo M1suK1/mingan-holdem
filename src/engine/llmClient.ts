@@ -1014,8 +1014,23 @@ export function enumerateLegalActionHints(state: GameState): string[] {
     }
   }
 
-  if (!state.usedScanThisTurn && ai.chips >= state.config.scanCost) {
-    hints.push('{"type":"scan","targetKind":"hand|board","targetIndex":0..3}');
+  if (
+    !state.usedScanThisTurn &&
+    ai.chips >= state.config.scanCost &&
+    state.actionHistory.some((e) => e.actor === 'human')
+  ) {
+    const scanHandIdx = state.players.human.hand
+      .map((h, i) => (h.visibility === 'open' && !state.scannedKeys.includes(`ai:hand:${i}`) ? i : -1))
+      .filter((i) => i >= 0);
+    const scanBoardIdx = state.board
+      .filter((b) => b.isOpen && b.swappedBy === 'human' && !state.scannedKeys.includes(`ai:board:${b.index}`))
+      .map((b) => b.index);
+    if (scanHandIdx.length > 0) {
+      hints.push(`{"type":"scan","targetKind":"hand","targetIndex":${scanHandIdx.join('|')}}`);
+    }
+    if (scanBoardIdx.length > 0) {
+      hints.push(`{"type":"scan","targetKind":"board","targetIndex":${scanBoardIdx.join('|')}}`);
+    }
   }
 
   return hints;
