@@ -61,13 +61,13 @@ export function CyberCard3D({
 }: CyberCard3DProps) {
   const isBlank = Boolean(card?.isBlank);
   const isPink = !isBlank && card?.suit === 'P';
-  const rankTxt = isBlank ? '废牌' : card ? formatRank(card.rank) : '';
+  const rankTxt = isBlank ? 'NULL' : card ? formatRank(card.rank) : '';
   const hexCode = isBlank
     ? '0x00'
     : card
       ? `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}`
       : '';
-  const suitName = isBlank ? '废牌' : card ? formatSuitLabel(card.suit) : '';
+  const suitName = isBlank ? 'NULL' : card ? formatSuitLabel(card.suit) : '';
   const interactive = Boolean(onClick);
 
   const bodyClasses = [
@@ -154,7 +154,7 @@ export function CyberCard3D({
             <span
               className={`px-card-hero-rank ${
                 isBlank ? 'rank-blank' : isPink ? 'rank-pink' : 'rank-cyan'
-              } ${rankTxt === '10' || isBlank ? 'is-ten' : ''}`}
+              } ${rankTxt === '10' ? 'is-ten' : ''}`}
             >
               {rankTxt}
             </span>

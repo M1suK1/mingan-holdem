@@ -2400,7 +2400,7 @@ export function App() {
       return latestStateRef.current;
     }
     const activeEscNode =
-      activeEscapeNodeRef.current !== null && !overrideOpponentName && !nextCharacter
+      activeEscapeNodeRef.current !== null && !nextCharacter
         ? ESCAPE_ROUTE_NODES[activeEscapeNodeRef.current] ?? null
         : null;
     const targetChar = nextCharacter ?? character;
@@ -2438,6 +2438,7 @@ export function App() {
     setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
+    lastSlashedHandRef.current = null;
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,

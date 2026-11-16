@@ -45,7 +45,7 @@ export function formatSuitLabel(suit: Suit): string {
 }
 
 export function formatCardShort(card: Card): string {
-  if (card.isBlank) return '废牌(NULL)';
+  if (card.isBlank) return 'NULL';
   return `${formatSuitLabel(card.suit)}${formatRank(card.rank)}`;
 }
 
