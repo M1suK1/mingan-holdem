@@ -164,7 +164,7 @@ export const SEC01_CHARACTER_DOSSIER: ContractCharacter = {
       polarity: 'positive',
       tags: ['特权作弊', '明牌改A'],
       description:
-        '凌翡的特殊作弊技能：预支 60 算力挑选手中 1 张非 A 明牌直接篡改为对应花色的 A（结果对端不可见，可被扫描抓包）。',
+        '凌翡的特殊作弊技能（与 +1 / -1 / 反色同级，一轮内可跨回合多次使用、每回合限 1 次）：预支 60 算力挑选手中 1 张非 A 明牌直接篡改为对应花色的 A（结果对端不可见，可被扫描抓包）。',
     },
     {
       id: 'sec01-fragile-pride',

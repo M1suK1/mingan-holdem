@@ -1561,10 +1561,7 @@ export function App() {
           enqueueOpponentSegments(snapshot.players.ai.name, chatRes.segments);
         } else {
           setActiveExpression(decision.dialogue.expression);
-          const isSecretCheat =
-            decision.action.type === 'hack' ||
-            (decision.action.type === 'use-skill' && decision.action.skillId === 'crown-ace');
-          if (!isSecretCheat) {
+          if (decision.action.type !== 'hack') {
             enqueueTask({
               kind: 'opponent',
               speaker: snapshot.players.ai.name,
@@ -2024,7 +2021,10 @@ export function App() {
       } else if (!hc || hc.visibility !== 'open') {
         pushToast('warn', '仅可对己方公开明牌使用篡改技能');
       } else {
-        pushToast('warn', skill === 'plus-one' ? '当前已是最大点数 A' : '当前已是最小点数 2');
+        pushToast(
+          'warn',
+          skill === 'plus-one' || skill === 'crown-ace' ? '当前已是最大点数 A' : '当前已是最小点数 2'
+        );
       }
       return;
     }
@@ -3875,6 +3875,43 @@ export function App() {
                   {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
+                    if (sid === 'crown-ace') {
+                      const isSealed = human.sealedSkills.includes('crown-ace');
+                      const isColdLocked = state.lockedHumanHackSkill === 'crown-ace';
+                      const cost = getEffectiveHackCost(state, 'human', 'crown-ace');
+                      const disabled =
+                        !tutorialCaps.allowHack ||
+                        !isHumanTurn ||
+                        diff > 0 ||
+                        isSealed ||
+                        isColdLocked ||
+                        state.usedHackThisTurn ||
+                        human.chips < cost;
+                      return (
+                        <button
+                          key={sid}
+                          id={`acquired-skill-btn-${sIdx}`}
+                          type="button"
+                          className={`lc-acquired-skill-chip ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
+                          disabled={disabled}
+                          onClick={() => handleExecuteHack('crown-ace')}
+                          title={sk.summary}
+                        >
+                          <span>
+                            {isSealed
+                              ? '封印'
+                              : isColdLocked
+                                ? '冷封'
+                                : state.usedHackThisTurn
+                                  ? '已用'
+                                  : sk.name}
+                          </span>
+                          {!isSealed && !isColdLocked && !state.usedHackThisTurn && (
+                            <span className="lc-hack-cost">{cost}</span>
+                          )}
+                        </button>
+                      );
+                    }
                     const isPassive = sk.targetMode === 'passive';
                     const isTargeting = pendingSkillTargetId === sid;
                     const cost = sk.costHint ?? 0;

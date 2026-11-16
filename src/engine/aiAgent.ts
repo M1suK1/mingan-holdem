@@ -275,7 +275,7 @@ function pickSpecialCrownAceAction(
   actorId: PlayerId
 ): GameAction | null {
   if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'crown-ace') return null;
-  if (state.usedProtocolSkillThisHand || getBetDiff(state, actorId) > 0) return null;
+  if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
 
   const actor = state.players[actorId];
   if (actor.chips < 180) return null;
@@ -294,7 +294,7 @@ function pickSpecialCrownAceAction(
     if (hc.visibility !== 'open' || hc.card.rank >= 14 || (hc.tamperedBy && hc.tamperedBy.length > 0)) {
       continue;
     }
-    const act: GameAction = { type: 'use-skill', skillId: 'crown-ace', targetIndex: idx };
+    const act: GameAction = { type: 'hack', handIndex: idx, skill: 'crown-ace' };
     if (!isActionLegal(state, act)) continue;
 
     const simHand = handCards.map((c, i) => (i === idx ? { ...c, rank: 14 as Rank } : c));
@@ -531,7 +531,7 @@ export class LocalAiAgent implements OpponentAgent {
     const lastType = state.lastAction?.type;
 
     // 1. Smart Scan & Profile-Driven Hacker Skill (non-consuming)
-    if (lastType !== 'hack' && lastType !== 'scan' && lastType !== 'use-skill') {
+    if (lastType !== 'hack' && lastType !== 'scan') {
       const crownAceAct = pickSpecialCrownAceAction(state, this.playerId);
       if (crownAceAct && roll < 0.55) {
         return {

@@ -101,7 +101,7 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     signatureSkillDesc: '每手首次主动加注成功时，额外从玩家吸取 25 算力。',
     specialCheatSkillId: 'crown-ace',
     specialCheatSkillName: '钦定王牌',
-    specialCheatSkillDesc: '可挑选手中 1 张非 A 明牌直接篡改为对应花色的 A（隐藏篡改，可被扫描抓获）。',
+    specialCheatSkillDesc: '与 +1/-1/反色同级的特权改牌技（一轮内可跨回合多次使用，每回合限 1 次）：可将手中 1 张非 A 明牌直接变为对应花色的 A。',
     rewardSkillChoices: ['siphon-cache', 'overclock-bluff'],
     pos: { x: 254, y: 132 },
     escapePath: [

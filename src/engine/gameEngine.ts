@@ -144,6 +144,8 @@ export function getHackSkillCost(state: Pick<GameState, 'config'>, skill: HackSk
       return state.config.hackMinusCost;
     case 'flip-suit':
       return state.config.hackFlipSuitCost;
+    case 'crown-ace':
+      return 60;
   }
 }
 
@@ -604,31 +606,30 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       if (actor.sealedSkills.includes(action.skill)) return false;
       if (actorId === 'human' && state.lockedHumanHackSkill === action.skill) return false;
       if (actorId === 'ai' && state.lockedAiHackSkill === action.skill) return false;
+      if (action.skill === 'crown-ace') {
+        const hasCrownAce =
+          actorId === 'human'
+            ? Boolean(state.playerAcquiredSkills?.includes('crown-ace'))
+            : state.aiSpecialCheatSkill === 'crown-ace';
+        if (!hasCrownAce) return false;
+      }
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
       const hCard = actor.hand[action.handIndex];
       if (!hCard || hCard.visibility !== 'open') return false;
-      if (action.skill === 'plus-one' && hCard.card.rank >= 14) return false;
+      if ((action.skill === 'plus-one' || action.skill === 'crown-ace') && hCard.card.rank >= 14) {
+        return false;
+      }
       if (action.skill === 'minus-one' && hCard.card.rank <= 2) return false;
       return true;
     }
 
-    // Acquired / Special Protocol Skills (once per hand)
+    // Acquired Protocol Skills (once per hand, human player)
     if (action.type === 'use-skill') {
-      if (state.usedProtocolSkillThisHand) return false;
-      const idx = action.targetIndex ?? 0;
-      if (action.skillId === 'crown-ace') {
-        const hasSkill =
-          actorId === 'human'
-            ? Boolean(state.playerAcquiredSkills?.includes('crown-ace'))
-            : state.aiSpecialCheatSkill === 'crown-ace';
-        if (!hasSkill) return false;
-        if (actor.sealedSkills.includes('plus-one')) return false;
-        const hc = actor.hand[idx];
-        return Boolean(hc && hc.visibility === 'open' && hc.card.rank < 14 && actor.chips >= 60);
-      }
       if (actorId !== 'human') return false;
+      if (state.usedProtocolSkillThisHand) return false;
       if (!state.playerAcquiredSkills?.includes(action.skillId)) return false;
+      const idx = action.targetIndex ?? 0;
       switch (action.skillId) {
         case 'ghost-packet':
           return !actor.ghostShield && actor.chips >= 40;
@@ -1121,6 +1122,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       nextCard.rank = (nextCard.rank + 1) as Rank;
     } else if (action.skill === 'minus-one') {
       nextCard.rank = (nextCard.rank - 1) as Rank;
+    } else if (action.skill === 'crown-ace') {
+      nextCard.rank = 14 as Rank;
     } else {
       nextCard.suit = nextCard.suit === 'B' ? 'P' : 'B';
     }
@@ -1132,7 +1135,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         ? '点数+1'
         : action.skill === 'minus-one'
           ? '点数-1'
-          : '反转花色';
+          : action.skill === 'crown-ace'
+            ? '钦定王牌(A)'
+            : '反转花色';
     const summary = `${actorLabel} 预支 ${cost} 算力注入黑客协议（${skillName} · 仅己方可见）`;
 
     next.lastAction = {
@@ -1292,18 +1297,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     next.usedProtocolSkillThisHand = true;
 
     let summary = '';
-    if (action.skillId === 'crown-ace') {
-      const cost = 60;
-      actor.chips -= cost;
-      actor.totalCommitted += cost;
-      actor.hiddenHackEscrow = (actor.hiddenHackEscrow ?? 0) + cost;
-      next.hackEscrowPot += cost;
-      const hc = actor.hand[idx];
-      if (!hc.originalCard) hc.originalCard = { ...hc.card };
-      hc.card = { ...hc.card, rank: 14 };
-      hc.tamperedBy = Array.from(new Set([...(hc.tamperedBy ?? []), 'plus-one']));
-      summary = `${actorLabel} 预支 ${cost} 算力注入特权协议（钦定王牌 · 仅己方可见）`;
-    } else if (action.skillId === 'ghost-packet') {
+    if (action.skillId === 'ghost-packet') {
       const cost = 40;
       actor.chips -= cost;
       actor.totalCommitted += cost;
@@ -1381,12 +1375,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       type: 'use-skill',
       actor: actorId,
       boardIndex: action.skillId === 'zero-day-peek' || action.skillId === 'ice-firewall' ? idx : undefined,
-      handIndex:
-        action.skillId === 'parity-spoof' ||
-        action.skillId === 'phantom-swap' ||
-        action.skillId === 'crown-ace'
-          ? idx
-          : undefined,
+      handIndex: action.skillId === 'parity-spoof' || action.skillId === 'phantom-swap' ? idx : undefined,
       label: summary,
     };
     next.actionHistory.push({
