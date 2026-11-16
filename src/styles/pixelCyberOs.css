@@ -694,16 +694,23 @@ button:disabled {
 }
 
 .lc-player-hand-zone {
+  position: relative;
   grid-column: 2;
   grid-row: 3;
   width: 100%;
-  padding: 0 14px 0 0;
+  padding: 0 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
   --hud-corner: var(--neon-pink);
   border-color: rgba(255, 46, 136, 0.58);
+  background: radial-gradient(
+    circle at 50% 34%,
+    color-mix(in srgb, var(--entity-accent, #00f0ff) 20%, transparent),
+    #030407 78%
+  );
+  overflow: hidden;
 }
 
 .lc-player-footer {
@@ -712,7 +719,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-main);
+  text-shadow: var(--px-ghost-ui);
 }
 
 .lc-player-hand-zone.is-low-compute {
@@ -2603,49 +2611,66 @@ button:disabled {
 }
 
 /* =========================================================================
-   8B. Player Pure Avatar Frame (Left of Cards) & Campaign / Preset / Worldbook UI
+   8B. Player Half-Body Background Portrait & Campaign / Preset / Worldbook UI
    ========================================================================= */
-.lc-player-main-split {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  gap: 10px;
-  align-items: stretch;
-}
-
-.lc-player-avatar-only {
-  position: relative;
-  width: 168px;
-  height: 100%;
-  min-height: 186px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
+.lc-player-portrait-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
   overflow: hidden;
-  display: block;
 }
 
-.lc-player-avatar-only:hover {
-  filter: brightness(1.08);
-}
-
-.lc-avatar-only-img {
+.lc-player-portrait-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: 50% 6%;
-  transform: scale(1.12);
-  transform-origin: 50% 8%;
-  display: block;
+  object-position: 50% 8%;
+  opacity: 0.68;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.95));
+  user-select: none;
+  pointer-events: none;
 }
 
-.lc-avatar-only-img.is-fullbody-crop {
-  object-position: 50% 0%;
-  transform: scale(2);
-  transform-origin: 50% 0%;
+.lc-player-portrait-img.is-fullbody-crop {
+  object-position: 50% 4%;
+}
+
+.lc-player-portrait-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(
+    to bottom,
+    rgba(3, 5, 10, 0.24) 0%,
+    rgba(3, 5, 10, 0.52) 56%,
+    rgba(3, 5, 10, 0.9) 100%
+  );
+  pointer-events: none;
+}
+
+.lc-disguise-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  background: rgba(6, 10, 18, 0.88);
+  border: 1px solid color-mix(in srgb, var(--entity-accent, #00f0ff) 65%, var(--px-border));
+  color: var(--neon-cyan-soft);
+  cursor: pointer;
+}
+
+.lc-disguise-pill.is-decoy {
+  border-color: rgba(255, 46, 136, 0.68);
+  color: var(--neon-pink-soft);
+}
+
+.lc-disguise-pill:hover {
+  filter: brightness(1.16);
 }
 
 .lc-acquired-skill-bar {
@@ -2690,6 +2715,10 @@ button:disabled {
 }
 
 .lc-player-cards-col {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
   padding: 8px 0;
   display: flex;
   flex-direction: column;
@@ -3022,19 +3051,8 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .lc-player-main-split {
-    grid-template-columns: 104px minmax(0, 1fr);
-    gap: 8px;
-  }
-
   .lc-player-hand-zone {
     padding: 0 10px;
-  }
-
-  .lc-player-avatar-only {
-    width: 104px;
-    height: 132px;
-    min-height: 132px;
   }
 }
 
@@ -3150,18 +3168,7 @@ button:disabled {
   .lc-player-hand-zone {
     grid-column: 1 / 3;
     grid-row: 3;
-    padding: 6px 8px;
-  }
-
-  .lc-player-main-split {
-    grid-template-columns: 82px minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .lc-player-avatar-only {
-    width: 82px;
-    height: 112px;
-    min-height: 112px;
+    padding: 4px 8px;
   }
 
   .lc-left-action-stack {

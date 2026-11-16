@@ -2643,43 +2643,48 @@ export function App() {
           </div>
         </section>
 
-        {/* COL 2, ROW 3: Player Pure Portrait Avatar (Left) + 3 Cards + Hacker & Scan Skill Bar */}
+        {/* COL 2, ROW 3: Player Half-Body Background Portrait + 3 Cards + Hacker & Scan Skill Bar */}
         <section
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
+          style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
           aria-label="己方手牌序列区"
         >
-          <div className="lc-player-main-split">
-            <button
-              id="player-btn-switch-disguise"
-              type="button"
-              className={`lc-player-avatar-only ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
-              style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
-              onClick={() => {
-                if (state.handNumber === 1 && state.actionHistory.length === 0) {
-                  setManualDisguiseOpen(true);
-                } else if (campaign.capturedEntities.length === 0) {
-                  pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
-                } else {
-                  pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
-                }
-              }}
-              title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
-              aria-label={`当前出战虚拟实体头像：${activeDisguise.name}`}
-            >
-              <img
-                src={activeDisguise.virtualPortrait}
-                alt={activeDisguise.name}
-                className={`lc-avatar-only-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
-              />
-            </button>
+          <div className="lc-player-portrait-layer" aria-hidden="true">
+            <img
+              src={activeDisguise.virtualPortrait}
+              alt=""
+              className={`lc-player-portrait-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
+            />
+            <div className="lc-player-portrait-fade" />
+          </div>
 
-            <div className="lc-player-cards-col">
-              <div className="lc-status-strip" style={{ width: '100%' }}>
-                <span className="lc-micro-tag cyan">
-                  己方：{humanSummary.label} · {humanSummary.detail}
-                </span>
+          <div className="lc-player-cards-col">
+            <div className="lc-status-strip" style={{ width: '100%' }}>
+              <span className="lc-micro-tag cyan">
+                己方：{humanSummary.label} · {humanSummary.detail}
+              </span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  id="player-btn-switch-disguise"
+                  type="button"
+                  className={`lc-disguise-pill ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
+                  onClick={() => {
+                    if (state.handNumber === 1 && state.actionHistory.length === 0) {
+                      setManualDisguiseOpen(true);
+                    } else if (campaign.capturedEntities.length === 0) {
+                      pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
+                    } else {
+                      pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
+                    }
+                  }}
+                  title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
+                  aria-label={`当前出战虚拟实体：${activeDisguise.name}`}
+                >
+                  {activeDisguise.isCore ? '核心' : '诱饵'}：{activeDisguise.name}
+                </button>
                 <span className="lc-micro-tag">可用算力 {human.chips}</span>
               </div>
+            </div>
 
               <div className="lc-cards-row">
                 {human.hand.map((hc, idx) => {
@@ -2876,7 +2881,6 @@ export function App() {
                 <span>换牌门票：{swapFee}</span>
               </div>
             </div>
-          </div>
         </section>
 
         {mobileChatOpen && (
