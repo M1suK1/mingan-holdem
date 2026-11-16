@@ -181,6 +181,31 @@ button:disabled {
   color: rgba(152, 164, 189, 0.11);
 }
 
+/* Player Low Compute / Bankrupt: Outer Background Data Streams Turn Crimson Red */
+.lc-backdrop.is-player-low .lc-rain-col,
+.lc-backdrop.is-player-bankrupt .lc-rain-col {
+  color: rgba(255, 36, 56, 0.74);
+  text-shadow: 0 0 10px rgba(255, 36, 56, 0.78);
+  animation:
+    lcDataStreamFall 7.5s linear infinite,
+    lcRedStreamFlash 0.72s steps(2, end) infinite;
+}
+
+.lc-backdrop.is-player-low .lc-bus-pulse,
+.lc-backdrop.is-player-bankrupt .lc-bus-pulse {
+  stroke: #ff2438;
+  opacity: 0.85;
+}
+
+.lc-backdrop.is-player-low .lc-mote,
+.lc-backdrop.is-player-bankrupt .lc-mote {
+  background: rgba(255, 42, 68, 0.82);
+}
+
+.lc-backdrop.is-player-low {
+  box-shadow: inset 0 0 85px rgba(255, 24, 48, 0.24);
+}
+
 @keyframes lcDataStreamFall {
   from {
     transform: translateY(-25%);
@@ -584,33 +609,106 @@ button:disabled {
   pointer-events: none;
 }
 
-/* Bankrupt (0 Compute): Portrait Chromatic Shear & Glitch Distortion */
-.lc-opponent-zone.is-bankrupt .lc-opp-portrait-img {
-  filter: contrast(1.45) saturate(1.6) drop-shadow(-4px 0 rgba(0, 240, 255, 0.75))
-    drop-shadow(4px 0 rgba(255, 46, 136, 0.85));
-  animation: lcPortraitDistort 0.85s steps(3, end) infinite;
+/* Bankrupt (0 Compute): V-Sync-OFF Horizontal Screen Tearing & Strobe Flicker */
+.lc-opponent-zone.is-bankrupt .lc-opp-portrait-img:not(.lc-opp-tear-slice) {
+  opacity: 0.24;
+  filter: contrast(1.4) saturate(1.4) drop-shadow(-3px 0 rgba(0, 240, 255, 0.7))
+    drop-shadow(3px 0 rgba(255, 46, 136, 0.8));
 }
 
-@keyframes lcPortraitDistort {
+.lc-opp-tear-slice {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  filter: contrast(1.38) saturate(1.55) drop-shadow(-4px 0 rgba(0, 240, 255, 0.78))
+    drop-shadow(4px 0 rgba(255, 46, 136, 0.86));
+}
+
+.lc-opp-tear-slice.slice-a {
+  animation: lcVsyncTearA 1.75s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-b {
+  animation: lcVsyncTearB 1.95s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-c {
+  animation: lcVsyncTearC 2.25s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-d {
+  animation: lcVsyncTearB 1.65s steps(1, end) infinite reverse;
+}
+.lc-opp-tear-slice.slice-e {
+  animation: lcVsyncTearA 2.1s steps(1, end) infinite reverse;
+}
+.lc-opp-tear-slice.slice-f {
+  animation: lcVsyncTearC 1.85s steps(1, end) infinite;
+}
+
+@keyframes lcVsyncTearA {
   0% {
-    transform: translate3d(0, 0, 0) skewX(0deg);
-    clip-path: inset(0 0 0 0);
+    transform: translateX(-8px);
+    opacity: 0.96;
   }
-  20% {
-    transform: translate3d(-5px, 1px, 0) skewX(-6deg) scaleY(1.03);
-    clip-path: inset(6% 0 10% 0);
+  28% {
+    transform: translateX(-14px);
+    opacity: 0.84;
   }
-  45% {
-    transform: translate3d(6px, -2px, 0) skewX(7deg) scaleX(1.04);
-    clip-path: inset(0 0 4% 0);
+  52% {
+    transform: translateX(10px);
+    opacity: 0.78;
   }
-  70% {
-    transform: translate3d(-4px, 2px, 0) skewX(-4deg);
-    clip-path: inset(12% 0 2% 0);
+  74% {
+    transform: translateX(-18px);
+    opacity: 0.96;
   }
   100% {
-    transform: translate3d(2px, 0, 0) skewX(2deg);
-    clip-path: inset(0 0 0 0);
+    transform: translateX(-8px);
+    opacity: 0.96;
+  }
+}
+
+@keyframes lcVsyncTearB {
+  0% {
+    transform: translateX(9px);
+    opacity: 0.94;
+  }
+  30% {
+    transform: translateX(-12px);
+    opacity: 0.78;
+  }
+  60% {
+    transform: translateX(18px);
+    opacity: 0.98;
+  }
+  82% {
+    transform: translateX(-6px);
+    opacity: 0.86;
+  }
+  100% {
+    transform: translateX(9px);
+    opacity: 0.94;
+  }
+}
+
+@keyframes lcVsyncTearC {
+  0% {
+    transform: translateX(-10px);
+    opacity: 0.88;
+  }
+  34% {
+    transform: translateX(15px);
+    opacity: 0.98;
+  }
+  64% {
+    transform: translateX(-3px);
+    opacity: 0.78;
+  }
+  86% {
+    transform: translateX(-16px);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(-10px);
+    opacity: 0.88;
   }
 }
 
@@ -694,16 +792,23 @@ button:disabled {
 }
 
 .lc-player-hand-zone {
+  position: relative;
   grid-column: 2;
   grid-row: 3;
   width: 100%;
-  padding: 0 14px 0 0;
+  padding: 0 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
   --hud-corner: var(--neon-pink);
   border-color: rgba(255, 46, 136, 0.58);
+  background: radial-gradient(
+    circle at 50% 34%,
+    color-mix(in srgb, var(--entity-accent, #00f0ff) 20%, transparent),
+    #030407 78%
+  );
+  overflow: hidden;
 }
 
 .lc-player-footer {
@@ -712,7 +817,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-main);
+  text-shadow: var(--px-ghost-ui);
 }
 
 .lc-player-hand-zone.is-low-compute {
@@ -824,15 +930,13 @@ button:disabled {
   z-index: 1;
 }
 
-/* Opponent Portrait Single-Round Defeat Mosaic Hit Overlay */
+/* Opponent Portrait Single-Round Defeat Irregular Mosaic Hit Overlay */
 .lc-opp-mosaic-hit {
   position: absolute;
   inset: 0;
   z-index: 5;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  overflow: hidden;
   animation: lcMosaicFlickerBurst 1.15s steps(3, end) forwards;
 }
 
@@ -2166,33 +2270,32 @@ button:disabled {
   }
 }
 
-/* Damage Effect 1: Round Loss Mosaic Flicker Overlay */
+/* Damage Effect 1: Round Loss Irregular Mosaic Flicker Overlay */
 .lc-mosaic-flicker-overlay {
   position: fixed;
   inset: 0;
   z-index: 44;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  overflow: hidden;
   animation: lcMosaicFlickerBurst 1.15s steps(3, end) forwards;
 }
 
 .lc-mosaic-tile {
+  position: absolute;
   background: transparent;
 }
 
 .lc-mosaic-tile.t1 {
-  background: rgba(255, 46, 136, 0.34);
+  background: rgba(255, 46, 136, 0.36);
 }
 .lc-mosaic-tile.t2 {
-  background: rgba(0, 240, 255, 0.28);
+  background: rgba(0, 240, 255, 0.3);
 }
 .lc-mosaic-tile.t3 {
-  background: rgba(8, 10, 16, 0.82);
+  background: rgba(8, 10, 16, 0.84);
 }
 .lc-mosaic-tile.t4 {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 @keyframes lcMosaicFlickerBurst {
@@ -2222,34 +2325,37 @@ button:disabled {
   }
 }
 
-/* Damage Effect 3: Bankrupt (0 Compute) Mosaic Engulfment Overlay */
+/* Damage Effect 3 (Opponent Only): Irregular Mosaic Engulfment Overlay */
 .lc-mosaic-flood-overlay {
   position: absolute;
   inset: 0;
   z-index: 6;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  grid-template-rows: repeat(10, 1fr);
-  animation: lcMosaicFloodSurge 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  overflow: hidden;
+  animation: lcMosaicFloodSurge 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .lc-mosaic-flood-cell {
+  position: absolute;
   background: rgba(4, 5, 8, 0.82);
-  border: 1px solid rgba(255, 36, 56, 0.22);
-  animation: lcMosaicCellGlitch 1.4s steps(2, end) infinite;
+  border: 1px solid rgba(255, 36, 56, 0.26);
+  animation: lcMosaicCellGlitch 2.2s steps(2, end) infinite;
 }
 
 .lc-mosaic-flood-cell.pink {
-  background: rgba(255, 46, 136, 0.42);
+  background: rgba(255, 46, 136, 0.44);
 }
 
 .lc-mosaic-flood-cell.cyan {
-  background: rgba(0, 240, 255, 0.32);
+  background: rgba(0, 240, 255, 0.34);
 }
 
 .lc-mosaic-flood-cell.void {
   background: rgba(2, 3, 6, 0.92);
+}
+
+.lc-mosaic-flood-cell.red {
+  background: rgba(255, 36, 56, 0.42);
 }
 
 @keyframes lcMosaicFloodSurge {
@@ -2289,6 +2395,79 @@ button:disabled {
   text-shadow: var(--px-ghost-hero);
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* Damage Effect 3 (Player Only): Massive Crimson Data-Stream Screen Flood */
+.lc-player-red-flood-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(90, 4, 14, 0.24) 0%,
+    rgba(28, 2, 6, 0.72) 100%
+  );
+  box-shadow: inset 0 0 110px rgba(255, 24, 48, 0.45);
+  animation: lcRedFloodSurge 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.lc-red-flood-streams {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.lc-red-flood-col {
+  position: absolute;
+  top: -55%;
+  writing-mode: vertical-rl;
+  font-family: var(--font-pixel);
+  font-weight: 800;
+  white-space: nowrap;
+  display: flex;
+  gap: 24px;
+  color: rgba(255, 36, 56, 0.9);
+  text-shadow: 0 0 12px rgba(255, 28, 48, 0.92);
+  animation: lcDataStreamFall 2.2s linear infinite;
+}
+
+.lc-red-flood-col:nth-child(3n + 1) {
+  color: rgba(255, 96, 114, 0.82);
+}
+
+.lc-red-flood-col:nth-child(4n + 2) {
+  color: rgba(210, 14, 38, 0.95);
+}
+
+@keyframes lcRedFloodSurge {
+  0% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+.lc-player-flood-banner {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 36;
+  padding: 6px 16px;
+  background: rgba(16, 2, 6, 0.94);
+  border: 2px solid #ff2438;
+  box-shadow: 0 0 22px rgba(255, 36, 56, 0.55);
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #ff6070;
+  text-shadow: 0 0 10px rgba(255, 36, 56, 0.85);
+  white-space: nowrap;
 }
 
 /* =========================================================================
@@ -2603,49 +2782,79 @@ button:disabled {
 }
 
 /* =========================================================================
-   8B. Player Pure Avatar Frame (Left of Cards) & Campaign / Preset / Worldbook UI
+   8B. Player Half-Body Background Portrait & Campaign / Preset / Worldbook UI
    ========================================================================= */
-.lc-player-main-split {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  gap: 10px;
-  align-items: stretch;
-}
-
-.lc-player-avatar-only {
-  position: relative;
-  width: 168px;
-  height: 100%;
-  min-height: 186px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
+.lc-player-portrait-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
   overflow: hidden;
-  display: block;
 }
 
-.lc-player-avatar-only:hover {
-  filter: brightness(1.08);
+.lc-player-portrait-frame {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -56px;
+  width: 280px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 0%, #000 62%, transparent 100%);
 }
 
-.lc-avatar-only-img {
+.lc-player-portrait-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: 50% 6%;
-  transform: scale(1.12);
-  transform-origin: 50% 8%;
-  display: block;
+  opacity: 0.94;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.9));
+  user-select: none;
+  pointer-events: none;
 }
 
-.lc-avatar-only-img.is-fullbody-crop {
+.lc-player-portrait-img.is-fullbody-crop {
   object-position: 50% 0%;
-  transform: scale(2);
+  transform: scale(1.42);
   transform-origin: 50% 0%;
+}
+
+.lc-player-portrait-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(
+    to bottom,
+    rgba(3, 5, 10, 0.04) 0%,
+    rgba(3, 5, 10, 0.14) 58%,
+    rgba(3, 5, 10, 0.72) 100%
+  );
+  pointer-events: none;
+}
+
+.lc-disguise-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  background: rgba(6, 10, 18, 0.88);
+  border: 1px solid color-mix(in srgb, var(--entity-accent, #00f0ff) 65%, var(--px-border));
+  color: var(--neon-cyan-soft);
+  cursor: pointer;
+}
+
+.lc-disguise-pill.is-decoy {
+  border-color: rgba(255, 46, 136, 0.68);
+  color: var(--neon-pink-soft);
+}
+
+.lc-disguise-pill:hover {
+  filter: brightness(1.16);
 }
 
 .lc-acquired-skill-bar {
@@ -2690,6 +2899,10 @@ button:disabled {
 }
 
 .lc-player-cards-col {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
   padding: 8px 0;
   display: flex;
   flex-direction: column;
@@ -2934,32 +3147,117 @@ button:disabled {
   overflow-y: auto;
 }
 
+/* Mobile Drawer Controls (Hidden on >960px desktop) */
+.lc-opp-topbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lc-mobile-chat-btn {
+  display: none;
+  position: relative;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan-soft);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.lc-mobile-unread-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  background: var(--neon-pink);
+  color: #ffffff;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.lc-mobile-only-close {
+  display: none;
+}
+
+.lc-mobile-opp-line {
+  display: none;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  background: rgba(8, 12, 22, 0.88);
+  border: 1px solid color-mix(in srgb, var(--char-accent) 55%, var(--px-border));
+  color: var(--text-main);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-mobile-opp-line.is-thought {
+  border-style: dashed;
+  color: #d6c8f5;
+}
+
+.lc-mobile-opp-speaker {
+  color: var(--char-accent);
+  font-weight: 800;
+}
+
+.lc-mobile-chat-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(2, 4, 10, 0.72);
+}
+
+/* Touch callout / accidental text selection guards */
+.px-card-scene,
+.lc-stack-btn,
+.lc-hold-btn,
+.lc-hack-btn {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
 @media (max-width: 760px) {
-  .lc-player-main-split,
   .lc-wb-grid,
   .lc-pwb-sampling-grid {
     grid-template-columns: 1fr;
   }
 
   .lc-player-hand-zone {
-    padding: 0 12px;
-  }
-
-  .lc-player-avatar-only {
-    width: 112px;
-    height: 140px;
-    min-height: 140px;
+    padding: 0 10px;
   }
 }
 
 /* =========================================================================
-   9. Responsive Adjustments (Narrow Windows)
+   9. Responsive Adjustments (Narrow Windows & Mobile Portrait)
    ========================================================================= */
 @media (max-width: 960px) {
+  .lc-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+  }
+
   .lc-stage-grid {
-    grid-template-columns: 110px minmax(0, 1fr);
-    grid-template-rows: minmax(230px, 1fr) auto auto auto;
-    gap: 8px 10px;
+    height: auto;
+    min-height: calc(100dvh - 16px);
+    grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-rows: minmax(205px, auto) auto auto auto;
+    gap: 8px;
   }
 
   .lc-pool-slot {
@@ -2970,6 +3268,7 @@ button:disabled {
   .lc-left-action-stack {
     grid-column: 1;
     grid-row: 3;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 
   .lc-opponent-zone {
@@ -2987,8 +3286,36 @@ button:disabled {
     grid-row: 3;
   }
 
+  .lc-mobile-chat-btn,
+  .lc-mobile-only-close,
+  .lc-mobile-opp-line {
+    display: inline-flex;
+  }
+
+  .lc-mobile-opp-line {
+    display: block;
+  }
+
   .lc-right-upper-col {
-    display: none;
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: min(360px, calc(100vw - 16px));
+    height: auto;
+    z-index: 70;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(106%);
+    transition:
+      transform 0.22s ease,
+      opacity 0.2s ease;
+  }
+
+  .lc-right-upper-col.is-mobile-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
   }
 
   .lc-action-stack {
@@ -2999,9 +3326,96 @@ button:disabled {
   }
 }
 
+@media (max-width: 600px) {
+  .lc-stage-grid {
+    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    gap: 6px;
+  }
+
+  .lc-pool-slot {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+
+  .lc-opponent-zone {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 196px;
+  }
+
+  .lc-board-zone {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .lc-player-hand-zone {
+    grid-column: 1 / 3;
+    grid-row: 3;
+    padding: 4px 8px;
+  }
+
+  .lc-player-portrait-frame {
+    left: -42px;
+    width: 196px;
+  }
+
+  .lc-left-action-stack {
+    grid-column: 1 / 3;
+    grid-row: 4;
+    grid-template-rows: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: auto;
+  }
+
+  .lc-action-stack {
+    grid-column: 1 / 3;
+    grid-row: 5;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    height: auto;
+  }
+
+  .px-card-scene.sz-sm {
+    width: 52px;
+    height: 74px;
+  }
+
+  .px-card-scene.sz-md {
+    width: clamp(54px, 15.5vw, 68px);
+    height: clamp(78px, 22vw, 96px);
+  }
+
+  .px-card-scene.sz-lg {
+    width: clamp(58px, 17vw, 72px);
+    height: clamp(84px, 24vw, 102px);
+  }
+
+  .lc-opp-topbar {
+    padding: 5px 8px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .lc-opp-name {
+    font-size: 12px;
+  }
+
+  .lc-stack-btn {
+    padding: 6px 6px;
+    min-height: 46px;
+  }
+
+  .lc-stack-sub {
+    font-size: 9px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lc-mote,
   .lc-rain-col,
+  .lc-red-flood-col,
+  .lc-player-red-flood-overlay,
+  .lc-opp-tear-slice,
   .lc-bus-pulse,
   .lc-speech-bubble,
   .lc-chat-msg,

@@ -312,13 +312,36 @@ export class WebRtcP2pTransport implements P2pTransport {
   }
 }
 
+export const WS_MAX_RECONNECT_ATTEMPTS = 6;
+
+export function computeWsReconnectDelayMs(attempt: number): number {
+  const safeAttempt = Math.max(0, Math.floor(attempt));
+  return Math.min(5000, 900 * Math.pow(2, safeAttempt));
+}
+
+export function shouldAutoReconnectWs(params: {
+  closedManually: boolean;
+  roomCode: string;
+  attempt: number;
+  maxAttempts?: number;
+}): boolean {
+  if (params.closedManually) return false;
+  if (!params.roomCode || !params.roomCode.trim()) return false;
+  const max = params.maxAttempts ?? WS_MAX_RECONNECT_ATTEMPTS;
+  return params.attempt < max;
+}
+
 export class WsRelayP2pTransport implements P2pTransport {
   readonly role: P2pRole;
   private ws: WebSocket | null = null;
   private pingTimer: number | null = null;
+  private reconnectTimer: number | null = null;
+  private visibilityHandler: (() => void) | null = null;
   private readonly chunkAssembler = new P2pChunkAssembler();
   private readonly callbacks: P2pTransportCallbacks;
-  private connectedOnce = false;
+  private roomCode = '';
+  private reconnectAttempts = 0;
+  private peerCurrentlyConnected = false;
   private closedManually = false;
 
   constructor(role: P2pRole, callbacks: P2pTransportCallbacks) {
@@ -327,22 +350,97 @@ export class WsRelayP2pTransport implements P2pTransport {
   }
 
   connect(roomCode: string): void {
-    this.close();
+    this.teardownSocketOnly();
+    this.clearReconnectTimer();
     this.closedManually = false;
-    this.connectedOnce = false;
+    this.roomCode = roomCode.trim().toUpperCase();
+    this.reconnectAttempts = 0;
+    this.peerCurrentlyConnected = false;
+    this.installVisibilityListener();
+    this.openSocket(false);
+  }
 
+  private installVisibilityListener(): void {
+    if (typeof document === 'undefined' || this.visibilityHandler) return;
+    this.visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (this.closedManually || !this.roomCode) return;
+      if (!this.ws || this.ws.readyState === WebSocket.CLOSED || this.ws.readyState === WebSocket.CLOSING) {
+        this.clearReconnectTimer();
+        this.reconnectAttempts = 0;
+        this.openSocket(true);
+      } else if (this.ws.readyState === WebSocket.OPEN) {
+        // Probe potentially half-open socket after mobile backgrounding
+        this.send({ type: 'PING', ts: Date.now() });
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private removeVisibilityListener(): void {
+    if (typeof document !== 'undefined' && this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (
+      !shouldAutoReconnectWs({
+        closedManually: this.closedManually,
+        roomCode: this.roomCode,
+        attempt: this.reconnectAttempts,
+      })
+    ) {
+      this.callbacks.onStatusChange('closed', '云端中继多次重连失败，请重新进入房间');
+      return;
+    }
+    this.clearReconnectTimer();
+    const attempt = this.reconnectAttempts;
+    const delayMs = computeWsReconnectDelayMs(attempt);
+    this.reconnectAttempts += 1;
+    this.callbacks.onStatusChange(
+      'connecting',
+      `网络波动或切回后台，正在重连房间 ${this.roomCode}（${attempt + 1}/${WS_MAX_RECONNECT_ATTEMPTS}）...`
+    );
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.closedManually) {
+        this.openSocket(true);
+      }
+    }, delayMs);
+  }
+
+  private openSocket(isReconnect: boolean): void {
+    this.teardownSocketOnly();
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${window.location.host}/api/p2p-ws?room=${encodeURIComponent(roomCode)}&role=${this.role}`;
-    this.callbacks.onStatusChange('connecting', `正在连接云端房间 ${roomCode}...`);
+    const url = `${proto}//${window.location.host}/api/p2p-ws?room=${encodeURIComponent(this.roomCode)}&role=${this.role}`;
+    this.callbacks.onStatusChange(
+      'connecting',
+      isReconnect ? `正在恢复房间 ${this.roomCode} 连接...` : `正在连接云端房间 ${this.roomCode}...`
+    );
 
     const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.onopen = () => {
+      this.reconnectAttempts = 0;
       if (this.role === 'host') {
-        this.callbacks.onStatusChange('waiting-answer', `云端房间 ${roomCode} 已就绪，等待好友输入房间号加入...`);
+        this.callbacks.onStatusChange(
+          'waiting-answer',
+          isReconnect
+            ? `已回到云端房间 ${this.roomCode}，等待好友同步...`
+            : `云端房间 ${this.roomCode} 已就绪，等待好友输入房间号加入...`
+        );
       } else {
-        this.callbacks.onStatusChange('connecting', `已进入房间 ${roomCode}，正在握手建立通道...`);
+        this.callbacks.onStatusChange('connecting', `已进入房间 ${this.roomCode}，正在握手建立通道...`);
       }
     };
 
@@ -355,14 +453,15 @@ export class WsRelayP2pTransport implements P2pTransport {
         const parsed = JSON.parse(assembled) as P2pPacket | { type: '__RELAY_STATUS__'; peerConnected?: boolean };
         if (parsed.type === '__RELAY_STATUS__') {
           if (parsed.peerConnected) {
-            if (!this.connectedOnce) {
-              this.connectedOnce = true;
+            if (!this.peerCurrentlyConnected) {
+              this.peerCurrentlyConnected = true;
               this.callbacks.onStatusChange('connected', '云端中继通道已建立（跨网/4G/5G 手机直连可用）');
               this.startHeartbeat();
             }
-          } else if (this.connectedOnce) {
+          } else if (this.peerCurrentlyConnected) {
+            this.peerCurrentlyConnected = false;
             this.stopHeartbeat();
-            this.callbacks.onStatusChange('closed', '好友已退出房间或网络断开');
+            this.callbacks.onStatusChange('connecting', '好友暂时离线或切换后台，正在等待重连...');
           }
           return;
         }
@@ -382,15 +481,15 @@ export class WsRelayP2pTransport implements P2pTransport {
     };
 
     ws.onerror = () => {
-      if (!this.closedManually) {
-        this.callbacks.onStatusChange('error', '云端中继通道连接异常');
-      }
+      // Let onclose drive automatic reconnect
     };
 
     ws.onclose = () => {
       this.stopHeartbeat();
+      this.peerCurrentlyConnected = false;
+      this.ws = null;
       if (!this.closedManually) {
-        this.callbacks.onStatusChange('closed', '云端中继通道已关闭');
+        this.scheduleReconnect();
       }
     };
   }
@@ -423,8 +522,7 @@ export class WsRelayP2pTransport implements P2pTransport {
     }
   }
 
-  close(): void {
-    this.closedManually = true;
+  private teardownSocketOnly(): void {
     this.stopHeartbeat();
     this.chunkAssembler.clear();
     if (this.ws) {
@@ -439,6 +537,14 @@ export class WsRelayP2pTransport implements P2pTransport {
       }
       this.ws = null;
     }
+  }
+
+  close(): void {
+    this.closedManually = true;
+    this.clearReconnectTimer();
+    this.removeVisibilityListener();
+    this.peerCurrentlyConnected = false;
+    this.teardownSocketOnly();
   }
 }
 

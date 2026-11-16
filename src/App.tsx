@@ -96,8 +96,12 @@ import {
 } from './engine/llmClient.ts';
 import { LocalAiAgent, resolveEffectiveAiDifficulty } from './engine/aiAgent.ts';
 import {
+  createNextHandReadyState,
+  getNextHandReadySummary,
   mirrorStateForGuestView,
+  reduceNextHandReadyState,
   sanitizeStateForGuest,
+  type NextHandReadyState,
   type P2pPacket,
   type P2pPeerProfile,
 } from './engine/p2pProtocol.ts';
@@ -165,6 +169,81 @@ const SETTINGS_MENU_ITEMS: Array<{
   { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
 ];
 
+function seededUnit(seed: number): number {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const FLOOD_DATA_STREAMS = Array.from({ length: 42 }, (_, i) => {
+  const clusterBase = [3, 9, 14, 21, 28, 37, 46, 54, 62, 71, 79, 86, 93][i % 13];
+  const leftPct = Math.max(0.5, Math.min(97.5, clusterBase + (seededUnit(i + 1) - 0.5) * 9.5));
+  const dur = 1.15 + seededUnit(i + 41) * 2.45;
+  const delay = -seededUnit(i + 83) * 2.8;
+  const fontSize = 9.5 + seededUnit(i + 127) * 6.5;
+  const opacity = 0.42 + seededUnit(i + 173) * 0.56;
+  const letterSpacing = 0.08 + seededUnit(i + 211) * 0.22;
+  const variant = Math.floor(seededUnit(i + 251) * 4);
+  return {
+    left: `${leftPct.toFixed(1)}%`,
+    dur: `${dur.toFixed(2)}s`,
+    delay: `${delay.toFixed(2)}s`,
+    fontSize: `${fontSize.toFixed(1)}px`,
+    opacity: Number(opacity.toFixed(2)),
+    letterSpacing: `${letterSpacing.toFixed(2)}em`,
+    tokens:
+      variant === 0
+        ? '0xERR  MEM::0000  SYS::CRASH  OVERFLOW  01011001  FATAL'
+        : variant === 1
+          ? 'BREACH!!  NULL_PTR  11100010  CORE_MELTDOWN  0xDEAD'
+          : variant === 2
+            ? 'DROP_ALL  0x4F  PACKET_LOSS  10110110  LINK_SEVERED'
+            : '01001110  SEGFAULT  0xFF00  STACK_CORRUPT  ABORT',
+  };
+});
+
+const PORTRAIT_TEAR_SLICES = [
+  { top: 0, bottom: 84, cls: 'slice-a' },
+  { top: 15, bottom: 71, cls: 'slice-b' },
+  { top: 28, bottom: 56, cls: 'slice-c' },
+  { top: 43, bottom: 40, cls: 'slice-d' },
+  { top: 59, bottom: 23, cls: 'slice-e' },
+  { top: 76, bottom: 0, cls: 'slice-f' },
+] as const;
+
+const MOSAIC_FLICKER_SHARDS = Array.from({ length: 52 }, (_, i) => {
+  const w = 3.5 + seededUnit(i + 301) * 22;
+  const h = 2.2 + seededUnit(i + 353) * 11;
+  const left = seededUnit(i + 401) * (100 - w * 0.6);
+  const top = seededUnit(i + 449) * (100 - h * 0.6);
+  const t = seededUnit(i + 503);
+  const tone = t < 0.28 ? 't1' : t < 0.56 ? 't2' : t < 0.84 ? 't3' : 't4';
+  return {
+    left: `${left.toFixed(1)}%`,
+    top: `${top.toFixed(1)}%`,
+    width: `${w.toFixed(1)}%`,
+    height: `${h.toFixed(1)}%`,
+    tone,
+  };
+});
+
+const MOSAIC_FLOOD_SHARDS = Array.from({ length: 68 }, (_, i) => {
+  const w = 5 + seededUnit(i + 601) * 26;
+  const h = 3.5 + seededUnit(i + 653) * 15;
+  const left = seededUnit(i + 701) * (100 - w * 0.5);
+  const top = seededUnit(i + 751) * (100 - h * 0.5);
+  const t = seededUnit(i + 809);
+  const tone = t < 0.26 ? 'pink' : t < 0.48 ? 'cyan' : t < 0.82 ? 'void' : 'red';
+  const delay = (seededUnit(i + 863) * 0.55).toFixed(2);
+  return {
+    left: `${left.toFixed(1)}%`,
+    top: `${top.toFixed(1)}%`,
+    width: `${w.toFixed(1)}%`,
+    height: `${h.toFixed(1)}%`,
+    tone,
+    delay: `${delay}s`,
+  };
+});
+
 const BACK_PORTRAIT_STREAMS = [
   { left: '6%', tokens: '01001101  0x7F  SYN::ACK  B_08', dur: '11s', delay: '-1s' },
   { left: '19%', tokens: 'HEX::2E88  110010  MEM::04  BIT', dur: '14s', delay: '-5s' },
@@ -180,16 +259,6 @@ const FRONT_PORTRAIT_STREAMS = [
   { left: '57%', tokens: 'STREAM::P12  1011  0x7A', dur: '11.5s', delay: '-5.5s', accent: true },
   { left: '82%', tokens: '0110  LINK::LIVE  CRC', dur: '8.8s', delay: '-1.5s', accent: false },
 ];
-
-const MOSAIC_FLICKER_TILES = Array.from({ length: 96 }, (_, i) => {
-  const mod = (i * 7 + Math.floor(i / 12) * 3) % 11;
-  return mod === 0 ? 't1' : mod === 2 ? 't2' : mod === 5 ? 't3' : mod === 8 ? 't4' : '';
-});
-
-const MOSAIC_FLOOD_CELLS = Array.from({ length: 140 }, (_, i) => {
-  const m = (i * 5 + Math.floor(i / 14) * 7) % 9;
-  return m <= 1 ? 'pink' : m <= 3 ? 'cyan' : m <= 6 ? 'void' : '';
-});
 
 const FIXED_CRUSHED_DOCK_H = 28;
 
@@ -276,7 +345,9 @@ export function App() {
   // VFX state & optional manual test override inside Settings
   const [roundLossFlicker, setRoundLossFlicker] = useState(false);
   const [aiRoundLossFlicker, setAiRoundLossFlicker] = useState(false);
-  const [vfxTestMode, setVfxTestMode] = useState<'auto' | 'low' | 'bankrupt'>('auto');
+  const [vfxTestMode, setVfxTestMode] = useState<
+    'auto' | 'human-low' | 'human-bankrupt' | 'ai-low' | 'ai-bankrupt'
+  >('auto');
   const [swapFlight, setSwapFlight] = useState<SwapFlightState | null>(null);
   const [scanVfx, setScanVfx] = useState<{
     id: string;
@@ -304,12 +375,26 @@ export function App() {
   const [p2pOfferToken, setP2pOfferToken] = useState('');
   const [p2pAnswerToken, setP2pAnswerToken] = useState('');
   const [p2pRoomCode, setP2pRoomCode] = useState('');
+  const [p2pNextHandReady, setP2pNextHandReady] = useState<NextHandReadyState>(
+    () => createNextHandReadyState()
+  );
+  const p2pNextHandReadyRef = useRef<NextHandReadyState>(p2pNextHandReady);
+  p2pNextHandReadyRef.current = p2pNextHandReady;
+  const p2pMatchActiveRef = useRef(false);
   const p2pTransportRef = useRef<P2pTransport | null>(null);
   const p2pSeqRef = useRef(0);
   const p2pRoomPollRef = useRef<number | null>(null);
   const isP2pConnected = p2pStatus === 'connected';
   const isP2pHost = isP2pConnected && p2pRole === 'host';
   const isP2pGuest = isP2pConnected && p2pRole === 'guest';
+  const isP2pSessionActive =
+    isP2pConnected ||
+    (p2pMatchActiveRef.current && (p2pStatus === 'connecting' || p2pStatus === 'waiting-answer'));
+
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [unreadMobileChat, setUnreadMobileChat] = useState(0);
+  const mobileChatOpenRef = useRef(mobileChatOpen);
+  mobileChatOpenRef.current = mobileChatOpen;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
@@ -406,6 +491,7 @@ export function App() {
     stopP2pRoomPoll();
     p2pTransportRef.current?.close();
     p2pTransportRef.current = null;
+    p2pMatchActiveRef.current = false;
     setP2pStatus('idle');
     setP2pDetail('未连接');
     setP2pRole(null);
@@ -414,6 +500,7 @@ export function App() {
     setP2pOfferToken('');
     setP2pAnswerToken('');
     setP2pRoomCode('');
+    setP2pNextHandReady(createNextHandReadyState());
     pushToast('info', '已断开 P2P 联机', '已切回单机模式');
   }, [stopP2pRoomPoll, pushToast]);
 
@@ -421,10 +508,12 @@ export function App() {
     (role: P2pRole) => {
       stopP2pRoomPoll();
       p2pTransportRef.current?.close();
+      p2pMatchActiveRef.current = false;
       setP2pRole(role);
       p2pRoleRef.current = role;
       setP2pOfferToken('');
       setP2pAnswerToken('');
+      setP2pNextHandReady(createNextHandReadyState());
       const tr = new WebRtcP2pTransport(role, {
         onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
         onPacket: (pkt) => handleP2pPacketRef.current(pkt),
@@ -440,10 +529,12 @@ export function App() {
     (role: P2pRole) => {
       stopP2pRoomPoll();
       p2pTransportRef.current?.close();
+      p2pMatchActiveRef.current = false;
       setP2pRole(role);
       p2pRoleRef.current = role;
       setP2pOfferToken('');
       setP2pAnswerToken('');
+      setP2pNextHandReady(createNextHandReadyState());
       const tr = new WsRelayP2pTransport(role, {
         onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
         onPacket: (pkt) => handleP2pPacketRef.current(pkt),
@@ -472,25 +563,43 @@ export function App() {
       if (tr) {
         tr.send({ type: 'HELLO', peer: buildLocalPeerProfile() });
         if (role === 'host') {
-          const fresh = createInitialState({
-            config: { ...latestStateRef.current.config },
-            opponentName: remotePeerRef.current?.name ?? '联机好友',
-            playerAcquiredSkills: [],
-          });
-          setState(fresh);
-          setMessages([
-            {
-              id: `p2p-start-${Date.now()}`,
-              sender: 'opponent',
-              speaker: '系统信标',
-              text: 'P2P 直连牌桌已建立，双方信息严格隔离开局！',
-              crushed: false,
-            },
-          ]);
-          pushP2pStateToGuest(fresh);
-          pushToast('success', 'P2P 直连成功（房主）', '已向好友下发初始发牌');
+          if (p2pMatchActiveRef.current) {
+            pushP2pStateToGuest(latestStateRef.current);
+            tr.send({
+              type: 'NEXT_HAND_READY_SYNC',
+              hostReady: p2pNextHandReadyRef.current.hostReady,
+              guestReady: p2pNextHandReadyRef.current.guestReady,
+            });
+            pushToast('success', 'P2P 连接已恢复', '已自动同步当前牌桌进度');
+          } else {
+            p2pMatchActiveRef.current = true;
+            const fresh = createInitialState({
+              config: { ...latestStateRef.current.config },
+              opponentName: remotePeerRef.current?.name ?? '联机好友',
+              playerAcquiredSkills: [],
+            });
+            setState(fresh);
+            setP2pNextHandReady(createNextHandReadyState());
+            setMessages([
+              {
+                id: `p2p-start-${Date.now()}`,
+                sender: 'opponent',
+                speaker: '系统信标',
+                text: 'P2P 直连牌桌已建立，双方信息严格隔离开局！',
+                crushed: false,
+              },
+            ]);
+            pushP2pStateToGuest(fresh);
+            pushToast('success', 'P2P 直连成功（房主）', '已向好友下发初始发牌');
+          }
         } else {
-          pushToast('success', 'P2P 直连成功（客机）', '正在同步房主牌桌...');
+          if (p2pMatchActiveRef.current) {
+            tr.send({ type: 'SYNC_REQ' });
+            pushToast('success', '已重连云端房间', '正在同步最新牌桌进度...');
+          } else {
+            p2pMatchActiveRef.current = true;
+            pushToast('success', 'P2P 直连成功（客机）', '正在同步房主牌桌...');
+          }
         }
       }
       setActiveModal({ type: 'none' });
@@ -561,15 +670,73 @@ export function App() {
       setActiveExpression(pkt.expression);
       return;
     }
+    if (pkt.type === 'SYNC_REQ' && role === 'host') {
+      pushP2pStateToGuest(latestStateRef.current);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: p2pNextHandReadyRef.current.hostReady,
+        guestReady: p2pNextHandReadyRef.current.guestReady,
+      });
+      return;
+    }
+    if (pkt.type === 'READY_NEXT_HAND' && role === 'host') {
+      const curr = latestStateRef.current;
+      if (curr.phase !== 'showdown') return;
+      const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', pkt.ready);
+      const summary = getNextHandReadySummary(nextReady);
+      if (summary.bothReady) {
+        const resetReady = createNextHandReadyState();
+        setP2pNextHandReady(resetReady);
+        setSelectedHandIndex(null);
+        setShowRaiseTiers(false);
+        setActiveExpression('calm');
+        const nextHand = startNextHand(curr);
+        setState(nextHand);
+        pushP2pStateToGuest(nextHand);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: false,
+          guestReady: false,
+        });
+      } else {
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: nextReady.hostReady,
+          guestReady: nextReady.guestReady,
+        });
+        pushToast('info', '好友已准备开启下一局', '点击「准备下一局 (1/2)」即可发牌');
+      }
+      return;
+    }
+    if (pkt.type === 'NEXT_HAND_READY_SYNC' && role === 'guest') {
+      setP2pNextHandReady({
+        hostReady: pkt.hostReady,
+        guestReady: pkt.guestReady,
+      });
+      return;
+    }
     if (pkt.type === 'NEXT_HAND_REQ' && role === 'host') {
       const curr = latestStateRef.current;
       if (curr.phase !== 'showdown') return;
-      const next = startNextHand(curr);
-      setState(next);
-      pushP2pStateToGuest(next);
+      const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
+      if (getNextHandReadySummary(nextReady).bothReady) {
+        setP2pNextHandReady(createNextHandReadyState());
+        const next = startNextHand(curr);
+        setState(next);
+        pushP2pStateToGuest(next);
+      } else {
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: nextReady.hostReady,
+          guestReady: nextReady.guestReady,
+        });
+      }
       return;
     }
     if (pkt.type === 'REMATCH_REQ' && role === 'host') {
+      setP2pNextHandReady(createNextHandReadyState());
       const fresh = createInitialState({
         config: latestStateRef.current.config,
         opponentName: remotePeerRef.current?.name ?? '联机好友',
@@ -577,6 +744,11 @@ export function App() {
       });
       setState(fresh);
       pushP2pStateToGuest(fresh);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: false,
+        guestReady: false,
+      });
     }
   };
 
@@ -950,6 +1122,9 @@ export function App() {
 
   const enqueueTask = useCallback(
     (task: QueuedChatTask) => {
+      if (task.kind === 'opponent' && !mobileChatOpenRef.current) {
+        setUnreadMobileChat((c) => Math.min(99, c + 1));
+      }
       queueRef.current.push(task);
       setQueuedCount(queueRef.current.length);
       processNextTask();
@@ -1094,9 +1269,9 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
 
-  // AI Turn Scheduler (Skipped during P2P friend multiplayer!)
+  // AI Turn Scheduler (Skipped during P2P friend multiplayer, including brief reconnect windows!)
   useEffect(() => {
-    if (isP2pConnected || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
 
     let cancelled = false;
     setIsAiThinking(true);
@@ -1722,19 +1897,48 @@ export function App() {
   };
 
   const handleNextHand = () => {
-    if (isP2pGuest) {
-      p2pTransportRef.current?.send({ type: 'NEXT_HAND_REQ' });
-      pushToast('info', '已向房主请求开启下一局');
-      return;
+    if (isP2pConnected) {
+      if (isP2pGuest) {
+        const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({ type: 'READY_NEXT_HAND', ready: true });
+        pushToast('info', '已确认准备下一局', '等待房主确认后同步发牌');
+        return;
+      }
+      if (isP2pHost) {
+        const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'host', true);
+        const summary = getNextHandReadySummary(nextReady);
+        if (!summary.bothReady) {
+          setP2pNextHandReady(nextReady);
+          p2pTransportRef.current?.send({
+            type: 'NEXT_HAND_READY_SYNC',
+            hostReady: nextReady.hostReady,
+            guestReady: nextReady.guestReady,
+          });
+          pushToast('info', '已准备下一局 (1/2)', '等待好友点击准备后同步发牌');
+          return;
+        }
+        const resetReady = createNextHandReadyState();
+        setP2pNextHandReady(resetReady);
+        setSelectedHandIndex(null);
+        setShowRaiseTiers(false);
+        setActiveExpression('calm');
+        const next = startNextHand(latestStateRef.current);
+        setState(next);
+        pushP2pStateToGuest(next);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: false,
+          guestReady: false,
+        });
+        return;
+      }
     }
     setSelectedHandIndex(null);
     setShowRaiseTiers(false);
     setActiveExpression('calm');
     const next = startNextHand(latestStateRef.current);
     setState(next);
-    if (isP2pHost) {
-      pushP2pStateToGuest(next);
-    }
   };
 
   const performFullReset = (
@@ -1771,6 +1975,7 @@ export function App() {
     setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
+    setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
@@ -1783,6 +1988,11 @@ export function App() {
     setState(freshState);
     if (isP2pHost) {
       pushP2pStateToGuest(freshState);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: false,
+        guestReady: false,
+      });
     }
     setMessages([
       {
@@ -2022,17 +2232,19 @@ export function App() {
   const revealAllAi = isShowdown || state.config.revealOpponentHidden;
   const evt = state.lastAction;
 
-  // Damage & Defeat VFX State (Applies to BOTH Human and Opponent!)
-  const isBankrupt =
-    vfxTestMode === 'bankrupt' ||
-    (isShowdown && (human.chips === 0 || ai.chips === 0));
+  // Damage & Defeat VFX State (Strictly isolated between Opponent and Player!)
+  const isAiBankrupt =
+    vfxTestMode === 'ai-bankrupt' || (isShowdown && ai.chips === 0);
+  const isHumanBankrupt =
+    vfxTestMode === 'human-bankrupt' || (isShowdown && human.chips === 0);
   const isAiLowCompute =
-    !isBankrupt &&
-    (vfxTestMode === 'low' || (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
+    !isAiBankrupt &&
+    (vfxTestMode === 'ai-low' ||
+      (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
   const isHumanLowCompute =
-    !isBankrupt &&
-    (vfxTestMode === 'low' || (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
-  const isLowCompute = isAiLowCompute || isHumanLowCompute;
+    !isHumanBankrupt &&
+    (vfxTestMode === 'human-low' ||
+      (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
   // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（P2P 联机时展示好友立绘）
   const portraitSrc =
@@ -2056,9 +2268,33 @@ export function App() {
         : []
   );
 
+  const p2pReadySummary = getNextHandReadySummary(p2pNextHandReady);
+  const localP2pReady =
+    p2pRole === 'host'
+      ? p2pReadySummary.hostReady
+      : p2pRole === 'guest'
+        ? p2pReadySummary.guestReady
+        : false;
+  const latestOpponentLine = useMemo(() => {
+    if (floatingBubble) {
+      return { speaker: floatingBubble.speaker, text: floatingBubble.text, kind: floatingBubble.msgKind };
+    }
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].sender === 'opponent') {
+        return { speaker: messages[i].speaker, text: messages[i].text, kind: messages[i].msgKind ?? 'speech' };
+      }
+    }
+    return null;
+  }, [floatingBubble, messages]);
+
   return (
     <div className="lc-shell">
-      <CyberBackdrop situation={isBankrupt ? 'breach' : isLowCompute ? 'overclock' : 'recon'} pot={state.pot} />
+      <CyberBackdrop
+        situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
+        pot={state.pot}
+        playerLowCompute={isHumanLowCompute}
+        playerBankrupt={isHumanBankrupt}
+      />
 
       {/* Centered & Aligned 3x3 Tactical Stage */}
       <main className="lc-stage-grid" aria-label="牌桌主视区">
@@ -2139,8 +2375,8 @@ export function App() {
 
         {/* COL 2, ROW 1: Enlarged Opponent Window + Layered Vertical Data Streams + Docked 3 Cards */}
         <section
-          className={`lc-hud-box lc-opponent-zone ${isLowCompute ? 'is-low-compute' : ''} ${
-            isBankrupt ? 'is-bankrupt' : ''
+          className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
+            isAiBankrupt ? 'is-bankrupt' : ''
           }`}
           style={{ '--char-accent': accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
@@ -2154,21 +2390,41 @@ export function App() {
                   : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
-            <span className="lc-opp-codename">
-              {isP2pConnected
-                ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
-                : isAiThinking
-                  ? 'THINKING...'
-                  : `${EXPRESSION_META[activeExpression].label} · ${
-                      effectiveAiDifficulty === 'master'
-                        ? '大师'
-                        : effectiveAiDifficulty === 'standard'
-                          ? '标准'
-                          : '新兵'
-                    } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
-                      CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
-                    }`}
-            </span>
+            <div className="lc-opp-topbar-right">
+              <span className="lc-opp-codename">
+                {p2pStatus === 'connecting' || p2pStatus === 'gathering'
+                  ? 'P2P 重连/握手中...'
+                  : isP2pConnected
+                    ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
+                    : isAiThinking
+                      ? 'THINKING...'
+                      : `${EXPRESSION_META[activeExpression].label} · ${
+                          effectiveAiDifficulty === 'master'
+                            ? '大师'
+                            : effectiveAiDifficulty === 'standard'
+                              ? '标准'
+                              : '新兵'
+                        } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
+                          CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
+                        }`}
+              </span>
+              <button
+                id="hud-btn-mobile-chat"
+                type="button"
+                className="lc-mobile-chat-btn"
+                onClick={() => {
+                  setMobileChatOpen(true);
+                  setUnreadMobileChat(0);
+                }}
+                aria-label="打开手机端通讯抽屉"
+              >
+                <PixelChatIcon size={12} />
+                通讯
+                {unreadMobileChat > 0 && (
+                  <span className="lc-mobile-unread-dot">{unreadMobileChat}</span>
+                )}
+              </button>
+            </div>
           </header>
 
           <div className="lc-opp-portrait-layer">
@@ -2186,7 +2442,7 @@ export function App() {
               ))}
             </div>
 
-            {/* Layer 2 (z:2): Character Portrait Cutout */}
+            {/* Layer 2 (z:2): Character Portrait Cutout + V-Sync-Off Horizontal Tear Slices */}
             <img
               src={portraitSrc}
               alt={`${character.name}半身立绘`}
@@ -2194,6 +2450,19 @@ export function App() {
               width={550}
               height={420}
             />
+            {isAiBankrupt &&
+              PORTRAIT_TEAR_SLICES.map((s) => (
+                <img
+                  key={s.cls}
+                  src={portraitSrc}
+                  alt=""
+                  aria-hidden="true"
+                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls}`}
+                  style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
+                  width={550}
+                  height={420}
+                />
+              ))}
 
             {/* Layer 3 (z:3): Minority of Vertical Data Streams IN FRONT of Portrait */}
             <div className="lc-opp-streams-front" aria-hidden="true">
@@ -2211,31 +2480,65 @@ export function App() {
 
             <div className="lc-opp-portrait-fade" aria-hidden="true" />
 
-            {/* Damage Effect 1B: Opponent Single-Round Defeat Mosaic Hit */}
+            {/* Damage Effect 1B: Opponent Single-Round Defeat Irregular Mosaic Hit */}
             {aiRoundLossFlicker && (
               <div className="lc-opp-mosaic-hit" aria-hidden="true">
-                {MOSAIC_FLICKER_TILES.slice(0, 80).map((cls, i) => (
-                  <span key={i} className={`lc-mosaic-tile ${cls}`} />
+                {MOSAIC_FLICKER_SHARDS.slice(0, 36).map((sh, i) => (
+                  <span
+                    key={i}
+                    className={`lc-mosaic-tile ${sh.tone}`}
+                    style={{
+                      left: sh.left,
+                      top: sh.top,
+                      width: sh.width,
+                      height: sh.height,
+                    }}
+                  />
                 ))}
               </div>
             )}
 
-            {/* Damage Effect 3: Bankrupt (0 Compute) Mosaic Engulfment */}
-            {isBankrupt && (
+            {/* Damage Effect 3 (Opponent Only): Opponent Bankrupt (0 Compute) Irregular Mosaic Engulfment */}
+            {isAiBankrupt && (
               <>
                 <div className="lc-mosaic-flood-overlay" aria-hidden="true">
-                  {MOSAIC_FLOOD_CELLS.map((tone, i) => (
-                    <span key={i} className={`lc-mosaic-flood-cell ${tone}`} />
+                  {MOSAIC_FLOOD_SHARDS.map((sh, i) => (
+                    <span
+                      key={i}
+                      className={`lc-mosaic-flood-cell ${sh.tone}`}
+                      style={{
+                        left: sh.left,
+                        top: sh.top,
+                        width: sh.width,
+                        height: sh.height,
+                        animationDelay: sh.delay,
+                      }}
+                    />
                   ))}
                 </div>
                 <div className="lc-bankrupt-banner" aria-hidden="true">
-                  {human.chips === 0 ? 'COMPUTE DEPLETED // SYSTEM CRASH' : 'TARGET BROKEN // ROOT TAKEOVER'}
+                  TARGET BROKEN // ROOT TAKEOVER
                 </div>
               </>
             )}
           </div>
 
           <div className="lc-opp-cards-dock">
+            {latestOpponentLine && (
+              <button
+                id="hud-btn-mobile-speech-bar"
+                type="button"
+                className={`lc-mobile-opp-line ${latestOpponentLine.kind === 'thought' ? 'is-thought' : ''}`}
+                onClick={() => {
+                  setMobileChatOpen(true);
+                  setUnreadMobileChat(0);
+                }}
+                title="点击展开完整聊天栏"
+              >
+                <span className="lc-mobile-opp-speaker">{latestOpponentLine.speaker}：</span>
+                <span className="lc-mobile-opp-text">{latestOpponentLine.text}</span>
+              </button>
+            )}
             <div className="lc-status-strip">
               <span className="lc-micro-tag pink">
                 对端：{opponentSummary.label} · {opponentSummary.detail}
@@ -2446,43 +2749,50 @@ export function App() {
           </div>
         </section>
 
-        {/* COL 2, ROW 3: Player Pure Portrait Avatar (Left) + 3 Cards + Hacker & Scan Skill Bar */}
+        {/* COL 2, ROW 3: Player Half-Body Background Portrait + 3 Cards + Hacker & Scan Skill Bar */}
         <section
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
+          style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
           aria-label="己方手牌序列区"
         >
-          <div className="lc-player-main-split">
-            <button
-              id="player-btn-switch-disguise"
-              type="button"
-              className={`lc-player-avatar-only ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
-              style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
-              onClick={() => {
-                if (state.handNumber === 1 && state.actionHistory.length === 0) {
-                  setManualDisguiseOpen(true);
-                } else if (campaign.capturedEntities.length === 0) {
-                  pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
-                } else {
-                  pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
-                }
-              }}
-              title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
-              aria-label={`当前出战虚拟实体头像：${activeDisguise.name}`}
-            >
+          <div className="lc-player-portrait-layer" aria-hidden="true">
+            <div className="lc-player-portrait-frame">
               <img
                 src={activeDisguise.virtualPortrait}
-                alt={activeDisguise.name}
-                className={`lc-avatar-only-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
+                alt=""
+                className={`lc-player-portrait-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
               />
-            </button>
+            </div>
+            <div className="lc-player-portrait-fade" />
+          </div>
 
-            <div className="lc-player-cards-col">
-              <div className="lc-status-strip" style={{ width: '100%' }}>
-                <span className="lc-micro-tag cyan">
-                  己方：{humanSummary.label} · {humanSummary.detail}
-                </span>
+          <div className="lc-player-cards-col">
+            <div className="lc-status-strip" style={{ width: '100%' }}>
+              <span className="lc-micro-tag cyan">
+                己方：{humanSummary.label} · {humanSummary.detail}
+              </span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  id="player-btn-switch-disguise"
+                  type="button"
+                  className={`lc-disguise-pill ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
+                  onClick={() => {
+                    if (state.handNumber === 1 && state.actionHistory.length === 0) {
+                      setManualDisguiseOpen(true);
+                    } else if (campaign.capturedEntities.length === 0) {
+                      pushToast('info', '暂无俘获诱饵', '击败追捕者后可夺取其虚拟实体作为伪装诱饵');
+                    } else {
+                      pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
+                    }
+                  }}
+                  title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
+                  aria-label={`当前出战虚拟实体：${activeDisguise.name}`}
+                >
+                  {activeDisguise.isCore ? '核心' : '诱饵'}：{activeDisguise.name}
+                </button>
                 <span className="lc-micro-tag">可用算力 {human.chips}</span>
               </div>
+            </div>
 
               <div className="lc-cards-row">
                 {human.hand.map((hc, idx) => {
@@ -2679,12 +2989,19 @@ export function App() {
                 <span>换牌门票：{swapFee}</span>
               </div>
             </div>
-          </div>
         </section>
 
-        {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel */}
+        {mobileChatOpen && (
+          <div
+            className="lc-mobile-chat-backdrop"
+            onClick={() => setMobileChatOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel (Drawer on <=960px) */}
         <aside
-          className="lc-right-upper-col"
+          className={`lc-right-upper-col ${mobileChatOpen ? 'is-mobile-open' : ''}`}
           style={{ '--char-accent': accentColor } as CSSProperties}
           aria-label="右侧通讯栏"
         >
@@ -2713,6 +3030,15 @@ export function App() {
                 >
                   <PixelBroadcastIcon size={12} />
                   发言
+                </button>
+                <button
+                  id="chat-btn-mobile-close"
+                  type="button"
+                  className="lc-chat-replay-btn lc-mobile-only-close"
+                  onClick={() => setMobileChatOpen(false)}
+                  aria-label="收起通讯抽屉"
+                >
+                  收起
                 </button>
               </div>
             </header>
@@ -2880,13 +3206,22 @@ export function App() {
                   id="action-btn-next-hand"
                   type="button"
                   className="lc-stack-btn"
+                  disabled={isP2pConnected && localP2pReady}
                   onClick={handleNextHand}
                 >
                   <span className="lc-btn-inline">
                     <PixelSyncIcon size={15} />
-                    下一局协议
+                    {isP2pConnected
+                      ? localP2pReady
+                        ? `已准备 (${p2pReadySummary.count}/2)`
+                        : `准备下一局 (${p2pReadySummary.count}/2)`
+                      : '下一局协议'}
                   </span>
-                  <span className="lc-stack-sub">第 #{state.handNumber + 1} 局</span>
+                  <span className="lc-stack-sub">
+                    {isP2pConnected && !localP2pReady && p2pReadySummary.count === 1
+                      ? '好友已准备，点击同步开局'
+                      : `第 #${state.handNumber + 1} 局`}
+                  </span>
                 </button>
               ) : (
                 <button
@@ -2984,6 +3319,7 @@ export function App() {
                 onPointerUp={cancelHoldHalfRaise}
                 onPointerLeave={cancelHoldHalfRaise}
                 onPointerCancel={cancelHoldHalfRaise}
+                onContextMenu={(e) => e.preventDefault()}
                 onKeyDown={(e) => {
                   if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
                     e.preventDefault();
@@ -3199,12 +3535,50 @@ export function App() {
         </div>
       )}
 
-      {/* Damage Effect 1: Single Round Defeat Mosaic Flicker Overlay */}
+      {/* Damage Effect 1: Single Round Defeat Irregular Mosaic Flicker Overlay */}
       {roundLossFlicker && (
         <div className="lc-mosaic-flicker-overlay" aria-hidden="true">
-          {MOSAIC_FLICKER_TILES.map((cls, i) => (
-            <span key={i} className={`lc-mosaic-tile ${cls}`} />
+          {MOSAIC_FLICKER_SHARDS.map((sh, i) => (
+            <span
+              key={i}
+              className={`lc-mosaic-tile ${sh.tone}`}
+              style={{
+                left: sh.left,
+                top: sh.top,
+                width: sh.width,
+                height: sh.height,
+              }}
+            />
           ))}
+        </div>
+      )}
+
+      {/* Damage Effect 3 (Player Only): Massive Non-Uniform Crimson Data-Stream Screen Flood */}
+      {isHumanBankrupt && (
+        <div className="lc-player-red-flood-overlay" aria-hidden="true">
+          <div className="lc-red-flood-streams">
+            {FLOOD_DATA_STREAMS.map((s, idx) => (
+              <div
+                key={idx}
+                className="lc-red-flood-col"
+                style={{
+                  left: s.left,
+                  fontSize: s.fontSize,
+                  opacity: s.opacity,
+                  letterSpacing: s.letterSpacing,
+                  animationDuration: s.dur,
+                  animationDelay: s.delay,
+                }}
+              >
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
+              </div>
+            ))}
+          </div>
+          <div className="lc-player-flood-banner">
+            COMPUTE DEPLETED // 红色溢出数据流淹没
+          </div>
         </div>
       )}
 
@@ -3263,9 +3637,9 @@ export function App() {
               </button>
             </div>
 
-            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides */}
+            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides independently */}
             <div className="lc-vfx-strip">
-              <span className="lc-menu-note">战损与危机特效即时预览（含对手受击）</span>
+              <span className="lc-menu-note">战损与危机特效即时预览（双方独立隔离）</span>
               <div className="lc-vfx-btn-row">
                 <button
                   id="vfx-test-round-loss"
@@ -3284,26 +3658,48 @@ export function App() {
                   单轮败北闪烁
                 </button>
                 <button
-                  id="vfx-test-low-compute"
+                  id="vfx-test-human-low"
                   type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'low' ? 'active' : ''}`}
+                  className={`lc-vfx-chip ${vfxTestMode === 'human-low' ? 'active' : ''}`}
                   onClick={() => {
-                    setVfxTestMode((m) => (m === 'low' ? 'auto' : 'low'));
+                    setVfxTestMode((m) => (m === 'human-low' ? 'auto' : 'human-low'));
                     setActiveModal({ type: 'none' });
                   }}
                 >
-                  {vfxTestMode === 'low' ? '关闭红流警报' : '低算力红流'}
+                  {vfxTestMode === 'human-low' ? '关闭己方红流' : '己方低算力外流'}
                 </button>
                 <button
-                  id="vfx-test-bankrupt"
+                  id="vfx-test-human-bankrupt"
                   type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'bankrupt' ? 'active' : ''}`}
+                  className={`lc-vfx-chip ${vfxTestMode === 'human-bankrupt' ? 'active' : ''}`}
                   onClick={() => {
-                    setVfxTestMode((m) => (m === 'bankrupt' ? 'auto' : 'bankrupt'));
+                    setVfxTestMode((m) => (m === 'human-bankrupt' ? 'auto' : 'human-bankrupt'));
                     setActiveModal({ type: 'none' });
                   }}
                 >
-                  {vfxTestMode === 'bankrupt' ? '恢复立绘' : '归零淹没扭曲'}
+                  {vfxTestMode === 'human-bankrupt' ? '关闭己方淹没' : '己方红流淹没'}
+                </button>
+                <button
+                  id="vfx-test-ai-low"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'ai-low' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'ai-low' ? 'auto' : 'ai-low'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'ai-low' ? '关闭对手红流' : '对手低算力红流'}
+                </button>
+                <button
+                  id="vfx-test-ai-bankrupt"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'ai-bankrupt' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'ai-bankrupt' ? 'auto' : 'ai-bankrupt'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'ai-bankrupt' ? '恢复对手立绘' : '对手归零扭曲'}
                 </button>
                 <button
                   id="vfx-test-reset"

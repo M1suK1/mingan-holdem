@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { DEFAULT_CONFIG, type Card } from '../src/engine/types.ts';
 import { applyAction, createInitialState, isActionLegal } from '../src/engine/gameEngine.ts';
 import {
@@ -9,7 +11,15 @@ import {
   decodeP2pSignalToken,
   splitP2pWireMessage,
   P2pChunkAssembler,
+  createNextHandReadyState,
+  reduceNextHandReadyState,
+  getNextHandReadySummary,
+  type P2pPacket,
 } from '../src/engine/p2pProtocol.ts';
+import {
+  computeWsReconnectDelayMs,
+  shouldAutoReconnectWs,
+} from '../src/engine/p2pTransport.ts';
 
 function c(rank: Card['rank'], suit: Card['suit'], copy: 0 | 1 = 0): Card {
   return { id: `${rank}${suit}-${copy}`, suit, rank, copy };
@@ -153,5 +163,80 @@ describe('P2P Protocol: strict anti-sniff sanitization & guest perspective mirro
       reassembled = assembler.feed(frame);
     }
     assert.equal(reassembled, huge);
+  });
+
+  it('tracks mutual READY_NEXT_HAND state (0/2 -> 1/2 -> 2/2) and supports SYNC_REQ packets', () => {
+    const initial = createNextHandReadyState();
+    assert.deepEqual(getNextHandReadySummary(initial), {
+      count: 0,
+      bothReady: false,
+      hostReady: false,
+      guestReady: false,
+    });
+
+    const afterGuest = reduceNextHandReadyState(initial, 'guest', true);
+    assert.deepEqual(getNextHandReadySummary(afterGuest), {
+      count: 1,
+      bothReady: false,
+      hostReady: false,
+      guestReady: true,
+    });
+
+    // Idempotent duplicate guest ready
+    const afterGuestDup = reduceNextHandReadyState(afterGuest, 'guest', true);
+    assert.equal(getNextHandReadySummary(afterGuestDup).count, 1);
+
+    const afterBoth = reduceNextHandReadyState(afterGuestDup, 'host', true);
+    assert.deepEqual(getNextHandReadySummary(afterBoth), {
+      count: 2,
+      bothReady: true,
+      hostReady: true,
+      guestReady: true,
+    });
+
+    const readyPkt: P2pPacket = { type: 'READY_NEXT_HAND', ready: true };
+    const syncPkt: P2pPacket = { type: 'SYNC_REQ' };
+    const assembler = new P2pChunkAssembler();
+    assert.deepEqual(
+      JSON.parse(assembler.feed(splitP2pWireMessage(JSON.stringify(readyPkt))[0])!),
+      readyPkt
+    );
+    assert.deepEqual(
+      JSON.parse(assembler.feed(splitP2pWireMessage(JSON.stringify(syncPkt))[0])!),
+      syncPkt
+    );
+  });
+
+  it('computes bounded WebSocket reconnect backoff and guards auto-reconnect conditions', () => {
+    assert.equal(computeWsReconnectDelayMs(0), 900);
+    assert.equal(computeWsReconnectDelayMs(1), 1800);
+    assert.equal(computeWsReconnectDelayMs(2), 3600);
+    assert.equal(computeWsReconnectDelayMs(5), 5000);
+
+    assert.equal(
+      shouldAutoReconnectWs({ closedManually: false, roomCode: 'AB12CD', attempt: 0, maxAttempts: 6 }),
+      true
+    );
+    assert.equal(
+      shouldAutoReconnectWs({ closedManually: true, roomCode: 'AB12CD', attempt: 0, maxAttempts: 6 }),
+      false
+    );
+    assert.equal(
+      shouldAutoReconnectWs({ closedManually: false, roomCode: '', attempt: 0, maxAttempts: 6 }),
+      false
+    );
+    assert.equal(
+      shouldAutoReconnectWs({ closedManually: false, roomCode: 'AB12CD', attempt: 6, maxAttempts: 6 }),
+      false
+    );
+  });
+
+  it('keeps mobile chat drawer reachable on <=960px screens instead of hiding .lc-right-upper-col', async () => {
+    const css = await fs.readFile(path.resolve(process.cwd(), 'src/styles/pixelCyberOs.css'), 'utf8');
+    const mobileIdx = css.indexOf('@media (max-width: 960px)');
+    assert.ok(mobileIdx >= 0);
+    const mobileBlock = css.slice(mobileIdx);
+    const hiddenChatRegex = /\.lc-right-upper-col\s*\{[^}]*display:\s*none/;
+    assert.equal(hiddenChatRegex.test(mobileBlock), false);
   });
 });
