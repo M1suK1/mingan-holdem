@@ -609,33 +609,110 @@ button:disabled {
   pointer-events: none;
 }
 
-/* Bankrupt (0 Compute): Portrait Chromatic Shear & Glitch Distortion */
-.lc-opponent-zone.is-bankrupt .lc-opp-portrait-img {
-  filter: contrast(1.45) saturate(1.6) drop-shadow(-4px 0 rgba(0, 240, 255, 0.75))
-    drop-shadow(4px 0 rgba(255, 46, 136, 0.85));
-  animation: lcPortraitDistort 0.85s steps(3, end) infinite;
+/* Bankrupt (0 Compute): V-Sync-OFF Horizontal Screen Tearing & Strobe Flicker */
+.lc-opponent-zone.is-bankrupt .lc-opp-portrait-img:not(.lc-opp-tear-slice) {
+  opacity: 0.24;
+  filter: contrast(1.4) saturate(1.4) drop-shadow(-3px 0 rgba(0, 240, 255, 0.7))
+    drop-shadow(3px 0 rgba(255, 46, 136, 0.8));
 }
 
-@keyframes lcPortraitDistort {
+.lc-opp-tear-slice {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  filter: contrast(1.38) saturate(1.55) drop-shadow(-4px 0 rgba(0, 240, 255, 0.78))
+    drop-shadow(4px 0 rgba(255, 46, 136, 0.86));
+}
+
+.lc-opp-tear-slice.slice-a {
+  animation: lcVsyncTearA 0.28s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-b {
+  animation: lcVsyncTearB 0.23s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-c {
+  animation: lcVsyncTearC 0.31s steps(1, end) infinite;
+}
+.lc-opp-tear-slice.slice-d {
+  animation: lcVsyncTearB 0.19s steps(1, end) infinite reverse;
+}
+.lc-opp-tear-slice.slice-e {
+  animation: lcVsyncTearA 0.25s steps(1, end) infinite reverse;
+}
+.lc-opp-tear-slice.slice-f {
+  animation: lcVsyncTearC 0.21s steps(1, end) infinite;
+}
+
+@keyframes lcVsyncTearA {
   0% {
-    transform: translate3d(0, 0, 0) skewX(0deg);
-    clip-path: inset(0 0 0 0);
+    transform: translateX(0);
+    opacity: 1;
   }
   20% {
-    transform: translate3d(-5px, 1px, 0) skewX(-6deg) scaleY(1.03);
-    clip-path: inset(6% 0 10% 0);
+    transform: translateX(-16px);
+    opacity: 0.82;
   }
-  45% {
-    transform: translate3d(6px, -2px, 0) skewX(7deg) scaleX(1.04);
-    clip-path: inset(0 0 4% 0);
+  40% {
+    transform: translateX(12px);
+    opacity: 0.45;
   }
-  70% {
-    transform: translate3d(-4px, 2px, 0) skewX(-4deg);
-    clip-path: inset(12% 0 2% 0);
+  60% {
+    transform: translateX(-22px);
+    opacity: 0.98;
+  }
+  80% {
+    transform: translateX(6px);
+    opacity: 0.6;
   }
   100% {
-    transform: translate3d(2px, 0, 0) skewX(2deg);
-    clip-path: inset(0 0 0 0);
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes lcVsyncTearB {
+  0% {
+    transform: translateX(10px);
+    opacity: 0.92;
+  }
+  25% {
+    transform: translateX(-18px);
+    opacity: 0.38;
+  }
+  50% {
+    transform: translateX(24px);
+    opacity: 1;
+  }
+  75% {
+    transform: translateX(-8px);
+    opacity: 0.68;
+  }
+  100% {
+    transform: translateX(10px);
+    opacity: 0.92;
+  }
+}
+
+@keyframes lcVsyncTearC {
+  0% {
+    transform: translateX(-12px);
+    opacity: 0.75;
+  }
+  30% {
+    transform: translateX(19px);
+    opacity: 1;
+  }
+  55% {
+    transform: translateX(-4px);
+    opacity: 0.4;
+  }
+  80% {
+    transform: translateX(-20px);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(-12px);
+    opacity: 0.75;
   }
 }
 
@@ -857,15 +934,13 @@ button:disabled {
   z-index: 1;
 }
 
-/* Opponent Portrait Single-Round Defeat Mosaic Hit Overlay */
+/* Opponent Portrait Single-Round Defeat Irregular Mosaic Hit Overlay */
 .lc-opp-mosaic-hit {
   position: absolute;
   inset: 0;
   z-index: 5;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  overflow: hidden;
   animation: lcMosaicFlickerBurst 1.15s steps(3, end) forwards;
 }
 
@@ -2199,33 +2274,32 @@ button:disabled {
   }
 }
 
-/* Damage Effect 1: Round Loss Mosaic Flicker Overlay */
+/* Damage Effect 1: Round Loss Irregular Mosaic Flicker Overlay */
 .lc-mosaic-flicker-overlay {
   position: fixed;
   inset: 0;
   z-index: 44;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  overflow: hidden;
   animation: lcMosaicFlickerBurst 1.15s steps(3, end) forwards;
 }
 
 .lc-mosaic-tile {
+  position: absolute;
   background: transparent;
 }
 
 .lc-mosaic-tile.t1 {
-  background: rgba(255, 46, 136, 0.34);
+  background: rgba(255, 46, 136, 0.36);
 }
 .lc-mosaic-tile.t2 {
-  background: rgba(0, 240, 255, 0.28);
+  background: rgba(0, 240, 255, 0.3);
 }
 .lc-mosaic-tile.t3 {
-  background: rgba(8, 10, 16, 0.82);
+  background: rgba(8, 10, 16, 0.84);
 }
 .lc-mosaic-tile.t4 {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 @keyframes lcMosaicFlickerBurst {
@@ -2255,34 +2329,37 @@ button:disabled {
   }
 }
 
-/* Damage Effect 3: Bankrupt (0 Compute) Mosaic Engulfment Overlay */
+/* Damage Effect 3 (Opponent Only): Irregular Mosaic Engulfment Overlay */
 .lc-mosaic-flood-overlay {
   position: absolute;
   inset: 0;
   z-index: 6;
   pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  grid-template-rows: repeat(10, 1fr);
-  animation: lcMosaicFloodSurge 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  overflow: hidden;
+  animation: lcMosaicFloodSurge 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .lc-mosaic-flood-cell {
+  position: absolute;
   background: rgba(4, 5, 8, 0.82);
-  border: 1px solid rgba(255, 36, 56, 0.22);
-  animation: lcMosaicCellGlitch 1.4s steps(2, end) infinite;
+  border: 1px solid rgba(255, 36, 56, 0.26);
+  animation: lcMosaicCellGlitch 0.95s steps(2, end) infinite;
 }
 
 .lc-mosaic-flood-cell.pink {
-  background: rgba(255, 46, 136, 0.42);
+  background: rgba(255, 46, 136, 0.44);
 }
 
 .lc-mosaic-flood-cell.cyan {
-  background: rgba(0, 240, 255, 0.32);
+  background: rgba(0, 240, 255, 0.34);
 }
 
 .lc-mosaic-flood-cell.void {
   background: rgba(2, 3, 6, 0.92);
+}
+
+.lc-mosaic-flood-cell.red {
+  background: rgba(255, 36, 56, 0.42);
 }
 
 @keyframes lcMosaicFloodSurge {
@@ -2351,24 +2428,21 @@ button:disabled {
   top: -55%;
   writing-mode: vertical-rl;
   font-family: var(--font-pixel);
-  font-size: 12.5px;
   font-weight: 800;
-  letter-spacing: 0.22em;
   white-space: nowrap;
   display: flex;
-  gap: 28px;
-  color: rgba(255, 36, 56, 0.88);
-  text-shadow: 0 0 12px rgba(255, 28, 48, 0.9);
+  gap: 24px;
+  color: rgba(255, 36, 56, 0.9);
+  text-shadow: 0 0 12px rgba(255, 28, 48, 0.92);
   animation: lcDataStreamFall 2.2s linear infinite;
 }
 
-.lc-red-flood-col:nth-child(2n) {
-  color: rgba(255, 92, 110, 0.72);
-  font-size: 11px;
+.lc-red-flood-col:nth-child(3n + 1) {
+  color: rgba(255, 96, 114, 0.82);
 }
 
-.lc-red-flood-col:nth-child(3n) {
-  color: rgba(215, 16, 40, 0.92);
+.lc-red-flood-col:nth-child(4n + 2) {
+  color: rgba(210, 14, 38, 0.95);
 }
 
 @keyframes lcRedFloodSurge {
@@ -3345,6 +3419,7 @@ button:disabled {
   .lc-rain-col,
   .lc-red-flood-col,
   .lc-player-red-flood-overlay,
+  .lc-opp-tear-slice,
   .lc-bus-pulse,
   .lc-speech-bubble,
   .lc-chat-msg,

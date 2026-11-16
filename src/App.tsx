@@ -169,17 +169,80 @@ const SETTINGS_MENU_ITEMS: Array<{
   { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
 ];
 
-const FLOOD_DATA_STREAMS = Array.from({ length: 26 }, (_, i) => ({
-  left: `${(i * 3.85).toFixed(1)}%`,
-  dur: `${(1.8 + (i % 5) * 0.42).toFixed(2)}s`,
-  delay: `${(-((i * 0.37) % 2.2)).toFixed(2)}s`,
-  tokens:
-    i % 3 === 0
-      ? '0xERR  MEM::0000  SYS::CRASH  OVERFLOW  01011001  FATAL  0xFF  ERR_STACK'
-      : i % 3 === 1
-        ? 'BREACH!!  NULL_PTR  11100010  CORE_MELTDOWN  0xDEADBEEF  HALT  0x00'
-        : 'DROP_ALL  0x4F  PACKET_LOSS  10110110  LINK_SEVERED  TERMINATE  FAIL',
-}));
+function seededUnit(seed: number): number {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const FLOOD_DATA_STREAMS = Array.from({ length: 42 }, (_, i) => {
+  const clusterBase = [3, 9, 14, 21, 28, 37, 46, 54, 62, 71, 79, 86, 93][i % 13];
+  const leftPct = Math.max(0.5, Math.min(97.5, clusterBase + (seededUnit(i + 1) - 0.5) * 9.5));
+  const dur = 1.15 + seededUnit(i + 41) * 2.45;
+  const delay = -seededUnit(i + 83) * 2.8;
+  const fontSize = 9.5 + seededUnit(i + 127) * 6.5;
+  const opacity = 0.42 + seededUnit(i + 173) * 0.56;
+  const letterSpacing = 0.08 + seededUnit(i + 211) * 0.22;
+  const variant = Math.floor(seededUnit(i + 251) * 4);
+  return {
+    left: `${leftPct.toFixed(1)}%`,
+    dur: `${dur.toFixed(2)}s`,
+    delay: `${delay.toFixed(2)}s`,
+    fontSize: `${fontSize.toFixed(1)}px`,
+    opacity: Number(opacity.toFixed(2)),
+    letterSpacing: `${letterSpacing.toFixed(2)}em`,
+    tokens:
+      variant === 0
+        ? '0xERR  MEM::0000  SYS::CRASH  OVERFLOW  01011001  FATAL'
+        : variant === 1
+          ? 'BREACH!!  NULL_PTR  11100010  CORE_MELTDOWN  0xDEAD'
+          : variant === 2
+            ? 'DROP_ALL  0x4F  PACKET_LOSS  10110110  LINK_SEVERED'
+            : '01001110  SEGFAULT  0xFF00  STACK_CORRUPT  ABORT',
+  };
+});
+
+const PORTRAIT_TEAR_SLICES = [
+  { top: 0, bottom: 84, cls: 'slice-a' },
+  { top: 15, bottom: 71, cls: 'slice-b' },
+  { top: 28, bottom: 56, cls: 'slice-c' },
+  { top: 43, bottom: 40, cls: 'slice-d' },
+  { top: 59, bottom: 23, cls: 'slice-e' },
+  { top: 76, bottom: 0, cls: 'slice-f' },
+] as const;
+
+const MOSAIC_FLICKER_SHARDS = Array.from({ length: 52 }, (_, i) => {
+  const w = 3.5 + seededUnit(i + 301) * 22;
+  const h = 2.2 + seededUnit(i + 353) * 11;
+  const left = seededUnit(i + 401) * (100 - w * 0.6);
+  const top = seededUnit(i + 449) * (100 - h * 0.6);
+  const t = seededUnit(i + 503);
+  const tone = t < 0.28 ? 't1' : t < 0.56 ? 't2' : t < 0.84 ? 't3' : 't4';
+  return {
+    left: `${left.toFixed(1)}%`,
+    top: `${top.toFixed(1)}%`,
+    width: `${w.toFixed(1)}%`,
+    height: `${h.toFixed(1)}%`,
+    tone,
+  };
+});
+
+const MOSAIC_FLOOD_SHARDS = Array.from({ length: 68 }, (_, i) => {
+  const w = 5 + seededUnit(i + 601) * 26;
+  const h = 3.5 + seededUnit(i + 653) * 15;
+  const left = seededUnit(i + 701) * (100 - w * 0.5);
+  const top = seededUnit(i + 751) * (100 - h * 0.5);
+  const t = seededUnit(i + 809);
+  const tone = t < 0.26 ? 'pink' : t < 0.48 ? 'cyan' : t < 0.82 ? 'void' : 'red';
+  const delay = (seededUnit(i + 863) * 0.55).toFixed(2);
+  return {
+    left: `${left.toFixed(1)}%`,
+    top: `${top.toFixed(1)}%`,
+    width: `${w.toFixed(1)}%`,
+    height: `${h.toFixed(1)}%`,
+    tone,
+    delay: `${delay}s`,
+  };
+});
 
 const BACK_PORTRAIT_STREAMS = [
   { left: '6%', tokens: '01001101  0x7F  SYN::ACK  B_08', dur: '11s', delay: '-1s' },
@@ -196,16 +259,6 @@ const FRONT_PORTRAIT_STREAMS = [
   { left: '57%', tokens: 'STREAM::P12  1011  0x7A', dur: '11.5s', delay: '-5.5s', accent: true },
   { left: '82%', tokens: '0110  LINK::LIVE  CRC', dur: '8.8s', delay: '-1.5s', accent: false },
 ];
-
-const MOSAIC_FLICKER_TILES = Array.from({ length: 96 }, (_, i) => {
-  const mod = (i * 7 + Math.floor(i / 12) * 3) % 11;
-  return mod === 0 ? 't1' : mod === 2 ? 't2' : mod === 5 ? 't3' : mod === 8 ? 't4' : '';
-});
-
-const MOSAIC_FLOOD_CELLS = Array.from({ length: 140 }, (_, i) => {
-  const m = (i * 5 + Math.floor(i / 14) * 7) % 9;
-  return m <= 1 ? 'pink' : m <= 3 ? 'cyan' : m <= 6 ? 'void' : '';
-});
 
 const FIXED_CRUSHED_DOCK_H = 28;
 
@@ -2389,7 +2442,7 @@ export function App() {
               ))}
             </div>
 
-            {/* Layer 2 (z:2): Character Portrait Cutout */}
+            {/* Layer 2 (z:2): Character Portrait Cutout + V-Sync-Off Horizontal Tear Slices */}
             <img
               src={portraitSrc}
               alt={`${character.name}半身立绘`}
@@ -2397,6 +2450,19 @@ export function App() {
               width={550}
               height={420}
             />
+            {isAiBankrupt &&
+              PORTRAIT_TEAR_SLICES.map((s) => (
+                <img
+                  key={s.cls}
+                  src={portraitSrc}
+                  alt=""
+                  aria-hidden="true"
+                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls}`}
+                  style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
+                  width={550}
+                  height={420}
+                />
+              ))}
 
             {/* Layer 3 (z:3): Minority of Vertical Data Streams IN FRONT of Portrait */}
             <div className="lc-opp-streams-front" aria-hidden="true">
@@ -2414,21 +2480,40 @@ export function App() {
 
             <div className="lc-opp-portrait-fade" aria-hidden="true" />
 
-            {/* Damage Effect 1B: Opponent Single-Round Defeat Mosaic Hit */}
+            {/* Damage Effect 1B: Opponent Single-Round Defeat Irregular Mosaic Hit */}
             {aiRoundLossFlicker && (
               <div className="lc-opp-mosaic-hit" aria-hidden="true">
-                {MOSAIC_FLICKER_TILES.slice(0, 80).map((cls, i) => (
-                  <span key={i} className={`lc-mosaic-tile ${cls}`} />
+                {MOSAIC_FLICKER_SHARDS.slice(0, 36).map((sh, i) => (
+                  <span
+                    key={i}
+                    className={`lc-mosaic-tile ${sh.tone}`}
+                    style={{
+                      left: sh.left,
+                      top: sh.top,
+                      width: sh.width,
+                      height: sh.height,
+                    }}
+                  />
                 ))}
               </div>
             )}
 
-            {/* Damage Effect 3 (Opponent Only): Opponent Bankrupt (0 Compute) Mosaic Engulfment */}
+            {/* Damage Effect 3 (Opponent Only): Opponent Bankrupt (0 Compute) Irregular Mosaic Engulfment */}
             {isAiBankrupt && (
               <>
                 <div className="lc-mosaic-flood-overlay" aria-hidden="true">
-                  {MOSAIC_FLOOD_CELLS.map((tone, i) => (
-                    <span key={i} className={`lc-mosaic-flood-cell ${tone}`} />
+                  {MOSAIC_FLOOD_SHARDS.map((sh, i) => (
+                    <span
+                      key={i}
+                      className={`lc-mosaic-flood-cell ${sh.tone}`}
+                      style={{
+                        left: sh.left,
+                        top: sh.top,
+                        width: sh.width,
+                        height: sh.height,
+                        animationDelay: sh.delay,
+                      }}
+                    />
                   ))}
                 </div>
                 <div className="lc-bankrupt-banner" aria-hidden="true">
@@ -3450,16 +3535,25 @@ export function App() {
         </div>
       )}
 
-      {/* Damage Effect 1: Single Round Defeat Mosaic Flicker Overlay */}
+      {/* Damage Effect 1: Single Round Defeat Irregular Mosaic Flicker Overlay */}
       {roundLossFlicker && (
         <div className="lc-mosaic-flicker-overlay" aria-hidden="true">
-          {MOSAIC_FLICKER_TILES.map((cls, i) => (
-            <span key={i} className={`lc-mosaic-tile ${cls}`} />
+          {MOSAIC_FLICKER_SHARDS.map((sh, i) => (
+            <span
+              key={i}
+              className={`lc-mosaic-tile ${sh.tone}`}
+              style={{
+                left: sh.left,
+                top: sh.top,
+                width: sh.width,
+                height: sh.height,
+              }}
+            />
           ))}
         </div>
       )}
 
-      {/* Damage Effect 3 (Player Only): Massive Crimson Data-Stream Screen Flood */}
+      {/* Damage Effect 3 (Player Only): Massive Non-Uniform Crimson Data-Stream Screen Flood */}
       {isHumanBankrupt && (
         <div className="lc-player-red-flood-overlay" aria-hidden="true">
           <div className="lc-red-flood-streams">
@@ -3467,7 +3561,14 @@ export function App() {
               <div
                 key={idx}
                 className="lc-red-flood-col"
-                style={{ left: s.left, animationDuration: s.dur, animationDelay: s.delay }}
+                style={{
+                  left: s.left,
+                  fontSize: s.fontSize,
+                  opacity: s.opacity,
+                  letterSpacing: s.letterSpacing,
+                  animationDuration: s.dur,
+                  animationDelay: s.delay,
+                }}
               >
                 <span>{s.tokens}</span>
                 <span>{s.tokens}</span>
