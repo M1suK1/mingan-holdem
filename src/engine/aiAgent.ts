@@ -627,7 +627,7 @@ export class LocalAiAgent implements OpponentAgent {
             dialogue: buildDialogue(
               speaker,
               'thinking',
-              `（嘻嘻……把这张 NULL 毒饵丢进节点 #${boardIdx + 1}！快踩上来吧，踩空的时候我就能咬断你的脖子了……！）`,
+              `投入 ${swapFee} 覆写费置换暗牌槽 #${boardIdx + 1}——把弱牌换成私有暗门。`,
               telemetry,
               'smile'
             ),
@@ -687,10 +687,10 @@ export class LocalAiAgent implements OpponentAgent {
           action: nullEraseAct,
           dialogue: buildDialogue(
             speaker,
-            'thinking',
-            '（把这张牌的信息全嚼碎吞掉……变成 NULL 咯？等你在幻影里踩空的时候，我就能扑上去把你的喉咙撕烂了……！）',
+            'idle',
+            '整理一下这一轮的牌面节奏。',
             telemetry,
-            'smile'
+            'calm'
           ),
         };
       }

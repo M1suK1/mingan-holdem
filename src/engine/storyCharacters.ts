@@ -275,7 +275,7 @@ export const SEC02_CHARACTER_DOSSIER: ContractCharacter = {
     samples: [
       '（……嗓子又只漏出电子杂音了。算了——猎犬本来就不需要说话，只要听见黑河的哨声扑上去咬断猎物喉咙就够了吧！）',
       '（富兰克林之死，落刃！！嘻嘻……那根作弊线断掉的声音真是美妙啊，再多让我听听你焦急的心跳嘛！）',
-      '（把那张明牌彻底嚼碎成 NULL……外面看起来还是好牌对不对？快扑过来呀，我在刀尖这边等着你呢！）',
+      '（把那张牌的底细全都撕得稀碎……外面看起来还像块甜肉对不对？快扑过来呀，我在刀尖这边等着你呢！）',
       '（……骗、骗人的吧？我居然被猎物反咬了……不要、黑河不要扔掉我……我还能咬、我还能继续扑上去撕碎他的——！）',
     ],
   },
@@ -306,6 +306,29 @@ export function resolveSec02Sprite(expression: ContractExpression = 'calm'): str
 
 export function isMuteGarbledCharacter(characterId?: string): boolean {
   return characterId === SEC02_CHARACTER_DOSSIER.id;
+}
+
+export const MUTE_DECOY_THOUGHT_POOL: readonly string[] = [
+  '（咬住、咬住！！把这堆跳动的算力全撕下来扯碎……再多挣扎一点呀，猎物就是要哭着求饶才美味嘛——！）',
+  '（嘻嘻嘻……快猜猜看哪一张底下藏着倒刺吧？踩空一脚的话，喉咙可是会被直接咬断的哦——！）',
+  '（把水搅浑、把牌面全都舔乱……等你在幻影里扑空的那一秒，我就能扑上去扯断你的脖颈了！）',
+  '（好饿……算力的腥味就在鼻尖前面晃。不能搞砸、绝对不能让黑河扔掉我……必须把你啃得骨头都不剩！）',
+  '（咬上去吧、快一口咬上来看看呀……嘻嘻，不管是真是假，只要流血了就都是我的猎物！）',
+  '（别退缩嘛……再往里走一步啊？我的两把刀已经等得发烫了，好想听算力链路崩断的脆响啊……！）',
+];
+
+export function pickMuteActionThought(
+  actionType: string,
+  rng: () => number = Math.random
+): string {
+  if (actionType === 'scan') {
+    return '（嗅到了……有好甜的腥味！！你藏在底下的小把戏发出味道了，让我用双刀把它剖开看看、剖开看看！！）';
+  }
+  if (actionType === 'fold') {
+    return '（切……这口肉太硬了啃不动。先退半步、再绕到你背后扑上去咬死你，绝对不放过你！）';
+  }
+  const idx = Math.floor(rng() * MUTE_DECOY_THOUGHT_POOL.length) % MUTE_DECOY_THOUGHT_POOL.length;
+  return MUTE_DECOY_THOUGHT_POOL[Math.max(0, idx)];
 }
 
 const MUTE_GARBLE_GLYPHS = ['▓', '▒', '░', '█', '╳', '≠', '§', '0x3F', 'NULL', 'ERR'];

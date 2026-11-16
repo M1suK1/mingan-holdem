@@ -169,6 +169,7 @@ import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
   isMuteGarbledCharacter,
+  pickMuteActionThought,
   resolveEcho0Sprite,
   resolveSec01Sprite,
   resolveSec02Sprite,
@@ -1607,14 +1608,7 @@ export function App() {
               text: decision.dialogue.text,
             });
             if (isMuteGarbledCharacter(char.id)) {
-              const innerThought =
-                decision.action.type === 'raise'
-                  ? '（咬住、咬住！！把这堆跳动的算力全撕下来扯碎……再多挣扎一点呀，猎物就是要哭着求饶才美味嘛——！）'
-                  : decision.action.type === 'scan'
-                    ? '（嗅到了……有好甜的腥味！！你藏在底下的小把戏发出味道了，让我用双刀把它剖开看看、剖开看看！！）'
-                    : decision.action.type === 'swap'
-                      ? '（嘻嘻嘻……把脏东西塞进公共区里去。咬上来吧、快一口咬上这口带钩的诱饵吧——！）'
-                      : '（好饿……算力的味道就在鼻尖前面晃。不能搞砸、绝对不能让黑河扔掉我……必须把你啃得骨头都不剩！）';
+              const innerThought = pickMuteActionThought(decision.action.type);
               enqueueTask({
                 kind: 'opponent',
                 speaker: snapshot.players.ai.name,

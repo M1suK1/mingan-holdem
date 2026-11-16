@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ECHO0_CHARACTER_DOSSIER,
+  MUTE_DECOY_THOUGHT_POOL,
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
   SEC01_EXPRESSION_PATHS,
@@ -10,6 +11,7 @@ import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
   isMuteGarbledCharacter,
+  pickMuteActionThought,
   resolveSec01Sprite,
   resolveSec02Sprite,
 } from '../src/engine/storyCharacters.ts';
@@ -189,6 +191,17 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     const garbled = formatMuteGarbledText('准备收割你的算力链路');
     assert.ok(garbled.length > 4);
     assert.ok(!garbled.includes('准备收割你的算力链路'));
+
+    // Decoy feral thoughts apply across non-cheat actions without leaking NULL/抹除/毒饵/脏东西
+    assert.ok(MUTE_DECOY_THOUGHT_POOL.length >= 5);
+    for (const t of MUTE_DECOY_THOUGHT_POOL) {
+      assert.ok(!/NULL|抹除|废牌|毒饵|脏东西/.test(t), `Thought leaked cheat intent: ${t}`);
+    }
+    const flipDecoy = pickMuteActionThought('flip', () => 0.2);
+    const swapThought = pickMuteActionThought('swap', () => 0.2);
+    assert.equal(flipDecoy, swapThought);
+    assert.ok(pickMuteActionThought('scan').includes('嗅到了'));
+    assert.ok(pickMuteActionThought('fold').includes('退半步'));
   });
 
   it('executes null-erase on own open hand card secretly, excludes blank cards from evaluation, and seals on scan', () => {
