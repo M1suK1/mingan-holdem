@@ -154,15 +154,6 @@ import {
   type EscapeMapProgress,
 } from './engine/escapeMap.ts';
 import {
-  TUTORIAL_STAGES,
-  createTutorialStageState,
-  decideTutorialOpponentAction,
-  getTutorialCapabilities,
-  getTutorialGuidance,
-  loadTutorialCompleted,
-  saveTutorialCompleted,
-} from './engine/tutorial.ts';
-import {
   SEC00_MONOLOGUE_STEPS,
   createSec00TutorialState,
   getSec00Capabilities,
@@ -173,7 +164,6 @@ import {
 import { resolveEcho0Sprite } from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
-import TutorialOverlayBar from './components/TutorialOverlayBar.tsx';
 import Sec00TutorialOverlay from './components/Sec00TutorialOverlay.tsx';
 import { TutorialSpotlightOverlay } from './components/TutorialSpotlightOverlay.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
@@ -221,7 +211,7 @@ const SETTINGS_MENU_ITEMS: Array<{
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
-  { id: 'menu-tutorial', keyName: 'tutorial', label: '新手教程 (6关)', note: '无黑客换牌翻牌 -> 加注跟注 -> 双花色同花 -> 篡改 -> 扫描封印 -> 实战', icon: 'rules' },
+  { id: 'menu-tutorial', keyName: 'tutorial', label: '重玩新手教学 (ECHO-0)', note: '重开 SEC-00 匿名终端单轮连贯教学与规则聚光引导', icon: 'rules' },
   { id: 'menu-cmd', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
   { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
@@ -503,14 +493,6 @@ export function App() {
   const mobileChatOpenRef = useRef(mobileChatOpen);
   mobileChatOpenRef.current = mobileChatOpen;
   const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => loadSoundSettings());
-  const [tutorialActive, setTutorialActive] = useState(false);
-  const [tutorialStageIndex, setTutorialStageIndex] = useState(0);
-  const [tutorialCompleted, setTutorialCompleted] = useState(() => loadTutorialCompleted());
-  const [welcomeDismissed, setWelcomeDismissed] = useState(() => loadTutorialCompleted());
-  const tutorialActiveRef = useRef(tutorialActive);
-  tutorialActiveRef.current = tutorialActive;
-  const tutorialStageRef = useRef(tutorialStageIndex);
-  tutorialStageRef.current = tutorialStageIndex;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
   const [cmdLogs, setCmdLogs] = useState<DebugCmdLogEntry[]>([
@@ -1307,8 +1289,7 @@ export function App() {
     const boot = window.setTimeout(() => {
       if (
         sec00GuideActiveRef.current ||
-        activeEscapeNodeRef.current !== null ||
-        tutorialActiveRef.current
+        activeEscapeNodeRef.current !== null
       ) {
         return;
       }
@@ -1500,39 +1481,6 @@ export function App() {
       };
     }
 
-    if (tutorialActive) {
-      let cancelled = false;
-      setIsAiThinking(true);
-      const timer = window.setTimeout(async () => {
-        try {
-          const snapshot = latestStateRef.current;
-          if (
-            cancelled ||
-            !tutorialActiveRef.current ||
-            snapshot.phase === 'showdown' ||
-            snapshot.currentTurn !== 'ai'
-          ) {
-            return;
-          }
-          const stageIdx = tutorialStageRef.current;
-          const act = await decideTutorialOpponentAction(stageIdx, snapshot);
-          if (!cancelled && tutorialActiveRef.current && act) {
-            const latest = latestStateRef.current;
-            if (latest.phase !== 'showdown' && latest.currentTurn === 'ai') {
-              setState(applyAction(latest, act));
-            }
-          }
-        } finally {
-          if (!cancelled) setIsAiThinking(false);
-        }
-      }, 460);
-      return () => {
-        cancelled = true;
-        window.clearTimeout(timer);
-        setIsAiThinking(false);
-      };
-    }
-
     let cancelled = false;
     setIsAiThinking(true);
 
@@ -1626,7 +1574,6 @@ export function App() {
     state.config.aiDelayMs,
     sec00GuideActive,
     sec00IntroIndex,
-    tutorialActive,
     isP2pSessionActive,
     enqueueTask,
     enqueueOpponentSegments,
@@ -1736,15 +1683,6 @@ export function App() {
             ? `漂亮的牌序博弈，本局算力池 ${res.potWon} 到手！`
             : `完全同分平局，双方平分算力池 ${res.potWon}。`;
 
-    if (tutorialActiveRef.current) {
-      enqueueTask({
-        kind: 'opponent',
-        speaker: '训练靶机',
-        text: line,
-      });
-      return;
-    }
-
     if (isP2pConnected) {
       enqueueTask({
         kind: 'opponent',
@@ -1805,7 +1743,7 @@ export function App() {
 
     // 整场算力归零：优先处理逃亡路线图节点循环，否则走原契约追捕流程
     if (state.players.ai.chips === 0) {
-      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+      if (activeEscapeNodeRef.current !== null) {
         const clearedIdx = activeEscapeNodeRef.current;
         const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
         if (!escapeClearQueuedForMatchRef.current) {
@@ -1874,7 +1812,7 @@ export function App() {
         }
       });
     } else if (state.players.human.chips === 0) {
-      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+      if (activeEscapeNodeRef.current !== null) {
         pushToast(
           'error',
           '算力归零 · 当前节点突围受阻',
@@ -2029,7 +1967,6 @@ export function App() {
   };
 
   const handleExecuteHack = (skill: HackSkillId) => {
-    if (tutorialActive && !tutorialCaps.allowHack) return;
     if (sec00GuideActiveRef.current) {
       if (sec00IntroIndexRef.current !== null) return;
       const latest = latestStateRef.current;
@@ -2139,7 +2076,6 @@ export function App() {
   };
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
-    if (tutorialActive && !tutorialCaps.allowScan) return;
     if (sec00GuideActiveRef.current) {
       if (sec00IntroIndexRef.current !== null) return;
       const latest = latestStateRef.current;
@@ -2309,112 +2245,7 @@ export function App() {
     });
   };
 
-  const startTutorial = useCallback(
-    (stageIdx = 0) => {
-      if (isP2pSessionActive) {
-        disconnectP2p();
-      }
-      const clamped = Math.max(0, Math.min(TUTORIAL_STAGES.length - 1, stageIdx));
-      for (const id of timersRef.current) {
-        window.clearTimeout(id);
-      }
-      timersRef.current = [];
-      queueRef.current = [];
-      inFlightTaskRef.current = null;
-      resetEpochRef.current += 1;
-      isAnimatingRef.current = false;
-      setQueuedCount(0);
-      setFloatingBubble(null);
-      setCrushingActive(false);
-      setSelectedHandIndex(null);
-      setDraggedHandIndex(null);
-      setShowRaiseTiers(false);
-      setScanMode(false);
-      setPendingSkillTargetId(null);
-      setRoundLossFlicker(false);
-      setAiRoundLossFlicker(false);
-      setActiveExpression('calm');
-      setActiveModal({ type: 'none' });
-      lastHandledShowdownHandRef.current = 0;
-      lastSoundActionIdRef.current = null;
-      setTutorialActive(true);
-      setTutorialStageIndex(clamped);
-      setSec00GuideActive(false);
-      sec00GuideActiveRef.current = false;
-      setSec00IntroIndex(null);
-      setActiveEscapeNodeIndex(null);
-      setViewMode('arena');
-      setWelcomeDismissed(true);
-      const tState = createTutorialStageState(clamped);
-      setState(tState);
-      setMessages([
-        {
-          id: `tut-start-${clamped}-${Date.now()}`,
-          sender: 'opponent',
-          speaker: '黑域教学协议',
-          text: `${TUTORIAL_STAGES[clamped].title}：${TUTORIAL_STAGES[clamped].mechanicTip}`,
-          crushed: false,
-        },
-      ]);
-    },
-    [disconnectP2p, isP2pSessionActive]
-  );
-
-  const exitTutorial = useCallback(
-    (markCompleted = false) => {
-      if (markCompleted) {
-        setTutorialCompleted(true);
-        saveTutorialCompleted(true);
-      }
-      setTutorialActive(false);
-      setWelcomeDismissed(true);
-      setSelectedHandIndex(null);
-      setDraggedHandIndex(null);
-      setShowRaiseTiers(false);
-      setScanMode(false);
-      setPendingSkillTargetId(null);
-      setRoundLossFlicker(false);
-      setAiRoundLossFlicker(false);
-      lastHandledShowdownHandRef.current = 0;
-      lastSoundActionIdRef.current = null;
-      const normalState = createInitialState({
-        config: state.config,
-        opponentName: character.name,
-        playerAcquiredSkills: latestCampaignRef.current.acquiredSkills,
-      });
-      setState(normalState);
-      setMessages([
-        {
-          id: `tut-exit-${Date.now()}`,
-          sender: 'opponent',
-          speaker: character.name,
-          text: markCompleted
-            ? '教程通关！现在进入正式的黑域追捕对局，亮出你的牌吧。'
-            : '已退出教学模式，回到正式黑域牌桌。',
-          crushed: false,
-        },
-      ]);
-    },
-    [character.name, state.config]
-  );
-
-  const handleTutorialNextStage = useCallback(() => {
-    if (tutorialStageIndex >= TUTORIAL_STAGES.length - 1) {
-      exitTutorial(true);
-      pushToast('success', '新手协议通关！', '已解锁正式黑域追捕对局');
-      return;
-    }
-    startTutorial(tutorialStageIndex + 1);
-  }, [exitTutorial, pushToast, startTutorial, tutorialStageIndex]);
-
   const handleNextHand = () => {
-    if (tutorialActive) {
-      setSelectedHandIndex(null);
-      setShowRaiseTiers(false);
-      setActiveExpression('calm');
-      setState(startNextHand(latestStateRef.current));
-      return;
-    }
     if (isP2pConnected) {
       if (isP2pGuest) {
         const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
@@ -2466,17 +2297,6 @@ export function App() {
     overrideChips?: Record<PlayerId, number>,
     overrideOpponentName?: string
   ) => {
-    if (tutorialActiveRef.current && !customConfig && !nextCharacter) {
-      if (
-        latestStateRef.current.players.ai.chips === 0 &&
-        tutorialStageRef.current >= TUTORIAL_STAGES.length - 1
-      ) {
-        exitTutorial(true);
-      } else {
-        startTutorial(tutorialStageRef.current);
-      }
-      return latestStateRef.current;
-    }
     if (p2pStatus === 'connected' && p2pRoleRef.current === 'guest') {
       p2pTransportRef.current?.send({ type: 'REMATCH_REQ' });
       setActiveModal({ type: 'none' });
@@ -2585,7 +2405,6 @@ export function App() {
     setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
-    setTutorialActive(false);
     setActiveEscapeNodeIndex(0);
     activeEscapeNodeRef.current = 0;
     setSec00GuideActive(true);
@@ -2613,7 +2432,6 @@ export function App() {
     if (isP2pSessionActive) {
       disconnectP2p();
     }
-    setTutorialActive(false);
     setEscapeProgress(latestEsc);
     escapeProgressRef.current = latestEsc;
     setActiveEscapeNodeIndex(nodeIndex);
@@ -2708,12 +2526,6 @@ export function App() {
         return;
       }
       case 'win': {
-        if (tutorialActiveRef.current) {
-          appendCmdLog('success', '[OK] 教程关直接过关，推进下一教学阶段');
-          setActiveModal({ type: 'none' });
-          handleTutorialNextStage();
-          return;
-        }
         if (viewMode === 'escape-map') {
           const base = completeEscapeTransition(escapeProgressRef.current);
           if (base.escapedReality || base.highestUnlockedIndex >= 5) {
@@ -2805,7 +2617,6 @@ export function App() {
         escapeProgressRef.current = jumped;
         setActiveEscapeNodeIndex(idx);
         activeEscapeNodeRef.current = idx;
-        setTutorialActive(false);
         setActiveModal({ type: 'none' });
         if (idx === 0) {
           startSec00Tutorial(true);
@@ -2899,10 +2710,6 @@ export function App() {
         const freshCamp = createInitialCampaign(campaign.playerCodename);
         setCampaign(freshCamp);
         saveCampaignState(freshCamp);
-        setTutorialCompleted(false);
-        setWelcomeDismissed(false);
-        saveTutorialCompleted(false);
-        setTutorialActive(false);
         const freshEsc = resetEscapeProgress();
         setEscapeProgress(freshEsc);
         escapeProgressRef.current = freshEsc;
@@ -3163,7 +2970,7 @@ export function App() {
 
   const activeEscapeNode =
     activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
-  const isSec00Echo0 = activeEscapeNode?.index === 0 && !tutorialActive && !isP2pConnected;
+  const isSec00Echo0 = activeEscapeNode?.index === 0 && !isP2pConnected;
 
   // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用女主 ECHO-0 匿名伪装立绘）
   const portraitSrc =
@@ -3212,38 +3019,26 @@ export function App() {
 
   const tutorialCaps = useMemo(
     () =>
-      tutorialActive
-        ? getTutorialCapabilities(tutorialStageIndex)
-        : sec00GuideActive
-          ? getSec00Capabilities(state)
-          : { allowHack: true, allowScan: true, allowRaise: true },
-    [tutorialActive, tutorialStageIndex, sec00GuideActive, state]
-  );
-
-  const tutorialGuidance = useMemo(
-    () =>
-      tutorialActive
-        ? getTutorialGuidance(tutorialStageIndex, state, { scanMode, selectedHandIndex })
-        : null,
-    [tutorialActive, tutorialStageIndex, state, scanMode, selectedHandIndex]
+      sec00GuideActive
+        ? getSec00Capabilities(state)
+        : { allowHack: true, allowScan: true, allowRaise: true },
+    [sec00GuideActive, state]
   );
 
   const sec00Guidance = useMemo(
     () =>
-      sec00GuideActive && !tutorialActive
+      sec00GuideActive
         ? getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers })
         : null,
-    [sec00GuideActive, tutorialActive, state, selectedHandIndex, scanMode, showRaiseTiers]
+    [sec00GuideActive, state, selectedHandIndex, scanMode, showRaiseTiers]
   );
 
   // Highlight guided tutorial targets cleanly without leaving stale classes
   useEffect(() => {
     const ids =
-      tutorialActive && tutorialGuidance
-        ? tutorialGuidance.focusIds
-        : sec00GuideActive && sec00IntroIndex === null && sec00Guidance
-          ? sec00Guidance.focusIds
-          : [];
+      sec00GuideActive && sec00IntroIndex === null && sec00Guidance
+        ? sec00Guidance.focusIds
+        : [];
     const elements: HTMLElement[] = [];
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -3258,8 +3053,6 @@ export function App() {
       }
     };
   }, [
-    tutorialActive,
-    tutorialGuidance,
     sec00GuideActive,
     sec00IntroIndex,
     sec00Guidance,
@@ -3270,7 +3063,7 @@ export function App() {
     state.currentTurn,
   ]);
 
-  const hasTopGuideBar = tutorialActive || sec00GuideActive;
+  const hasTopGuideBar = sec00GuideActive;
 
   const spotlightPlan = useMemo(
     () =>
@@ -3281,8 +3074,6 @@ export function App() {
         sec00GuideActive,
         sec00IntroIndex,
         sec00Guidance,
-        tutorialActive,
-        tutorialGuidance,
         selectedHandIndex,
         scanMode,
         showRaiseTiers,
@@ -3295,8 +3086,6 @@ export function App() {
       sec00GuideActive,
       sec00IntroIndex,
       sec00Guidance,
-      tutorialActive,
-      tutorialGuidance,
       selectedHandIndex,
       scanMode,
       showRaiseTiers,
@@ -3331,15 +3120,7 @@ export function App() {
         </Suspense>
       ) : (
         <>
-          {tutorialActive && tutorialGuidance ? (
-            <TutorialOverlayBar
-              stageIndex={tutorialStageIndex}
-              guidance={tutorialGuidance}
-              onNextStage={handleTutorialNextStage}
-              onRetryStage={() => startTutorial(tutorialStageIndex)}
-              onExitTutorial={() => exitTutorial(false)}
-            />
-          ) : sec00GuideActive && sec00Guidance ? (
+          {sec00GuideActive && sec00Guidance && (
             <Sec00TutorialOverlay
               introStepIndex={sec00IntroIndex}
               guidance={sec00Guidance}
@@ -3356,42 +3137,6 @@ export function App() {
                 pushToast('info', '已关闭 SEC-00 步进引导', '你可自由按常规规则继续完成本局');
               }}
             />
-          ) : (
-            !tutorialCompleted &&
-            !welcomeDismissed && (
-              <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程与路线快速入口">
-                <span>初次进入《黑域协议：替壳者》？先打赢当前节点或用 2 分钟交互教程熟悉规则</span>
-                <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button
-                    id="welcome-btn-escape-map"
-                    type="button"
-                    className="lc-tutorial-btn"
-                    onClick={() => setViewMode('escape-map')}
-                  >
-                    查看逃亡路线图
-                  </button>
-                  <button
-                    id="welcome-btn-start-tutorial"
-                    type="button"
-                    className="lc-tutorial-btn primary"
-                    onClick={() => startTutorial(0)}
-                  >
-                    开始 6 关教程
-                  </button>
-                  <button
-                    id="welcome-btn-dismiss"
-                    type="button"
-                    className="lc-tutorial-btn"
-                    onClick={() => {
-                      setWelcomeDismissed(true);
-                      saveTutorialCompleted(true);
-                    }}
-                  >
-                    跳过
-                  </button>
-                </div>
-              </div>
-            )
           )}
 
           {/* Centered & Aligned 3x3 Tactical Stage */}
@@ -3487,20 +3232,16 @@ export function App() {
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
               <span>
-                {tutorialActive
-                  ? state.players.ai.name
-                  : isP2pConnected && remotePeer
-                    ? `${remotePeer.name} · ${remotePeer.title}`
-                    : activeEscapeNode
-                      ? `${activeEscapeNode.code} · ${activeEscapeNode.title} · ${activeEscapeNode.opponentName}`
-                      : `${character.name} · ${dossier.identityTitle}`}
+                {isP2pConnected && remotePeer
+                  ? `${remotePeer.name} · ${remotePeer.title}`
+                  : activeEscapeNode
+                    ? `${activeEscapeNode.code} · ${activeEscapeNode.title} · ${activeEscapeNode.opponentName}`
+                    : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
             <div className="lc-opp-topbar-right">
               <span className="lc-opp-codename">
-                {tutorialActive
-                  ? `TUTORIAL // ${TUTORIAL_STAGES[tutorialStageIndex]?.badge ?? ''}`
-                  : p2pStatus === 'connecting' || p2pStatus === 'gathering'
+                {p2pStatus === 'connecting' || p2pStatus === 'gathering'
                   ? 'P2P 重连/握手中...'
                   : isP2pConnected
                     ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
@@ -4034,7 +3775,7 @@ export function App() {
                       onClick={() => handleExecuteHack(btn.skill)}
                       title={
                         lockedByTutorial
-                          ? '当前教程关卡暂未解锁黑客技能（第 4 关开启）'
+                          ? '当前教学步骤尚未解锁黑客技能（按上方指引推进）'
                           : diff > 0
                             ? '遭遇加注，请先在右侧跟注后再使用技能'
                             : isSealed
@@ -4082,7 +3823,7 @@ export function App() {
                   }}
                   title={
                     !tutorialCaps.allowScan
-                      ? '当前教程关卡暂未解锁扫描技能（第 5 关开启）'
+                      ? '当前教学步骤尚未解锁扫描技能（终结步骤开启）'
                       : diff > 0 && state.phase !== 'river'
                         ? '公共牌未全明时遭遇加注，请先在右侧跟注后再进行扫描'
                         : state.usedScanThisTurn
@@ -4700,7 +4441,7 @@ export function App() {
                 </span>
                 <span className="lc-stack-sub">
                   {!tutorialCaps.allowRaise
-                    ? '第 2 关解锁'
+                    ? '稍后步骤解锁'
                     : raiseRange.allowed
                       ? `三档 (${state.raisesInSubPhase}/${maxRaises})`
                       : '翻/换牌后重置'}
@@ -4870,7 +4611,7 @@ export function App() {
                   className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
-                    if (item.keyName === 'tutorial') startTutorial(0);
+                    if (item.keyName === 'tutorial') startSec00Tutorial(true);
                     else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
                     else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
                     else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });

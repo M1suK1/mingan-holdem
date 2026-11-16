@@ -1,5 +1,4 @@
 import type { Sec00Guidance } from './sec00Tutorial.ts';
-import type { TutorialGuidance } from './tutorial.ts';
 
 export type SpotlightTone = 'cyan' | 'amber' | 'pink' | 'emerald';
 
@@ -32,7 +31,7 @@ export interface SpotlightLinkArrow {
 
 export interface SpotlightPlan {
   active: boolean;
-  mode: 'sec00-monologue' | 'sec00-thought' | 'sec00-step' | 'tutorial-step' | 'off';
+  mode: 'sec00-monologue' | 'sec00-thought' | 'sec00-step' | 'off';
   dimOpacity: number;
   targets: SpotlightTargetSpec[];
   mobileFallbackTargets?: SpotlightTargetSpec[];
@@ -46,8 +45,6 @@ export interface SpotlightInputContext {
   sec00GuideActive: boolean;
   sec00IntroIndex: number | null;
   sec00Guidance: Sec00Guidance | null;
-  tutorialActive: boolean;
-  tutorialGuidance: TutorialGuidance | null;
   selectedHandIndex: number | null;
   scanMode: boolean;
   showRaiseTiers: boolean;
@@ -83,35 +80,13 @@ export function clampSpotlightRect(
   };
 }
 
-function classifyFocusTarget(id: string): Omit<SpotlightTargetSpec, 'id'> {
-  if (id.startsWith('human-hand-card-')) {
-    return { label: '己方手牌', tone: 'cyan', padding: 6, role: 'hand' };
-  }
-  if (id.startsWith('opponent-hand-card-')) {
-    return { label: '扫描目标', tone: 'pink', padding: 6, role: 'opponent' };
-  }
-  if (id.startsWith('board-node-card-')) {
-    return { label: '公共牌区', tone: 'amber', padding: 6, role: 'board' };
-  }
-  if (id.startsWith('hack-btn-')) {
-    return { label: '黑客与扫描技能', tone: 'pink', padding: 5, role: 'skill' };
-  }
-  if (id.startsWith('lc-action-btn-') || id.startsWith('raise-tier-btn-') || id.startsWith('action-btn-')) {
-    return { label: '操作指令', tone: 'emerald', padding: 5, role: 'action' };
-  }
-  if (id.startsWith('tutorial-btn-')) {
-    return { label: '切换关卡', tone: 'emerald', padding: 4, role: 'guide-bar' };
-  }
-  return { tone: 'cyan', padding: 5 };
-}
-
 export function resolveTutorialSpotlightPlan(ctx: SpotlightInputContext): SpotlightPlan {
-  if (ctx.viewMode !== 'arena' || ctx.hasModalOpen || ctx.hasPendingSkillClaim) {
+  if (ctx.viewMode !== 'arena' || ctx.hasModalOpen || ctx.hasPendingSkillClaim || !ctx.sec00GuideActive) {
     return { active: false, mode: 'off', dimOpacity: 0, targets: [] };
   }
 
   // 1. Transient ECHO-0 psychological thought spotlight during SEC-00
-  if (ctx.sec00GuideActive && !ctx.tutorialActive && ctx.thoughtSpotlightActive) {
+  if (ctx.thoughtSpotlightActive) {
     return {
       active: true,
       mode: 'sec00-thought',
@@ -131,7 +106,7 @@ export function resolveTutorialSpotlightPlan(ctx: SpotlightInputContext): Spotli
   }
 
   // 2. SEC-00 opening self-monologue (1/4 ~ 4/4)
-  if (ctx.sec00GuideActive && !ctx.tutorialActive && ctx.sec00IntroIndex !== null) {
+  if (ctx.sec00IntroIndex !== null) {
     const baseTargets: SpotlightTargetSpec[] = [
       { id: 'lc-tutorial-guide-bar', label: '上方教程', tone: 'cyan', padding: 6, role: 'guide-bar', subtle: true },
       { id: 'sec00-monologue-card', label: '开局独白', tone: 'cyan', padding: 8, role: 'monologue' },
@@ -205,7 +180,7 @@ export function resolveTutorialSpotlightPlan(ctx: SpotlightInputContext): Spotli
   }
 
   // 3. SEC-00 interactive hands-on guidance
-  if (ctx.sec00GuideActive && !ctx.tutorialActive && ctx.sec00Guidance) {
+  if (ctx.sec00Guidance) {
     const g = ctx.sec00Guidance;
     const targets: SpotlightTargetSpec[] = [
       { id: 'lc-tutorial-guide-bar', label: '当前教学步骤', tone: 'cyan', padding: 6, role: 'guide-bar', subtle: true },
@@ -280,36 +255,6 @@ export function resolveTutorialSpotlightPlan(ctx: SpotlightInputContext): Spotli
     return {
       active: true,
       mode: 'sec00-step',
-      dimOpacity: 0.72,
-      targets,
-      arrow,
-    };
-  }
-
-  // 4. 6-stage standalone tutorial
-  if (ctx.tutorialActive && ctx.tutorialGuidance) {
-    const targets: SpotlightTargetSpec[] = [
-      { id: 'lc-tutorial-guide-bar', label: '教程引导', tone: 'cyan', padding: 6, role: 'guide-bar', subtle: true },
-    ];
-    for (const id of ctx.tutorialGuidance.focusIds) {
-      if (id === 'lc-tutorial-guide-bar') continue;
-      const meta = classifyFocusTarget(id);
-      targets.push({ id, ...meta });
-    }
-
-    let arrow: SpotlightLinkArrow | null = null;
-    const handId = ctx.tutorialGuidance.focusIds.find((id) => id.startsWith('human-hand-card-'));
-    const boardId = ctx.tutorialGuidance.focusIds.find((id) => id.startsWith('board-node-card-'));
-    const hackId = ctx.tutorialGuidance.focusIds.find((id) => id.startsWith('hack-btn-'));
-    if (handId && boardId) {
-      arrow = { fromId: handId, toId: boardId, label: '互换手牌', tone: 'amber' };
-    } else if (handId && hackId) {
-      arrow = { fromId: handId, toId: hackId, label: '注入改牌', tone: 'cyan' };
-    }
-
-    return {
-      active: true,
-      mode: 'tutorial-step',
       dimOpacity: 0.72,
       targets,
       arrow,

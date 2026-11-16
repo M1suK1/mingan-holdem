@@ -4,11 +4,15 @@ import {
   resolveTutorialSpotlightPlan,
   clampSpotlightRect,
 } from '../src/engine/tutorialSpotlight.ts';
-import { createSec00TutorialState, getSec00Guidance } from '../src/engine/sec00Tutorial.ts';
-import { createTutorialStageState, getTutorialGuidance } from '../src/engine/tutorial.ts';
+import {
+  createSec00TutorialState,
+  getSec00Guidance,
+  pickSec00AiAction,
+} from '../src/engine/sec00Tutorial.ts';
+import { applyAction } from '../src/engine/gameEngine.ts';
 
 describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
-  it('disables spotlight when outside arena, modal is open, or no tutorial is active', () => {
+  it('disables spotlight when outside arena, modal is open, or SEC-00 tutorial is inactive', () => {
     const state = createSec00TutorialState();
     const sec00Guidance = getSec00Guidance(state, {
       selectedHandIndex: null,
@@ -23,8 +27,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: 0,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -40,8 +42,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: 0,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -56,8 +56,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: false,
       sec00IntroIndex: null,
       sec00Guidance: null,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -81,8 +79,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: 0,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -103,8 +99,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: 1,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -121,8 +115,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: 3,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -150,8 +142,6 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
       sec00GuideActive: true,
       sec00IntroIndex: null,
       sec00Guidance,
-      tutorialActive: false,
-      tutorialGuidance: null,
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -166,22 +156,15 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
     assert.ok((thoughtPlan.mobileFallbackTargets ?? []).some((t) => t.id === 'hud-btn-mobile-speech-bar'));
   });
 
-  it('tracks hand-to-board, hack-skill, and scan-mode transitions during SEC-00 and 6-stage tutorial', () => {
-    const state = createSec00TutorialState();
-    const swapUnselected = getSec00Guidance(state, {
-      selectedHandIndex: null,
-      scanMode: false,
-      showRaiseTiers: false,
-    });
+  it('tracks hand-to-board, hack-skill, and scan-mode transitions across the SEC-00 ECHO-0 tutorial', () => {
+    let s = createSec00TutorialState();
     const swapPlan = resolveTutorialSpotlightPlan({
       viewMode: 'arena',
       hasModalOpen: false,
       hasPendingSkillClaim: false,
       sec00GuideActive: true,
       sec00IntroIndex: null,
-      sec00Guidance: swapUnselected,
-      tutorialActive: false,
-      tutorialGuidance: null,
+      sec00Guidance: getSec00Guidance(s, { selectedHandIndex: null, scanMode: false, showRaiseTiers: false }),
       selectedHandIndex: null,
       scanMode: false,
       showRaiseTiers: false,
@@ -191,49 +174,65 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
     assert.equal(swapPlan.arrow?.fromId, 'human-hand-card-2');
     assert.equal(swapPlan.arrow?.toId, 'board-node-card-0');
 
-    // Stage 5 of 6-stage tutorial: scan toggle -> opponent-hand-card-0
-    const tutState = createTutorialStageState(4);
-    const tutBeforeScan = getTutorialGuidance(4, tutState, {
-      selectedHandIndex: null,
-      scanMode: false,
-    });
-    const tutPlan1 = resolveTutorialSpotlightPlan({
-      viewMode: 'arena',
-      hasModalOpen: false,
-      hasPendingSkillClaim: false,
-      sec00GuideActive: false,
-      sec00IntroIndex: null,
-      sec00Guidance: null,
-      tutorialActive: true,
-      tutorialGuidance: tutBeforeScan,
-      selectedHandIndex: null,
-      scanMode: false,
-      showRaiseTiers: false,
-      thoughtSpotlightActive: false,
-    });
-    assert.equal(tutPlan1.mode, 'tutorial-step');
-    assert.ok(tutPlan1.targets.some((t) => t.id === 'lc-tutorial-guide-bar'));
-    assert.ok(tutPlan1.targets.some((t) => t.id === 'hack-btn-scan-toggle'));
+    // Progress SEC-00 through swap -> AI raise20 -> call -> flip -> AI flip2 -> raise40 -> AI call+hack+endTurn -> hack+1 -> scan
+    s = applyAction(s, { type: 'swap', handIndex: 2, boardIndex: 0 });
+    s = applyAction(s, pickSec00AiAction(s)!);
+    s = applyAction(s, { type: 'call' });
+    s = applyAction(s, { type: 'flip', boardIndex: 1 });
+    s = applyAction(s, pickSec00AiAction(s)!);
+    s = applyAction(s, { type: 'raise', amount: 40 });
+    s = applyAction(s, pickSec00AiAction(s)!);
+    s = applyAction(s, pickSec00AiAction(s)!);
+    s = applyAction(s, pickSec00AiAction(s)!);
 
-    const tutAfterScan = getTutorialGuidance(4, tutState, {
-      selectedHandIndex: null,
-      scanMode: true,
-    });
-    const tutPlan2 = resolveTutorialSpotlightPlan({
+    const hackPlan = resolveTutorialSpotlightPlan({
       viewMode: 'arena',
       hasModalOpen: false,
       hasPendingSkillClaim: false,
-      sec00GuideActive: false,
+      sec00GuideActive: true,
       sec00IntroIndex: null,
-      sec00Guidance: null,
-      tutorialActive: true,
-      tutorialGuidance: tutAfterScan,
+      sec00Guidance: getSec00Guidance(s, { selectedHandIndex: null, scanMode: false, showRaiseTiers: false }),
+      selectedHandIndex: null,
+      scanMode: false,
+      showRaiseTiers: false,
+      thoughtSpotlightActive: false,
+    });
+    assert.ok(hackPlan.targets.some((t) => t.id === 'human-hand-card-0'));
+    assert.ok(hackPlan.targets.some((t) => t.id === 'hack-btn-plus-one'));
+    assert.equal(hackPlan.arrow?.fromId, 'human-hand-card-0');
+    assert.equal(hackPlan.arrow?.toId, 'hack-btn-plus-one');
+
+    s = applyAction(s, { type: 'hack', handIndex: 0, skill: 'plus-one' });
+
+    const beforeScanPlan = resolveTutorialSpotlightPlan({
+      viewMode: 'arena',
+      hasModalOpen: false,
+      hasPendingSkillClaim: false,
+      sec00GuideActive: true,
+      sec00IntroIndex: null,
+      sec00Guidance: getSec00Guidance(s, { selectedHandIndex: null, scanMode: false, showRaiseTiers: false }),
+      selectedHandIndex: null,
+      scanMode: false,
+      showRaiseTiers: false,
+      thoughtSpotlightActive: false,
+    });
+    assert.ok(beforeScanPlan.targets.some((t) => t.id === 'hack-btn-scan-toggle'));
+
+    const activeScanPlan = resolveTutorialSpotlightPlan({
+      viewMode: 'arena',
+      hasModalOpen: false,
+      hasPendingSkillClaim: false,
+      sec00GuideActive: true,
+      sec00IntroIndex: null,
+      sec00Guidance: getSec00Guidance(s, { selectedHandIndex: null, scanMode: true, showRaiseTiers: false }),
       selectedHandIndex: null,
       scanMode: true,
       showRaiseTiers: false,
       thoughtSpotlightActive: false,
     });
-    assert.ok(tutPlan2.targets.some((t) => t.id === 'opponent-hand-card-0'));
+    assert.ok(activeScanPlan.targets.some((t) => t.id === 'opponent-hand-card-0'));
+    assert.equal(activeScanPlan.arrow?.fromId, 'hack-btn-scan-toggle');
+    assert.equal(activeScanPlan.arrow?.toId, 'opponent-hand-card-0');
   });
 
   it('clamps spotlight cutout bounds safely inside viewport', () => {

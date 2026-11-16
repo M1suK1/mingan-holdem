@@ -296,7 +296,7 @@ export function markEscapeNodeCleared(
       toIndex: nextIndex,
       startedAt: Date.now(),
     },
-    escapedReality: false,
+    escapedReality: progress.escapedReality,
   };
 }
 
