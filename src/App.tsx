@@ -1285,16 +1285,24 @@ export function App() {
     [enqueueTask]
   );
 
-  // One-shot opening speech on mount
+  // One-shot opening speech on mount (only in free-play contract mode, never in Escape Route / SEC-00 / Tutorial)
   useEffect(() => {
     if (hasBootedRef.current) return;
     hasBootedRef.current = true;
 
     const boot = window.setTimeout(() => {
+      if (
+        sec00GuideActiveRef.current ||
+        activeEscapeNodeRef.current !== null ||
+        tutorialActiveRef.current
+      ) {
+        return;
+      }
+      const curr = latestCharRef.current;
       enqueueTask({
         kind: 'opponent',
-        speaker: FALLBACK_CONTRACT_CHARACTER.name,
-        text: FALLBACK_CONTRACT_CHARACTER.quote,
+        speaker: curr.name,
+        text: curr.quote,
       });
     }, 450);
 
@@ -1735,11 +1743,12 @@ export function App() {
       pendingBundledChatRef.current = null;
       if (cfg.enabled && (cfg.reactAfterEachRound !== false || Boolean(bundledUserText))) {
         const currChar = latestCharRef.current;
+        const speakerName = state.players.ai.name;
         const winTxt =
           res.winner === 'human'
             ? '玩家胜出'
             : res.winner === 'ai'
-              ? `${currChar.name}胜出`
+              ? `${speakerName}胜出`
               : '平局分池';
         const reasonTxt =
           res.reason === 'scan-caught'
@@ -1764,7 +1773,7 @@ export function App() {
         }).then((enc) => {
           if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
           setActiveExpression(enc.expression);
-          enqueueOpponentSegments(currChar.name, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
+          enqueueOpponentSegments(speakerName, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
         });
       } else {
         enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
