@@ -2934,32 +2934,128 @@ button:disabled {
   overflow-y: auto;
 }
 
+/* Mobile Drawer Controls (Hidden on >960px desktop) */
+.lc-opp-topbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lc-mobile-chat-btn {
+  display: none;
+  position: relative;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan-soft);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.lc-mobile-unread-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  background: var(--neon-pink);
+  color: #ffffff;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.lc-mobile-only-close {
+  display: none;
+}
+
+.lc-mobile-opp-line {
+  display: none;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  background: rgba(8, 12, 22, 0.88);
+  border: 1px solid color-mix(in srgb, var(--char-accent) 55%, var(--px-border));
+  color: var(--text-main);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-mobile-opp-line.is-thought {
+  border-style: dashed;
+  color: #d6c8f5;
+}
+
+.lc-mobile-opp-speaker {
+  color: var(--char-accent);
+  font-weight: 800;
+}
+
+.lc-mobile-chat-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(2, 4, 10, 0.72);
+}
+
+/* Touch callout / accidental text selection guards */
+.px-card-scene,
+.lc-stack-btn,
+.lc-hold-btn,
+.lc-hack-btn {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
 @media (max-width: 760px) {
-  .lc-player-main-split,
   .lc-wb-grid,
   .lc-pwb-sampling-grid {
     grid-template-columns: 1fr;
   }
 
+  .lc-player-main-split {
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 8px;
+  }
+
   .lc-player-hand-zone {
-    padding: 0 12px;
+    padding: 0 10px;
   }
 
   .lc-player-avatar-only {
-    width: 112px;
-    height: 140px;
-    min-height: 140px;
+    width: 104px;
+    height: 132px;
+    min-height: 132px;
   }
 }
 
 /* =========================================================================
-   9. Responsive Adjustments (Narrow Windows)
+   9. Responsive Adjustments (Narrow Windows & Mobile Portrait)
    ========================================================================= */
 @media (max-width: 960px) {
+  .lc-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+  }
+
   .lc-stage-grid {
-    grid-template-columns: 110px minmax(0, 1fr);
-    grid-template-rows: minmax(230px, 1fr) auto auto auto;
-    gap: 8px 10px;
+    height: auto;
+    min-height: calc(100dvh - 16px);
+    grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-rows: minmax(205px, auto) auto auto auto;
+    gap: 8px;
   }
 
   .lc-pool-slot {
@@ -2970,6 +3066,7 @@ button:disabled {
   .lc-left-action-stack {
     grid-column: 1;
     grid-row: 3;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 
   .lc-opponent-zone {
@@ -2987,8 +3084,36 @@ button:disabled {
     grid-row: 3;
   }
 
+  .lc-mobile-chat-btn,
+  .lc-mobile-only-close,
+  .lc-mobile-opp-line {
+    display: inline-flex;
+  }
+
+  .lc-mobile-opp-line {
+    display: block;
+  }
+
   .lc-right-upper-col {
-    display: none;
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: min(360px, calc(100vw - 16px));
+    height: auto;
+    z-index: 70;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(106%);
+    transition:
+      transform 0.22s ease,
+      opacity 0.2s ease;
+  }
+
+  .lc-right-upper-col.is-mobile-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
   }
 
   .lc-action-stack {
@@ -2996,6 +3121,96 @@ button:disabled {
     grid-row: 4;
     grid-template-rows: none;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .lc-stage-grid {
+    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    gap: 6px;
+  }
+
+  .lc-pool-slot {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+
+  .lc-opponent-zone {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 196px;
+  }
+
+  .lc-board-zone {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .lc-player-hand-zone {
+    grid-column: 1 / 3;
+    grid-row: 3;
+    padding: 6px 8px;
+  }
+
+  .lc-player-main-split {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .lc-player-avatar-only {
+    width: 82px;
+    height: 112px;
+    min-height: 112px;
+  }
+
+  .lc-left-action-stack {
+    grid-column: 1 / 3;
+    grid-row: 4;
+    grid-template-rows: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: auto;
+  }
+
+  .lc-action-stack {
+    grid-column: 1 / 3;
+    grid-row: 5;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    height: auto;
+  }
+
+  .px-card-scene.sz-sm {
+    width: 52px;
+    height: 74px;
+  }
+
+  .px-card-scene.sz-md {
+    width: clamp(54px, 15.5vw, 68px);
+    height: clamp(78px, 22vw, 96px);
+  }
+
+  .px-card-scene.sz-lg {
+    width: clamp(58px, 17vw, 72px);
+    height: clamp(84px, 24vw, 102px);
+  }
+
+  .lc-opp-topbar {
+    padding: 5px 8px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .lc-opp-name {
+    font-size: 12px;
+  }
+
+  .lc-stack-btn {
+    padding: 6px 6px;
+    min-height: 46px;
+  }
+
+  .lc-stack-sub {
+    font-size: 9px;
   }
 }
 

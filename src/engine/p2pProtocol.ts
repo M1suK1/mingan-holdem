@@ -32,9 +32,47 @@ export type P2pPacket =
     }
   | { type: 'EXPRESSION_SYNC'; expression: ContractExpression }
   | { type: 'NEXT_HAND_REQ' }
+  | { type: 'READY_NEXT_HAND'; ready: boolean }
+  | { type: 'NEXT_HAND_READY_SYNC'; hostReady: boolean; guestReady: boolean }
+  | { type: 'SYNC_REQ' }
   | { type: 'REMATCH_REQ' }
   | { type: 'PING'; ts: number }
   | { type: 'PONG'; ts: number };
+
+export interface NextHandReadyState {
+  hostReady: boolean;
+  guestReady: boolean;
+}
+
+export function createNextHandReadyState(): NextHandReadyState {
+  return { hostReady: false, guestReady: false };
+}
+
+export function reduceNextHandReadyState(
+  prev: NextHandReadyState,
+  role: 'host' | 'guest',
+  ready: boolean
+): NextHandReadyState {
+  if (role === 'host') {
+    return prev.hostReady === ready ? prev : { ...prev, hostReady: ready };
+  }
+  return prev.guestReady === ready ? prev : { ...prev, guestReady: ready };
+}
+
+export function getNextHandReadySummary(state: NextHandReadyState): {
+  count: number;
+  bothReady: boolean;
+  hostReady: boolean;
+  guestReady: boolean;
+} {
+  const count = (state.hostReady ? 1 : 0) + (state.guestReady ? 1 : 0);
+  return {
+    count,
+    bothReady: state.hostReady && state.guestReady,
+    hostReady: state.hostReady,
+    guestReady: state.guestReady,
+  };
+}
 
 export interface P2pSignalPayload {
   kind: 'offer' | 'answer';

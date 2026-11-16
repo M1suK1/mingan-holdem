@@ -96,8 +96,12 @@ import {
 } from './engine/llmClient.ts';
 import { LocalAiAgent, resolveEffectiveAiDifficulty } from './engine/aiAgent.ts';
 import {
+  createNextHandReadyState,
+  getNextHandReadySummary,
   mirrorStateForGuestView,
+  reduceNextHandReadyState,
   sanitizeStateForGuest,
+  type NextHandReadyState,
   type P2pPacket,
   type P2pPeerProfile,
 } from './engine/p2pProtocol.ts';
@@ -304,12 +308,26 @@ export function App() {
   const [p2pOfferToken, setP2pOfferToken] = useState('');
   const [p2pAnswerToken, setP2pAnswerToken] = useState('');
   const [p2pRoomCode, setP2pRoomCode] = useState('');
+  const [p2pNextHandReady, setP2pNextHandReady] = useState<NextHandReadyState>(
+    () => createNextHandReadyState()
+  );
+  const p2pNextHandReadyRef = useRef<NextHandReadyState>(p2pNextHandReady);
+  p2pNextHandReadyRef.current = p2pNextHandReady;
+  const p2pMatchActiveRef = useRef(false);
   const p2pTransportRef = useRef<P2pTransport | null>(null);
   const p2pSeqRef = useRef(0);
   const p2pRoomPollRef = useRef<number | null>(null);
   const isP2pConnected = p2pStatus === 'connected';
   const isP2pHost = isP2pConnected && p2pRole === 'host';
   const isP2pGuest = isP2pConnected && p2pRole === 'guest';
+  const isP2pSessionActive =
+    isP2pConnected ||
+    (p2pMatchActiveRef.current && (p2pStatus === 'connecting' || p2pStatus === 'waiting-answer'));
+
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [unreadMobileChat, setUnreadMobileChat] = useState(0);
+  const mobileChatOpenRef = useRef(mobileChatOpen);
+  mobileChatOpenRef.current = mobileChatOpen;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
@@ -406,6 +424,7 @@ export function App() {
     stopP2pRoomPoll();
     p2pTransportRef.current?.close();
     p2pTransportRef.current = null;
+    p2pMatchActiveRef.current = false;
     setP2pStatus('idle');
     setP2pDetail('未连接');
     setP2pRole(null);
@@ -414,6 +433,7 @@ export function App() {
     setP2pOfferToken('');
     setP2pAnswerToken('');
     setP2pRoomCode('');
+    setP2pNextHandReady(createNextHandReadyState());
     pushToast('info', '已断开 P2P 联机', '已切回单机模式');
   }, [stopP2pRoomPoll, pushToast]);
 
@@ -421,10 +441,12 @@ export function App() {
     (role: P2pRole) => {
       stopP2pRoomPoll();
       p2pTransportRef.current?.close();
+      p2pMatchActiveRef.current = false;
       setP2pRole(role);
       p2pRoleRef.current = role;
       setP2pOfferToken('');
       setP2pAnswerToken('');
+      setP2pNextHandReady(createNextHandReadyState());
       const tr = new WebRtcP2pTransport(role, {
         onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
         onPacket: (pkt) => handleP2pPacketRef.current(pkt),
@@ -440,10 +462,12 @@ export function App() {
     (role: P2pRole) => {
       stopP2pRoomPoll();
       p2pTransportRef.current?.close();
+      p2pMatchActiveRef.current = false;
       setP2pRole(role);
       p2pRoleRef.current = role;
       setP2pOfferToken('');
       setP2pAnswerToken('');
+      setP2pNextHandReady(createNextHandReadyState());
       const tr = new WsRelayP2pTransport(role, {
         onStatusChange: (s, d) => onP2pStatusChangeRef.current(s, d),
         onPacket: (pkt) => handleP2pPacketRef.current(pkt),
@@ -472,25 +496,43 @@ export function App() {
       if (tr) {
         tr.send({ type: 'HELLO', peer: buildLocalPeerProfile() });
         if (role === 'host') {
-          const fresh = createInitialState({
-            config: { ...latestStateRef.current.config },
-            opponentName: remotePeerRef.current?.name ?? '联机好友',
-            playerAcquiredSkills: [],
-          });
-          setState(fresh);
-          setMessages([
-            {
-              id: `p2p-start-${Date.now()}`,
-              sender: 'opponent',
-              speaker: '系统信标',
-              text: 'P2P 直连牌桌已建立，双方信息严格隔离开局！',
-              crushed: false,
-            },
-          ]);
-          pushP2pStateToGuest(fresh);
-          pushToast('success', 'P2P 直连成功（房主）', '已向好友下发初始发牌');
+          if (p2pMatchActiveRef.current) {
+            pushP2pStateToGuest(latestStateRef.current);
+            tr.send({
+              type: 'NEXT_HAND_READY_SYNC',
+              hostReady: p2pNextHandReadyRef.current.hostReady,
+              guestReady: p2pNextHandReadyRef.current.guestReady,
+            });
+            pushToast('success', 'P2P 连接已恢复', '已自动同步当前牌桌进度');
+          } else {
+            p2pMatchActiveRef.current = true;
+            const fresh = createInitialState({
+              config: { ...latestStateRef.current.config },
+              opponentName: remotePeerRef.current?.name ?? '联机好友',
+              playerAcquiredSkills: [],
+            });
+            setState(fresh);
+            setP2pNextHandReady(createNextHandReadyState());
+            setMessages([
+              {
+                id: `p2p-start-${Date.now()}`,
+                sender: 'opponent',
+                speaker: '系统信标',
+                text: 'P2P 直连牌桌已建立，双方信息严格隔离开局！',
+                crushed: false,
+              },
+            ]);
+            pushP2pStateToGuest(fresh);
+            pushToast('success', 'P2P 直连成功（房主）', '已向好友下发初始发牌');
+          }
         } else {
-          pushToast('success', 'P2P 直连成功（客机）', '正在同步房主牌桌...');
+          if (p2pMatchActiveRef.current) {
+            tr.send({ type: 'SYNC_REQ' });
+            pushToast('success', '已重连云端房间', '正在同步最新牌桌进度...');
+          } else {
+            p2pMatchActiveRef.current = true;
+            pushToast('success', 'P2P 直连成功（客机）', '正在同步房主牌桌...');
+          }
         }
       }
       setActiveModal({ type: 'none' });
@@ -561,15 +603,73 @@ export function App() {
       setActiveExpression(pkt.expression);
       return;
     }
+    if (pkt.type === 'SYNC_REQ' && role === 'host') {
+      pushP2pStateToGuest(latestStateRef.current);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: p2pNextHandReadyRef.current.hostReady,
+        guestReady: p2pNextHandReadyRef.current.guestReady,
+      });
+      return;
+    }
+    if (pkt.type === 'READY_NEXT_HAND' && role === 'host') {
+      const curr = latestStateRef.current;
+      if (curr.phase !== 'showdown') return;
+      const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', pkt.ready);
+      const summary = getNextHandReadySummary(nextReady);
+      if (summary.bothReady) {
+        const resetReady = createNextHandReadyState();
+        setP2pNextHandReady(resetReady);
+        setSelectedHandIndex(null);
+        setShowRaiseTiers(false);
+        setActiveExpression('calm');
+        const nextHand = startNextHand(curr);
+        setState(nextHand);
+        pushP2pStateToGuest(nextHand);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: false,
+          guestReady: false,
+        });
+      } else {
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: nextReady.hostReady,
+          guestReady: nextReady.guestReady,
+        });
+        pushToast('info', '好友已准备开启下一局', '点击「准备下一局 (1/2)」即可发牌');
+      }
+      return;
+    }
+    if (pkt.type === 'NEXT_HAND_READY_SYNC' && role === 'guest') {
+      setP2pNextHandReady({
+        hostReady: pkt.hostReady,
+        guestReady: pkt.guestReady,
+      });
+      return;
+    }
     if (pkt.type === 'NEXT_HAND_REQ' && role === 'host') {
       const curr = latestStateRef.current;
       if (curr.phase !== 'showdown') return;
-      const next = startNextHand(curr);
-      setState(next);
-      pushP2pStateToGuest(next);
+      const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
+      if (getNextHandReadySummary(nextReady).bothReady) {
+        setP2pNextHandReady(createNextHandReadyState());
+        const next = startNextHand(curr);
+        setState(next);
+        pushP2pStateToGuest(next);
+      } else {
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: nextReady.hostReady,
+          guestReady: nextReady.guestReady,
+        });
+      }
       return;
     }
     if (pkt.type === 'REMATCH_REQ' && role === 'host') {
+      setP2pNextHandReady(createNextHandReadyState());
       const fresh = createInitialState({
         config: latestStateRef.current.config,
         opponentName: remotePeerRef.current?.name ?? '联机好友',
@@ -577,6 +677,11 @@ export function App() {
       });
       setState(fresh);
       pushP2pStateToGuest(fresh);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: false,
+        guestReady: false,
+      });
     }
   };
 
@@ -950,6 +1055,9 @@ export function App() {
 
   const enqueueTask = useCallback(
     (task: QueuedChatTask) => {
+      if (task.kind === 'opponent' && !mobileChatOpenRef.current) {
+        setUnreadMobileChat((c) => Math.min(99, c + 1));
+      }
       queueRef.current.push(task);
       setQueuedCount(queueRef.current.length);
       processNextTask();
@@ -1094,9 +1202,9 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
 
-  // AI Turn Scheduler (Skipped during P2P friend multiplayer!)
+  // AI Turn Scheduler (Skipped during P2P friend multiplayer, including brief reconnect windows!)
   useEffect(() => {
-    if (isP2pConnected || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
 
     let cancelled = false;
     setIsAiThinking(true);
@@ -1722,19 +1830,48 @@ export function App() {
   };
 
   const handleNextHand = () => {
-    if (isP2pGuest) {
-      p2pTransportRef.current?.send({ type: 'NEXT_HAND_REQ' });
-      pushToast('info', '已向房主请求开启下一局');
-      return;
+    if (isP2pConnected) {
+      if (isP2pGuest) {
+        const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
+        setP2pNextHandReady(nextReady);
+        p2pTransportRef.current?.send({ type: 'READY_NEXT_HAND', ready: true });
+        pushToast('info', '已确认准备下一局', '等待房主确认后同步发牌');
+        return;
+      }
+      if (isP2pHost) {
+        const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'host', true);
+        const summary = getNextHandReadySummary(nextReady);
+        if (!summary.bothReady) {
+          setP2pNextHandReady(nextReady);
+          p2pTransportRef.current?.send({
+            type: 'NEXT_HAND_READY_SYNC',
+            hostReady: nextReady.hostReady,
+            guestReady: nextReady.guestReady,
+          });
+          pushToast('info', '已准备下一局 (1/2)', '等待好友点击准备后同步发牌');
+          return;
+        }
+        const resetReady = createNextHandReadyState();
+        setP2pNextHandReady(resetReady);
+        setSelectedHandIndex(null);
+        setShowRaiseTiers(false);
+        setActiveExpression('calm');
+        const next = startNextHand(latestStateRef.current);
+        setState(next);
+        pushP2pStateToGuest(next);
+        p2pTransportRef.current?.send({
+          type: 'NEXT_HAND_READY_SYNC',
+          hostReady: false,
+          guestReady: false,
+        });
+        return;
+      }
     }
     setSelectedHandIndex(null);
     setShowRaiseTiers(false);
     setActiveExpression('calm');
     const next = startNextHand(latestStateRef.current);
     setState(next);
-    if (isP2pHost) {
-      pushP2pStateToGuest(next);
-    }
   };
 
   const performFullReset = (
@@ -1771,6 +1908,7 @@ export function App() {
     setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
+    setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
@@ -1783,6 +1921,11 @@ export function App() {
     setState(freshState);
     if (isP2pHost) {
       pushP2pStateToGuest(freshState);
+      p2pTransportRef.current?.send({
+        type: 'NEXT_HAND_READY_SYNC',
+        hostReady: false,
+        guestReady: false,
+      });
     }
     setMessages([
       {
@@ -2056,6 +2199,25 @@ export function App() {
         : []
   );
 
+  const p2pReadySummary = getNextHandReadySummary(p2pNextHandReady);
+  const localP2pReady =
+    p2pRole === 'host'
+      ? p2pReadySummary.hostReady
+      : p2pRole === 'guest'
+        ? p2pReadySummary.guestReady
+        : false;
+  const latestOpponentLine = useMemo(() => {
+    if (floatingBubble) {
+      return { speaker: floatingBubble.speaker, text: floatingBubble.text, kind: floatingBubble.msgKind };
+    }
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].sender === 'opponent') {
+        return { speaker: messages[i].speaker, text: messages[i].text, kind: messages[i].msgKind ?? 'speech' };
+      }
+    }
+    return null;
+  }, [floatingBubble, messages]);
+
   return (
     <div className="lc-shell">
       <CyberBackdrop situation={isBankrupt ? 'breach' : isLowCompute ? 'overclock' : 'recon'} pot={state.pot} />
@@ -2154,21 +2316,41 @@ export function App() {
                   : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
-            <span className="lc-opp-codename">
-              {isP2pConnected
-                ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
-                : isAiThinking
-                  ? 'THINKING...'
-                  : `${EXPRESSION_META[activeExpression].label} · ${
-                      effectiveAiDifficulty === 'master'
-                        ? '大师'
-                        : effectiveAiDifficulty === 'standard'
-                          ? '标准'
-                          : '新兵'
-                    } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
-                      CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
-                    }`}
-            </span>
+            <div className="lc-opp-topbar-right">
+              <span className="lc-opp-codename">
+                {p2pStatus === 'connecting' || p2pStatus === 'gathering'
+                  ? 'P2P 重连/握手中...'
+                  : isP2pConnected
+                    ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
+                    : isAiThinking
+                      ? 'THINKING...'
+                      : `${EXPRESSION_META[activeExpression].label} · ${
+                          effectiveAiDifficulty === 'master'
+                            ? '大师'
+                            : effectiveAiDifficulty === 'standard'
+                              ? '标准'
+                              : '新兵'
+                        } · ${PLAY_STYLE_META[effectiveStrategy.playStyle].label}/${
+                          CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
+                        }`}
+              </span>
+              <button
+                id="hud-btn-mobile-chat"
+                type="button"
+                className="lc-mobile-chat-btn"
+                onClick={() => {
+                  setMobileChatOpen(true);
+                  setUnreadMobileChat(0);
+                }}
+                aria-label="打开手机端通讯抽屉"
+              >
+                <PixelChatIcon size={12} />
+                通讯
+                {unreadMobileChat > 0 && (
+                  <span className="lc-mobile-unread-dot">{unreadMobileChat}</span>
+                )}
+              </button>
+            </div>
           </header>
 
           <div className="lc-opp-portrait-layer">
@@ -2236,6 +2418,21 @@ export function App() {
           </div>
 
           <div className="lc-opp-cards-dock">
+            {latestOpponentLine && (
+              <button
+                id="hud-btn-mobile-speech-bar"
+                type="button"
+                className={`lc-mobile-opp-line ${latestOpponentLine.kind === 'thought' ? 'is-thought' : ''}`}
+                onClick={() => {
+                  setMobileChatOpen(true);
+                  setUnreadMobileChat(0);
+                }}
+                title="点击展开完整聊天栏"
+              >
+                <span className="lc-mobile-opp-speaker">{latestOpponentLine.speaker}：</span>
+                <span className="lc-mobile-opp-text">{latestOpponentLine.text}</span>
+              </button>
+            )}
             <div className="lc-status-strip">
               <span className="lc-micro-tag pink">
                 对端：{opponentSummary.label} · {opponentSummary.detail}
@@ -2682,9 +2879,17 @@ export function App() {
           </div>
         </section>
 
-        {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel */}
+        {mobileChatOpen && (
+          <div
+            className="lc-mobile-chat-backdrop"
+            onClick={() => setMobileChatOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel (Drawer on <=960px) */}
         <aside
-          className="lc-right-upper-col"
+          className={`lc-right-upper-col ${mobileChatOpen ? 'is-mobile-open' : ''}`}
           style={{ '--char-accent': accentColor } as CSSProperties}
           aria-label="右侧通讯栏"
         >
@@ -2713,6 +2918,15 @@ export function App() {
                 >
                   <PixelBroadcastIcon size={12} />
                   发言
+                </button>
+                <button
+                  id="chat-btn-mobile-close"
+                  type="button"
+                  className="lc-chat-replay-btn lc-mobile-only-close"
+                  onClick={() => setMobileChatOpen(false)}
+                  aria-label="收起通讯抽屉"
+                >
+                  收起
                 </button>
               </div>
             </header>
@@ -2880,13 +3094,22 @@ export function App() {
                   id="action-btn-next-hand"
                   type="button"
                   className="lc-stack-btn"
+                  disabled={isP2pConnected && localP2pReady}
                   onClick={handleNextHand}
                 >
                   <span className="lc-btn-inline">
                     <PixelSyncIcon size={15} />
-                    下一局协议
+                    {isP2pConnected
+                      ? localP2pReady
+                        ? `已准备 (${p2pReadySummary.count}/2)`
+                        : `准备下一局 (${p2pReadySummary.count}/2)`
+                      : '下一局协议'}
                   </span>
-                  <span className="lc-stack-sub">第 #{state.handNumber + 1} 局</span>
+                  <span className="lc-stack-sub">
+                    {isP2pConnected && !localP2pReady && p2pReadySummary.count === 1
+                      ? '好友已准备，点击同步开局'
+                      : `第 #${state.handNumber + 1} 局`}
+                  </span>
                 </button>
               ) : (
                 <button
@@ -2984,6 +3207,7 @@ export function App() {
                 onPointerUp={cancelHoldHalfRaise}
                 onPointerLeave={cancelHoldHalfRaise}
                 onPointerCancel={cancelHoldHalfRaise}
+                onContextMenu={(e) => e.preventDefault()}
                 onKeyDown={(e) => {
                   if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
                     e.preventDefault();
