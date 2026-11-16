@@ -40,6 +40,10 @@ describe('soundEngine: action/showdown cue mapping, settings clamping & Node fal
     assert.equal(actionToSoundCue({ type: 'scan', caught: false }), 'scan-clean');
     assert.equal(actionToSoundCue({ type: 'scan', caught: true }), 'scan-caught');
     assert.equal(actionToSoundCue({ type: 'use-skill' }), 'skill');
+    assert.equal(
+      actionToSoundCue({ type: 'use-skill', actor: 'human', label: '我方 激活「富兰克林之死」' }),
+      'blade-slash'
+    );
   });
 
   it('maps showdown & bankrupt outcomes accurately for player vs opponent', () => {

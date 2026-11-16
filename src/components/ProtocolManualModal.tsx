@@ -202,7 +202,7 @@ export default function ProtocolManualModal({
                 <strong style={{ color: 'var(--neon-pink-300)' }}>二、阶梯限注与「跟注不消耗动作」</strong>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.65 }}>
                   <div>• 前期（剩 3~4 暗牌）上限 {config.earlyRaiseCap}；中期（剩 1~2 暗牌）上限 {config.midRaiseCap}；暗牌未减少前累计最多加注 {config.maxRaisesPerSubPhase} 次，任意翻牌或换牌立即清零计数。</div>
-                  <div>• 面对对手加注时：点击「跟注」仅同步筹码且不消耗你的回合动作，补齐后可继续直接点牌翻牌/换牌、反加或移交回合。</div>
+                  <div>• 面对对手加注时：点击「跟注」仅同步算力且不消耗你的回合动作，补齐后可继续直接点牌翻牌/换牌、反加或移交回合。</div>
                   <div>• 第 4 张暗牌揭晓后进入终局河牌圈（由未触发最后一张暗牌的一方先手，上限 {config.riverRaiseCap}，最多互加 {config.maxRiverRaises} 次）；全下平齐则自动翻开剩余全部节点比大小。</div>
                 </div>
               </div>

@@ -80,7 +80,7 @@ export const PROMPT_MACRO_HINTS: Array<{ key: string; label: string; hint: strin
   { key: 'char', label: '追捕者人设', hint: '契约卡性格、习惯、代表台词与特性' },
   { key: 'pursuer', label: '追捕身份档案', hint: '所属派系、威胁等级、虚拟实体代号与动机' },
   { key: 'player', label: '通缉黑客档案', hint: '玩家代号、通缉等级与当前伪装/诱饵状态' },
-  { key: 'table', label: '牌桌脱敏报文', hint: '当前手牌/公共牌/筹码/差额（严格过滤暗牌）' },
+  { key: 'table', label: '牌桌脱敏报文', hint: '当前手牌/公共牌/算力/差额（严格过滤暗牌）' },
   { key: 'skills', label: '技能状态', hint: '玩家已掠夺技能与双方被封印技能' },
   { key: 'history', label: '聊天记录', hint: '近期玩家与追捕者的完整通讯对话及心理独白' },
   { key: 'context', label: '本次指令上下文', hint: '具体请求的目标（合法动作清单/玩家发言等）' },

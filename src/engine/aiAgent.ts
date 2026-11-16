@@ -599,7 +599,7 @@ export class LocalAiAgent implements OpponentAgent {
           dialogue: buildDialogue(
             speaker,
             'thinking',
-            '（把这张明牌的信息全部抹掉……变成没有任何意义的废牌吧。）',
+            '（把这张牌的信息全嚼碎吞掉……变成 NULL 咯？等你在幻影里踩空的时候，我就能扑上去把你的喉咙撕烂了……！）',
             telemetry,
             'smile'
           ),
@@ -946,7 +946,7 @@ export class LocalAiAgent implements OpponentAgent {
           dialogue: buildDialogue(
             speaker,
             'tense',
-            `向主池注入 +${amt} 算力筹码。跟还是退？`,
+            `向主池注入 +${amt} 算力。跟还是退？`,
             telemetry,
             'angry'
           ),

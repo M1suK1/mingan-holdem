@@ -16,7 +16,7 @@ export const EXPRESSION_META: Record<
   calm: { label: '平静', cyberCode: 'SYNC_STABLE', desc: '心率平稳，冷静审视桌面数据流' },
   smile: { label: '微笑', cyberCode: 'CONFIDENCE_UP', desc: '嘴角扬起，似乎握有高权重底牌或诱导陷阱' },
   surprise: { label: '惊讶', cyberCode: 'SIGNAL_SPIKE', desc: '遭遇意料之外的加注或牌面突变' },
-  sad: { label: '低落', cyberCode: 'LINK_DRAIN', desc: '筹码受损或关键听牌落空' },
+  sad: { label: '低落', cyberCode: 'LINK_DRAIN', desc: '算力受损或关键听牌落空' },
   angry: { label: '警觉', cyberCode: 'ICE_ALERT', desc: '进入高压攻防姿态，准备强硬反击' },
   shy: { label: '动摇', cyberCode: 'FLUCTUATION', desc: '偷鸡被看穿或节奏被打乱时的微妙神情' },
 };

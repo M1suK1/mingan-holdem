@@ -292,7 +292,7 @@ export default function LlmTerminalModal({
                       每局结算后由 LLM 发表本轮结果感想
                     </label>
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      每小局摊牌或弃牌结算后，结合胜负与双方筹码变动由追捕者发表针对性感想与心理独白
+                      每小局摊牌或弃牌结算后，结合胜负与双方算力变动由追捕者发表针对性感想与心理独白
                     </div>
                   </div>
                   <input

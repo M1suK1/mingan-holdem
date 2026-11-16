@@ -20,7 +20,8 @@ export type SoundCue =
   | 'bubble'
   | 'ui-click'
   | 'charge-tick'
-  | 'wall-hit';
+  | 'wall-hit'
+  | 'blade-slash';
 
 export interface SoundSettings {
   enabled: boolean;
@@ -75,7 +76,7 @@ export function saveSoundSettings(settings: SoundSettings): void {
 }
 
 export function actionToSoundCue(
-  action: (Pick<VfxEvent, 'type' | 'amount' | 'caught'> & { actor?: VfxEvent['actor'] }) | null | undefined
+  action: (Pick<VfxEvent, 'type' | 'amount' | 'caught'> & { actor?: VfxEvent['actor']; label?: string }) | null | undefined
 ): SoundCue | null {
   if (!action) return null;
   if ((action.type === 'hack' || action.type === 'use-skill') && action.actor && action.actor !== 'human') {
@@ -99,7 +100,7 @@ export function actionToSoundCue(
     case 'scan':
       return action.caught ? 'scan-caught' : 'scan-clean';
     case 'use-skill':
-      return 'skill';
+      return action.label?.includes('富兰克林之死') ? 'blade-slash' : 'skill';
     default:
       return null;
   }
@@ -442,6 +443,36 @@ export function playSound(cue: SoundCue, opts?: { progress?: number }): boolean 
         type: 'square',
         gain: 0.14,
         filterHz: 2400,
+      });
+      return true;
+
+    case 'blade-slash':
+      // Razor air whoosh + sharp descending steel slash + metallic ring + severed link snap
+      playNoiseSnap(ctx, out, { duration: 0.085, centerHz: 3400, q: 1.9, gain: 0.25 });
+      playTone(ctx, out, {
+        duration: 0.14,
+        freqStart: 2400,
+        freqEnd: 460,
+        type: 'sawtooth',
+        gain: 0.22,
+        filterHz: 3800,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.03,
+        duration: 0.18,
+        freqStart: 1760,
+        freqEnd: 1180,
+        type: 'sine',
+        gain: 0.14,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.045,
+        duration: 0.09,
+        freqStart: 220,
+        freqEnd: 70,
+        type: 'square',
+        gain: 0.14,
+        filterHz: 900,
       });
       return true;
 

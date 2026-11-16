@@ -887,7 +887,7 @@ export async function requestEncounterDialogue(params: {
     'pursuer-defeated': `【事件：追捕者败北】你的算力已归零，你的虚拟实体即将被玩家按黑域协议夺取，发表不甘或认可的败北台词。`,
     'decoy-escape': `【事件：玩家牺牲伪装诱饵逃脱】你打穿了对手的算力，却发现对方出战的只是一具俘获来的伪装诱饵（${detailNote ?? '诱饵实体'}），让玩家本体成功逃脱，表达震惊或警告。`,
     'core-seized': `【事件：剥离玩家本体实体（失败结局）】玩家以本体虚拟实体出战且算力归零，你成功夺走了玩家本体，宣告这场通缉猎杀圆满收网。`,
-    'round-settled': `【事件：单局结算感想】第 #${state.handNumber} 局刚刚结束：${roundResultSummary ?? fallbackRoundReply}。请结合本局摊牌情况、双方算力押注和筹码余量，用 1 至 3 段对话或心理想法发表你的真实感想或心理反应（对下一局保持张力）。`,
+    'round-settled': `【事件：单局结算感想】第 #${state.handNumber} 局刚刚结束：${roundResultSummary ?? fallbackRoundReply}。请结合本局摊牌情况、双方算力押注和剩余算力，用 1 至 3 段对话或心理想法发表你的真实感想或心理反应（对下一局保持张力）。`,
   };
 
   const rt = resolveRuntimeContext({ character, campaign, dossier, preset: params.preset, worldbook: params.worldbook });

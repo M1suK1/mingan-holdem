@@ -281,7 +281,7 @@ export default function SandboxTuningModal({
             <strong style={{ fontSize: 13, color: '#ffffff' }}>核心经济与阶梯限注参数</strong>
 
             <div className="form-field-row">
-              <label htmlFor="tuning-input-starting-chips">双方初始算力筹码</label>
+              <label htmlFor="tuning-input-starting-chips">双方初始算力</label>
               <input
                 id="tuning-input-starting-chips"
                 type="number"

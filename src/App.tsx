@@ -229,7 +229,7 @@ const SETTINGS_MENU_ITEMS: Array<{
   { id: 'menu-preset-wb', keyName: 'preset-wb', label: '预设与世界书', note: '编辑 SillyTavern 兼容预设词条与世界书注入', icon: 'rules' },
   { id: 'menu-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与黑域实体规则', icon: 'rules' },
   { id: 'menu-audit', keyName: 'audit', label: '对局流水', note: '查看历史出牌与动作日志', icon: 'audit' },
-  { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
+  { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '算力规模、换牌门票与AI风格', icon: 'tuning' },
 ];
 
 function seededUnit(seed: number): number {
@@ -1608,12 +1608,12 @@ export function App() {
             if (isMuteGarbledCharacter(char.id)) {
               const innerThought =
                 decision.action.type === 'raise'
-                  ? '（……声音还是传不出去。没关系，只要把筹码推上去逼退对面就行了。）'
+                  ? '（咬住、咬住！！把这堆跳动的算力全撕下来扯碎……再多挣扎一点呀，猎物就是要哭着求饶才美味嘛——！）'
                   : decision.action.type === 'scan'
-                    ? '（不对劲……你的链路里有异常痕迹。让我用双刃把伪装切开看看。）'
+                    ? '（嗅到了……有好甜的腥味！！你藏在底下的小把戏发出味道了，让我用双刀把它剖开看看、剖开看看！！）'
                     : decision.action.type === 'swap'
-                      ? '（换入暗区……黑河教过我，永远不要让对手看清底牌的真实轮廓。）'
-                      : '（……要冷静。只要赢下这一手，黑河就不会再把我丢回雨夜里了。）';
+                      ? '（嘻嘻嘻……把脏东西塞进公共区里去。咬上来吧、快一口咬上这口带钩的诱饵吧——！）'
+                      : '（好饿……算力的味道就在鼻尖前面晃。不能搞砸、绝对不能让黑河扔掉我……必须把你啃得骨头都不剩！）';
               enqueueTask({
                 kind: 'opponent',
                 speaker: snapshot.players.ai.name,
@@ -1677,6 +1677,7 @@ export function App() {
     if (lastSlashedHandRef.current === key) return;
     lastSlashedHandRef.current = key;
     setSlashBurstKey(key);
+    playSound('blade-slash');
     const skName = getSkillById(locked)?.name ?? locked;
     pushToast(
       'warn',
@@ -1779,7 +1780,7 @@ export function App() {
       return;
     }
 
-    // 普通小局结束（双方筹码均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
+    // 普通小局结束（双方算力均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
     if (state.players.ai.chips > 0 && state.players.human.chips > 0) {
       const cfg = latestLlmRef.current;
       const bundledUserText = pendingBundledChatRef.current ?? undefined;
@@ -1820,6 +1821,19 @@ export function App() {
         });
       } else {
         enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+        if (isMuteGarbledCharacter(latestCharRef.current.id)) {
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            msgKind: 'thought',
+            text:
+              res.winner === 'ai'
+                ? '（啊哈、咬碎了一大口！！好甜……你的骨头在发抖吧？再多端上来一点算力呀！！）'
+                : res.reason === 'scan-caught'
+                  ? '（啧……爪子被夹住了吗？！可恶、可恶！！还没咬断你的脖子呢，不准逃啊！！）'
+                  : '（哼……只是让你侥幸啃走一点碎肉而已。下一局就把你的手指和牌一起剁碎！！）',
+          });
+        }
       }
       return;
     }
