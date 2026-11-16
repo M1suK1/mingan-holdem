@@ -49,6 +49,20 @@ export function formatCardShort(card: Card): string {
   return `${formatSuitLabel(card.suit)}${formatRank(card.rank)}`;
 }
 
+export function isCardTamperedFromOriginal(card: Card, originalCard?: Card): boolean {
+  if (!originalCard) return false;
+  return (
+    card.rank !== originalCard.rank ||
+    card.suit !== originalCard.suit ||
+    Boolean(card.isBlank) !== Boolean(originalCard.isBlank)
+  );
+}
+
+export function formatTamperLabel(card: Card, originalCard?: Card): string | undefined {
+  if (!originalCard || !isCardTamperedFromOriginal(card, originalCard)) return undefined;
+  return `原:${formatSuitLabel(originalCard.suit)}${formatRank(originalCard.rank)}`;
+}
+
 export function otherPlayer(id: PlayerId): PlayerId {
   return id === 'human' ? 'ai' : 'human';
 }
@@ -225,6 +239,7 @@ export function getRemainingSuitStats(state: GameState, viewerId: PlayerId = 'hu
   let seenBlack = 0;
   let seenPink = 0;
   const countCard = (c: Card) => {
+    if (c.isBlank) return;
     if (c.suit === 'B') seenBlack += 1;
     else seenPink += 1;
   };

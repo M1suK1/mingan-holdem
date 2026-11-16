@@ -24,10 +24,12 @@ import {
   applyAction,
   createDeck,
   createInitialState,
+  formatTamperLabel,
   getVisibleBoardCard,
   getVisibleHandCard,
   getVisiblePlayerChips,
   isActionLegal,
+  isCardTamperedFromOriginal,
 } from '../src/engine/gameEngine.ts';
 import { evaluateSevenCards } from '../src/engine/evaluator.ts';
 import { getSkillById, getSkillGroup } from '../src/engine/skillPool.ts';
@@ -241,6 +243,15 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(afterErase.players.ai.hand[0].card.isBlank, true);
     assert.equal(afterErase.players.ai.hand[0].originalCard?.rank, 14);
     assert.deepEqual(afterErase.players.ai.hand[0].tamperedBy, ['null-erase']);
+    assert.equal(
+      isCardTamperedFromOriginal(afterErase.players.ai.hand[0].card, afterErase.players.ai.hand[0].originalCard),
+      true
+    );
+    assert.equal(
+      formatTamperLabel(afterErase.players.ai.hand[0].card, afterErase.players.ai.hand[0].originalCard),
+      '原:粉A'
+    );
+    assert.equal(formatTamperLabel(afterErase.players.ai.hand[1].card, afterErase.players.ai.hand[1].originalCard), undefined);
     assert.equal(afterErase.usedHackThisTurn, true);
     assert.equal(afterErase.usedProtocolSkillThisHand, false);
     // Opponent still sees unmodified 14P!
@@ -250,6 +261,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     // AI swaps that erased card into board[0] -> human sees 14P on board, but real card is blanked!
     const afterSwap = applyAction(afterErase, { type: 'swap', handIndex: 0, boardIndex: 0 });
     assert.equal(afterSwap.board[0].card.isBlank, true);
+    assert.equal(formatTamperLabel(afterSwap.board[0].card, afterSwap.board[0].originalCard), '原:粉A');
     assert.equal(getVisibleBoardCard(afterSwap.board[0], 'human', false).isBlank, undefined);
     assert.equal(getVisibleBoardCard(afterSwap.board[0], 'human', false).rank, 14);
 

@@ -26,6 +26,7 @@ import {
   createInitialState,
   formatRank,
   formatSuitLabel,
+  formatTamperLabel,
   getBetDiff,
   getCurrentRaiseCap,
   getEffectiveHackCost,
@@ -3612,12 +3613,9 @@ export function App() {
                   !alreadyScanned &&
                   human.chips >= getEffectiveScanCost(state, 'human');
 
-                const aiTamperLabel =
-                  revealAllAi &&
-                  hc.originalCard &&
-                  (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
-                    ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
-                    : undefined;
+                const aiTamperLabel = revealAllAi
+                  ? formatTamperLabel(hc.card, hc.originalCard)
+                  : undefined;
 
                 return (
                   <CyberCard3D
@@ -3690,11 +3688,8 @@ export function App() {
                 human.chips >= getEffectiveScanCost(state, 'human');
 
               const boardTamperLabel =
-                (slot.swappedBy === 'human' || revealAllAi) &&
-                slot.originalCard &&
-                (slot.card.rank !== slot.originalCard.rank ||
-                  slot.card.suit !== slot.originalCard.suit)
-                  ? `原:${formatSuitLabel(slot.originalCard.suit)}${formatRank(slot.originalCard.rank)}`
+                slot.swappedBy === 'human' || revealAllAi
+                  ? formatTamperLabel(slot.card, slot.originalCard)
                   : undefined;
 
               const isPeeked = isHidden && state.peekedBoardIndices.includes(slot.index);
@@ -3864,11 +3859,7 @@ export function App() {
                   const isSwappingHidden = Boolean(
                     swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
                   );
-                  const tamperLabel =
-                    hc.originalCard &&
-                    (hc.card.rank !== hc.originalCard.rank || hc.card.suit !== hc.originalCard.suit)
-                      ? `原:${formatSuitLabel(hc.originalCard.suit)}${formatRank(hc.originalCard.rank)}`
-                      : undefined;
+                  const tamperLabel = formatTamperLabel(hc.card, hc.originalCard);
 
                   return (
                     <CyberCard3D

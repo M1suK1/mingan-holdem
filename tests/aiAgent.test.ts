@@ -212,4 +212,68 @@ describe('aiAgent: legality and full-hand self-play', () => {
       assert.equal(st.players.human.chips + st.players.ai.chips, DEFAULT_CONFIG.startingChips * 2);
     }
   });
+
+  it('Fulan AI immediately swaps her NULL-erased card onto a hidden board slot and never strands blank cards in hand', async () => {
+    const base = createInitialState({
+      opponentName: '芙兰',
+      chips: { human: 750, ai: 750 },
+      aiSpecialCheatSkill: 'null-erase',
+    });
+    const afterErase = applyAction(
+      { ...base, currentTurn: 'ai' },
+      { type: 'hack', handIndex: 0, skill: 'null-erase' }
+    );
+    assert.equal(afterErase.lastAction?.type, 'hack');
+    assert.equal(afterErase.players.ai.hand[0].card.isBlank, true);
+
+    const fulanAi = new LocalAiAgent(
+      'ai',
+      'balanced',
+      FALLBACK_CONTRACT_CHARACTER,
+      () => 0.1,
+      'standard',
+      'trap',
+      'phantom-hacker'
+    );
+    const followUp = await fulanAi.decide(afterErase);
+    assert.equal(followUp.action.type, 'swap', 'AI must swap out the NULL card right after erasing it');
+    if (followUp.action.type === 'swap') {
+      assert.equal(followUp.action.handIndex, 0);
+    }
+
+    // Multi-hand check: whenever Fulan erases a card, she swaps it onto the board before ending her turn
+    const humanBot = new LocalAiAgent('human', 'balanced', FALLBACK_CONTRACT_CHARACTER, Math.random, 'standard');
+    const fulanBot = new LocalAiAgent(
+      'ai',
+      'balanced',
+      FALLBACK_CONTRACT_CHARACTER,
+      Math.random,
+      'standard',
+      'trap',
+      'phantom-hacker'
+    );
+    for (let h = 0; h < 6; h += 1) {
+      let st = createInitialState({
+        opponentName: '芙兰',
+        chips: { human: 750, ai: 750 },
+        aiSpecialCheatSkill: 'null-erase',
+      });
+      let guard = 0;
+      while (st.phase !== 'showdown') {
+        guard += 1;
+        assert.ok(guard < 120);
+        const dec = await (st.currentTurn === 'human' ? humanBot : fulanBot).decide(st);
+        assert.ok(isActionLegal(st, dec.action));
+        st = applyAction(st, dec.action);
+        // Once Fulan yields turn back to human (not mid-hack), she must not keep an unswapped blank card in hand
+        if (st.currentTurn === 'human' && st.phase !== 'showdown') {
+          assert.equal(
+            st.players.ai.hand.some((hc) => hc.card.isBlank),
+            false,
+            'Fulan should swap her NULL card out onto the board before yielding turn'
+          );
+        }
+      }
+    }
+  });
 });

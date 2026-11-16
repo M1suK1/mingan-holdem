@@ -51,26 +51,28 @@ export function resolveEffectiveAiDifficulty(
 }
 
 function scoreCurrentPartialHand(hand: Card[], openBoard: Card[]): number {
-  const combined = [...hand, ...openBoard];
+  const validHand = hand.filter((c) => !c.isBlank);
+  const validBoard = openBoard.filter((c) => !c.isBlank);
+  const combined = [...validHand, ...validBoard];
   if (combined.length >= 5) {
     const evalRes = evaluateSevenCards(combined);
     return Math.min(1, 0.24 + evalRes.category * 0.1 + (evalRes.tiebreakers[0] ?? 7) / 140);
   }
-  if (hand.length !== 3) {
-    return Math.min(0.95, Math.max(0.15, scoreCardPotential(hand, openBoard) / 500));
+  if (validHand.length !== 3 || validBoard.length !== openBoard.length) {
+    return Math.min(0.95, Math.max(0.1, scoreCardPotential(validHand, validBoard) / 500));
   }
-  const three = evaluateThreeCards(hand);
+  const three = evaluateThreeCards(validHand);
   let strength = 0.2 + three.category * 0.28 + (three.tiebreakers[0] ?? 7) / 45;
   const suitCounts = new Map<string, number>();
   for (const c of combined) {
     suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
   }
-  const maxSuit = Math.max(...suitCounts.values());
+  const maxSuit = Math.max(0, ...suitCounts.values());
   if (maxSuit >= 4) strength += 0.08;
   else if (maxSuit === 3) strength += 0.03;
 
-  for (const h of hand) {
-    if (openBoard.some((b) => b.rank === h.rank)) {
+  for (const h of validHand) {
+    if (validBoard.some((b) => b.rank === h.rank)) {
       strength += 0.18;
     }
   }
@@ -177,7 +179,10 @@ function estimateHandEquity(
 }
 
 function scoreCardPotential(hand: Card[], openBoard: Card[]): number {
-  const combined = [...hand, ...openBoard];
+  const validHand = hand.filter((c) => !c.isBlank);
+  const validBoard = openBoard.filter((c) => !c.isBlank);
+  const combined = [...validHand, ...validBoard];
+  if (combined.length === 0) return 0;
   if (combined.length >= 5) {
     const res = evaluateSevenCards(combined);
     return res.category * 100 + (res.tiebreakers[0] ?? 0) * 2 + (res.tiebreakers[1] ?? 0) * 0.1;
@@ -213,7 +218,7 @@ function scoreCardPotential(hand: Card[], openBoard: Card[]): number {
   else if (bestRun === 4) score += 85;
   else if (bestRun === 3) score += 25;
 
-  const high = Math.max(...hand.map((c) => c.rank));
+  const high = validHand.length > 0 ? Math.max(...validHand.map((c) => c.rank)) : 0;
   return score + high;
 }
 
@@ -314,9 +319,21 @@ function pickSpecialNullEraseAction(
 ): GameAction | null {
   if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'null-erase') return null;
   if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
+  if (state.phase === 'river') return null;
 
   const actor = state.players[actorId];
-  if (actor.chips < 170) return null;
+  if (actor.swapCount >= 2) return null;
+  // Wait until any existing NULL card in hand has been swapped onto the board
+  if (actor.hand.some((hc) => hc.card.isBlank)) return null;
+
+  const swappableHidden = state.board.filter(
+    (b) => !b.isOpen && !state.frozenBoardIndices?.includes(b.index)
+  );
+  if (swappableHidden.length === 0) return null;
+
+  const hackCost = getEffectiveHackCost(state, actorId, 'null-erase');
+  const swapFee = getNextSwapFee(state, actorId);
+  if (actor.chips < Math.max(150, hackCost + swapFee + 20)) return null;
 
   const openBoard = state.board
     .filter((b) => b.isOpen)
@@ -365,8 +382,12 @@ function pickBestSwappableHandIndex(
     .filter((b) => b.isOpen)
     .map((b) => getVisibleBoardCard(b, actorId, false));
 
-  // 潜行改牌流派 / 信息抹除设陷：若手上已有改过的明牌且仍有未锁定槽位，优先将其换入公共牌池以欺骗玩家视线
+  // 潜行改牌流派 / 信息抹除设陷：若手上已有 NULL 废牌或改过的明牌且仍有未锁定槽位，优先将其换入公共牌池以欺骗玩家视线
   if (cheatProfile === 'phantom-hacker' || state.aiSpecialCheatSkill === 'null-erase') {
+    const blankIdx = actor.hand.findIndex(
+      (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.card.isBlank)
+    );
+    if (blankIdx >= 0) return blankIdx;
     const tamperedIdx = actor.hand.findIndex(
       (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
     );
@@ -475,8 +496,14 @@ function pickSmartScanAction(
   return isActionLegal(state, act) ? act : null;
 }
 
-function pickRandomHiddenBoardIndex(state: GameState, rng: () => number): number | null {
-  const hidden = state.board.filter((b) => !b.isOpen).map((b) => b.index);
+function pickRandomHiddenBoardIndex(
+  state: GameState,
+  rng: () => number,
+  actorId: PlayerId = 'ai'
+): number | null {
+  const hidden = state.board
+    .filter((b) => !b.isOpen && !(actorId === 'ai' && state.frozenBoardIndices?.includes(b.index)))
+    .map((b) => b.index);
   if (hidden.length === 0) return null;
   return hidden[Math.floor(rng() * hidden.length)];
 }
@@ -576,6 +603,68 @@ export class LocalAiAgent implements OpponentAgent {
     const telemetry = serializeStateForLlm(state);
     const lastType = state.lastAction?.type;
 
+    // 0. 信息抹除 / 潜行设陷优先脱手：手上有已抹除的 NULL 牌或潜行改过的明牌时，优先换入未翻开公共节点（即使刚执行完 hack/scan 也应立刻打出）
+    if (
+      diff === 0 &&
+      state.phase !== 'river' &&
+      hiddenCount > 0 &&
+      actor.swapCount < 2
+    ) {
+      const boardIdx = pickRandomHiddenBoardIndex(state, this.rng, this.playerId);
+      const swapFee = getNextSwapFee(state, this.playerId);
+      const blankHandIdx = actor.hand.findIndex(
+        (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.card.isBlank)
+      );
+      if (blankHandIdx >= 0 && boardIdx !== null && actor.chips >= swapFee) {
+        const nullSwap: GameAction = {
+          type: 'swap',
+          handIndex: blankHandIdx,
+          boardIndex: boardIdx,
+        };
+        if (isActionLegal(state, nullSwap)) {
+          return {
+            action: nullSwap,
+            dialogue: buildDialogue(
+              speaker,
+              'thinking',
+              `（嘻嘻……把这张 NULL 毒饵丢进节点 #${boardIdx + 1}！快踩上来吧，踩空的时候我就能咬断你的脖子了……！）`,
+              telemetry,
+              'smile'
+            ),
+          };
+        }
+      }
+
+      if (
+        (this.cheatProfile === 'phantom-hacker' || state.aiSpecialCheatSkill === 'null-erase') &&
+        boardIdx !== null &&
+        actor.chips >= swapFee + 40
+      ) {
+        const tamperedHandIdx = actor.hand.findIndex(
+          (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
+        );
+        if (tamperedHandIdx >= 0) {
+          const trapSwap: GameAction = {
+            type: 'swap',
+            handIndex: tamperedHandIdx,
+            boardIndex: boardIdx,
+          };
+          if (isActionLegal(state, trapSwap)) {
+            return {
+              action: trapSwap,
+              dialogue: buildDialogue(
+                speaker,
+                'thinking',
+                `投入 ${swapFee} 算力重构节点 #${boardIdx + 1}——真正的好牌该藏在私有扇区里。`,
+                telemetry,
+                'smile'
+              ),
+            };
+          }
+        }
+      }
+    }
+
     // 1. Smart Scan & Profile-Driven Hacker Skill (non-consuming)
     if (lastType !== 'hack' && lastType !== 'scan') {
       const crownAceAct = pickSpecialCrownAceAction(state, this.playerId);
@@ -625,40 +714,6 @@ export class LocalAiAgent implements OpponentAgent {
             'angry'
           ),
         };
-      }
-
-      // 潜行改牌流派 / 信息抹除设陷：如果手上已有篡改过的明牌且仍有未翻开公共槽，优先将其换入公共牌池制造视野陷阱！
-      if (
-        (this.cheatProfile === 'phantom-hacker' || state.aiSpecialCheatSkill === 'null-erase') &&
-        diff === 0 &&
-        state.phase !== 'river' &&
-        hiddenCount > 0 &&
-        actor.swapCount < 2
-      ) {
-        const tamperedHandIdx = actor.hand.findIndex(
-          (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
-        );
-        const boardIdx = pickRandomHiddenBoardIndex(state, this.rng);
-        const swapFee = getNextSwapFee(state, this.playerId);
-        if (tamperedHandIdx >= 0 && boardIdx !== null && actor.chips >= swapFee + 40) {
-          const trapSwap: GameAction = {
-            type: 'swap',
-            handIndex: tamperedHandIdx,
-            boardIndex: boardIdx,
-          };
-          if (isActionLegal(state, trapSwap)) {
-            return {
-              action: trapSwap,
-              dialogue: buildDialogue(
-                speaker,
-                'thinking',
-                `投入 ${swapFee} 算力重构节点 #${boardIdx + 1}——真正的好牌该藏在私有扇区里。`,
-                telemetry,
-                'smile'
-              ),
-            };
-          }
-        }
       }
 
       if (diff === 0 && actor.chips >= 200) {
@@ -865,7 +920,7 @@ export class LocalAiAgent implements OpponentAgent {
       this.difficulty,
       this.cheatProfile
     );
-    const boardIdx = pickRandomHiddenBoardIndex(state, this.rng);
+    const boardIdx = pickRandomHiddenBoardIndex(state, this.rng, this.playerId);
     const swapFee = getNextSwapFee(state, this.playerId);
     const canSwap =
       hiddenCount > 0 &&

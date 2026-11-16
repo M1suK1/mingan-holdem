@@ -996,7 +996,7 @@ export function enumerateLegalActionHints(state: GameState): string[] {
   // Optional hacker / scan skills when diff === 0
   if (!state.usedHackThisTurn) {
     const openHandIdx = ai.hand
-      .map((h, i) => (h.visibility === 'open' ? i : -1))
+      .map((h, i) => (h.visibility === 'open' && !h.card.isBlank ? i : -1))
       .filter((i) => i >= 0);
     const candidateSkills: HackSkillId[] =
       state.aiSpecialCheatSkill === 'crown-ace'
