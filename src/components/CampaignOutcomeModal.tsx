@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { AlertTriangle, Check, ShieldAlert, Skull, Sparkles, UserCheck, Zap } from 'lucide-react';
 import type { CampaignState } from '../engine/types.ts';
 import { getActiveDisguiseEntity } from '../engine/campaign.ts';
-import { getSkillById } from '../engine/skillPool.ts';
+import { MAX_EXTRA_SKILLS, getSkillById, needsSkillReplacement } from '../engine/skillPool.ts';
 
 interface CampaignOutcomeModalProps {
   campaign: CampaignState;
   onSelectDisguise: (entityId: string) => void;
-  onClaimLootSkill: (skillId?: string) => void;
+  onClaimLootSkill: (skillId?: string, replaceSlotIndex?: number) => void;
   onContinueAfterEscape: () => void;
   onRestartCampaign: () => void;
   onCloseOptional?: () => void;
@@ -24,6 +24,7 @@ export default function CampaignOutcomeModal({
   const [selectedSkillId, setSelectedSkillId] = useState<string>(
     campaign.pendingLoot?.skillChoices[0] ?? ''
   );
+  const [replaceSlotIndex, setReplaceSlotIndex] = useState<number>(0);
   const [selectedEntityId, setSelectedEntityId] = useState<string>(
     campaign.capturedEntities[0]?.id ?? campaign.activeDisguiseId ?? campaign.coreEntity.id
   );
@@ -32,6 +33,8 @@ export default function CampaignOutcomeModal({
 
   if (campaign.status === 'loot-select' && campaign.pendingLoot) {
     const loot = campaign.pendingLoot;
+    const effectivePickedSkill = selectedSkillId || loot.skillChoices[0] || '';
+    const mustReplaceSkill = needsSkillReplacement(campaign.acquiredSkills, effectivePickedSkill);
     return (
       <div
         className="cyber-modal-scrim"
@@ -75,7 +78,7 @@ export default function CampaignOutcomeModal({
 
             <div className="cyber-panel-box">
               <strong style={{ fontSize: 13, color: 'var(--neon-pink-soft)' }}>
-                2. 从追捕者技能池挑选 1 项协议技能（后续版本将陆续填充实装效果）
+                2. 从追捕者技能池挑选 1 项协议技能（额外技能上限 {campaign.acquiredSkills.length}/{MAX_EXTRA_SKILLS}）
               </strong>
               {loot.skillChoices.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -114,14 +117,54 @@ export default function CampaignOutcomeModal({
               )}
             </div>
 
+            {mustReplaceSkill && (
+              <div className="cyber-panel-box">
+                <strong style={{ fontSize: 13, color: 'var(--neon-amber)' }}>
+                  3. 额外技能槽位已满 (3/3) — 选择要被替换的旧技能
+                </strong>
+                <div className="lc-skill-loot-grid">
+                  {campaign.acquiredSkills.slice(0, MAX_EXTRA_SKILLS).map((oldId, rIdx) => {
+                    const oldSk = getSkillById(oldId);
+                    const isTarget = replaceSlotIndex === rIdx;
+                    return (
+                      <button
+                        key={`${oldId}-${rIdx}`}
+                        id={`campaign-replace-slot-${rIdx}`}
+                        type="button"
+                        className={`lc-skill-loot-card ${isTarget ? 'selected' : ''}`}
+                        onClick={() => setReplaceSlotIndex(rIdx)}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <strong>{oldSk?.name ?? oldId}</strong>
+                          <span className={`cyber-badge ${isTarget ? 'pink' : 'cyan'}`}>
+                            {isTarget ? '将被替换' : `槽位 #${rIdx + 1}`}
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          {oldSk?.summary ?? ''}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <button
               id="campaign-btn-confirm-loot"
               type="button"
               className="cyber-cmd-btn primary-cyan"
-              onClick={() => onClaimLootSkill(selectedSkillId || loot.skillChoices[0])}
+              onClick={() =>
+                onClaimLootSkill(
+                  effectivePickedSkill || undefined,
+                  mustReplaceSkill ? replaceSlotIndex : undefined
+                )
+              }
             >
               <Check size={15} aria-hidden="true" />
-              确认收缴虚拟实体与所选技能，准备下一轮反追捕
+              {mustReplaceSkill
+                ? `确认收缴实体并替换槽位 #${replaceSlotIndex + 1}`
+                : '确认收缴虚拟实体与所选技能，准备下一轮反追捕'}
             </button>
           </div>
         </div>

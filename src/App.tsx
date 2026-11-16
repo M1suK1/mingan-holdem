@@ -18,6 +18,7 @@ import {
   type GameConfig,
   type GameState,
   type HackSkillId,
+  type PlayerId,
 } from './engine/types.ts';
 import {
   applyAction,
@@ -66,10 +67,14 @@ import {
   claimVictoryLoot,
 } from './engine/campaign.ts';
 import {
+  MAX_EXTRA_SKILLS,
   PLAY_STYLE_META,
   CHEAT_PROFILE_META,
+  SKILL_POOL_REGISTRY,
   buildPursuerDossier,
+  equipExtraSkill,
   getSkillById,
+  needsSkillReplacement,
   resolvePursuerStrategyProfile,
 } from './engine/skillPool.ts';
 import {
@@ -128,6 +133,27 @@ import {
   type SoundSettings,
 } from './engine/soundEngine.ts';
 import {
+  DEBUG_CHEAT_COMMANDS,
+  applyDebugChipsOverride,
+  applyDebugLoseHand,
+  applyDebugPresetHand,
+  applyDebugWinHand,
+  parseDebugCommand,
+} from './engine/debugCmd.ts';
+import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
+import {
+  ESCAPE_ROUTE_NODES,
+  canEnterEscapeNode,
+  claimEscapeNodeSkill,
+  completeEscapeTransition,
+  loadEscapeProgress,
+  markEscapeNodeCleared,
+  markEscapeWallRevealed,
+  resetEscapeProgress,
+  saveEscapeProgress,
+  type EscapeMapProgress,
+} from './engine/escapeMap.ts';
+import {
   TUTORIAL_STAGES,
   createTutorialStageState,
   decideTutorialOpponentAction,
@@ -136,8 +162,18 @@ import {
   loadTutorialCompleted,
   saveTutorialCompleted,
 } from './engine/tutorial.ts';
+import {
+  SEC00_MONOLOGUE_STEPS,
+  createSec00TutorialState,
+  getSec00Capabilities,
+  getSec00Guidance,
+  isSec00ActionAllowed,
+  pickSec00AiAction,
+} from './engine/sec00Tutorial.ts';
+import { resolveEcho0Sprite } from './engine/storyCharacters.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import TutorialOverlayBar from './components/TutorialOverlayBar.tsx';
+import Sec00TutorialOverlay from './components/Sec00TutorialOverlay.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
 import {
@@ -172,15 +208,19 @@ const CampaignOutcomeModal = lazy(() => import('./components/CampaignOutcomeModa
 const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.tsx'));
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
 const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
+const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.tsx'));
+const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
+const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'tutorial' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
+  keyName: 'tutorial' | 'cmd' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
   { id: 'menu-tutorial', keyName: 'tutorial', label: '新手教程 (6关)', note: '无黑客换牌翻牌 -> 加注跟注 -> 双花色同花 -> 篡改 -> 扫描封印 -> 实战', icon: 'rules' },
+  { id: 'menu-cmd', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
   { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
   { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
@@ -286,6 +326,7 @@ const FIXED_CRUSHED_DOCK_H = 28;
 type ActiveModal =
   | { type: 'none' }
   | { type: 'settings-menu' }
+  | { type: 'cmd' }
   | { type: 'p2p' }
   | { type: 'contracts' }
   | { type: 'llm' }
@@ -343,13 +384,54 @@ export function App() {
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
   const [campaign, setCampaign] = useState(() => loadCampaignState());
-  const [state, setState] = useState<GameState>(() =>
-    createInitialState({
-      config: DEFAULT_CONFIG,
-      opponentName: FALLBACK_CONTRACT_CHARACTER.name,
-      playerAcquiredSkills: loadCampaignState().acquiredSkills,
-    })
-  );
+  const [escapeProgress, setEscapeProgress] = useState<EscapeMapProgress>(() => loadEscapeProgress());
+  const [viewMode, setViewMode] = useState<'arena' | 'escape-map'>('arena');
+  const [activeEscapeNodeIndex, setActiveEscapeNodeIndex] = useState<number | null>(() => {
+    const initEsc = loadEscapeProgress();
+    return initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+  });
+  const escapeProgressRef = useRef(escapeProgress);
+  escapeProgressRef.current = escapeProgress;
+  const activeEscapeNodeRef = useRef(activeEscapeNodeIndex);
+  activeEscapeNodeRef.current = activeEscapeNodeIndex;
+  const escapeClearQueuedForMatchRef = useRef(false);
+
+  const [sec00GuideActive, setSec00GuideActive] = useState<boolean>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0);
+  });
+  const [sec00IntroIndex, setSec00IntroIndex] = useState<number | null>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0) ? 0 : null;
+  });
+  const sec00GuideActiveRef = useRef(sec00GuideActive);
+  sec00GuideActiveRef.current = sec00GuideActive;
+  const sec00IntroIndexRef = useRef(sec00IntroIndex);
+  sec00IntroIndexRef.current = sec00IntroIndex;
+
+  const [state, setState] = useState<GameState>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    if (initNodeIdx === 0 && !initEsc.clearedIndices.includes(0)) {
+      return createSec00TutorialState();
+    }
+    const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    return createInitialState({
+      config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
+      chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
+      opponentName: initNode.opponentName,
+      opponentSignatureSkill: initNode.signatureSkillId,
+      playerAcquiredSkills: initEsc.equippedSkills,
+    });
+  });
+  const [pendingSkillClaim, setPendingSkillClaim] = useState<{
+    title: string;
+    subtitle: string;
+    choices: string[];
+    clearedNodeIndex?: number;
+  } | null>(null);
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
@@ -427,6 +509,13 @@ export function App() {
   tutorialStageRef.current = tutorialStageIndex;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
+  const [cmdLogs, setCmdLogs] = useState<DebugCmdLogEntry[]>([
+    {
+      id: 'cmd-init',
+      tone: 'info',
+      text: 'BLACK-DOMAIN DEBUG CONSOLE READY // 输入 help 查看作弊码，输入 win 直接过关（支持按 ~ 或 F9 唤起）',
+    },
+  ]);
 
   const dossier = useMemo(
     () => buildPursuerDossier(character, campaign.roundIndex),
@@ -441,6 +530,10 @@ export function App() {
   useEffect(() => {
     saveCampaignState(campaign);
   }, [campaign]);
+
+  useEffect(() => {
+    saveEscapeProgress(escapeProgress);
+  }, [escapeProgress]);
 
   const latestCampaignRef = useRef(campaign);
   latestCampaignRef.current = campaign;
@@ -905,15 +998,23 @@ export function App() {
   }, []);
 
   // Chat Stack & FIFO Bubble Queue
-  const [messages, setMessages] = useState<ChatItem[]>([
-    {
-      id: 'init-msg-1',
-      sender: 'opponent',
-      speaker: FALLBACK_CONTRACT_CHARACTER.name,
-      text: '协议连接建立。直接拖牌互换或点击暗牌翻开，让我看看你的牌序。',
-      crushed: false,
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatItem[]>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    if (initNodeIdx === 0 && !initEsc.clearedIndices.includes(0)) {
+      return [];
+    }
+    const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    return [
+      {
+        id: 'init-msg-1',
+        sender: 'opponent',
+        speaker: initNode.opponentName,
+        text: `已接入 ${initNode.code} · ${initNode.title}。亮出你的牌序吧。`,
+        crushed: false,
+      },
+    ];
+  });
   const [crushingActive, setCrushingActive] = useState(false);
   const [historyOffset, setHistoryOffset] = useState(0);
   const [enteringId, setEnteringId] = useState<string | null>(null);
@@ -993,13 +1094,15 @@ export function App() {
         const full = await loadContractCharacterByFile(preferred.fileName);
         if (cancelled) return;
         setCharacter(full);
-        setState((prev) => ({
-          ...prev,
-          players: {
-            ...prev.players,
-            ai: { ...prev.players.ai, name: full.name },
-          },
-        }));
+        if (activeEscapeNodeRef.current === null) {
+          setState((prev) => ({
+            ...prev,
+            players: {
+              ...prev.players,
+              ai: { ...prev.players.ai, name: full.name },
+            },
+          }));
+        }
       }
     })();
     return () => {
@@ -1294,17 +1397,82 @@ export function App() {
         isOwnPrivate: evt.actor === 'human',
       },
     });
-
-    const timer = window.setTimeout(() => {
-      setSwapFlight((curr) => (curr?.id === evt.id ? null : curr));
-    }, 580);
-
-    return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
+
+  useEffect(() => {
+    if (!swapFlight) return;
+    const activeId = swapFlight.id;
+    const timer = window.setTimeout(() => {
+      setSwapFlight((curr) => (curr?.id === activeId ? null : curr));
+    }, 580);
+    return () => window.clearTimeout(timer);
+  }, [swapFlight?.id]);
+
+  useEffect(() => {
+    if (state.phase === 'showdown' || pendingSkillClaim) {
+      setSwapFlight(null);
+    }
+  }, [state.phase, pendingSkillClaim]);
 
   // AI & Tutorial Turn Scheduler (Skipped during P2P friend multiplayer!)
   useEffect(() => {
     if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (sec00GuideActive && sec00IntroIndex !== null) return;
+
+    if (sec00GuideActive) {
+      let cancelled = false;
+      setIsAiThinking(true);
+      const timer = window.setTimeout(() => {
+        try {
+          const snapshot = latestStateRef.current;
+          if (
+            cancelled ||
+            !sec00GuideActiveRef.current ||
+            snapshot.phase === 'showdown' ||
+            snapshot.currentTurn !== 'ai'
+          ) {
+            return;
+          }
+          const act = pickSec00AiAction(snapshot);
+          if (act) {
+            setState((prev) => {
+              if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
+              return applyAction(prev, act);
+            });
+            if (act.type === 'hack') {
+              setActiveExpression('smile');
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（故意把篡改信号漏得这么明显……只要扫一眼就能抓到破绽。快一点，来击穿我。）',
+              });
+            } else if (act.type === 'flip') {
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（比牌型我已经输了……刚好。借这一局，把「那份东西」写进他的实体壳层里。）',
+              });
+            } else if (act.type === 'raise') {
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（信号极度不稳……追踪节点正在向这片野区合拢……必须……逃出去。）',
+              });
+            }
+          }
+        } finally {
+          if (!cancelled) setIsAiThinking(false);
+        }
+      }, 480);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+        setIsAiThinking(false);
+      };
+    }
 
     if (tutorialActive) {
       let cancelled = false;
@@ -1371,7 +1539,7 @@ export function App() {
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
           setActiveExpression(llmDecision.expression);
-          enqueueOpponentSegments(char.name, llmDecision.segments);
+          enqueueOpponentSegments(snapshot.players.ai.name, llmDecision.segments);
           setState((prev) => {
             if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
             return applyAction(prev, llmDecision.action);
@@ -1403,13 +1571,13 @@ export function App() {
           if (resetEpochRef.current !== epoch) return;
           if (chatRes.logEntry) setLlmLogs((prev) => [chatRes.logEntry!, ...prev].slice(0, 40));
           setActiveExpression(chatRes.expression);
-          enqueueOpponentSegments(char.name, chatRes.segments);
+          enqueueOpponentSegments(snapshot.players.ai.name, chatRes.segments);
         } else {
           setActiveExpression(decision.dialogue.expression);
           if (decision.action.type !== 'hack') {
             enqueueTask({
               kind: 'opponent',
-              speaker: char.name,
+              speaker: snapshot.players.ai.name,
               text: decision.dialogue.text,
             });
           }
@@ -1430,6 +1598,10 @@ export function App() {
     state.justCalledThisTurn,
     state.actionHistory.length,
     state.config.aiDelayMs,
+    sec00GuideActive,
+    sec00IntroIndex,
+    tutorialActive,
+    isP2pSessionActive,
     enqueueTask,
     enqueueOpponentSegments,
     buildChatHistorySnapshot,
@@ -1491,17 +1663,21 @@ export function App() {
     if (evt.caught) {
       pushToast(
         evt.actor === 'human' ? 'success' : 'error',
-        evt.actor === 'human' ? '扫描抓获对端篡改！' : `${character.name} 扫描抓获了我方篡改！`,
+        evt.actor === 'human'
+          ? '扫描抓获对端篡改！'
+          : `${state.players.ai.name} 扫描抓获了我方篡改！`,
         evt.label
       );
     } else {
       pushToast(
         'info',
-        evt.actor === 'human' ? '扫描核验完成：未被篡改' : `${character.name} 扫描未发现异常`,
+        evt.actor === 'human'
+          ? '扫描核验完成：未被篡改'
+          : `${state.players.ai.name} 扫描未发现异常`,
         `已预支 ${evt.amount ?? state.config.scanCost} 算力至奖池`
       );
     }
-  }, [state.lastAction, state.config.scanCost, character.name, pushToast]);
+  }, [state.lastAction, state.config.scanCost, state.players.ai.name, pushToast]);
 
   // Showdown reaction + Round Loss Mosaic Flicker (Both Player & Opponent!)
   useEffect(() => {
@@ -1591,15 +1767,57 @@ export function App() {
           enqueueOpponentSegments(currChar.name, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
         });
       } else {
-        enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+        enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
       }
       return;
     }
 
-    enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+    if (!sec00GuideActiveRef.current || state.players.ai.chips > 0) {
+      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+    }
 
-    // 整场算力归零：触发黑域协议虚拟实体夺取 / 诱饵逃脱 / 失败结局
+    // 整场算力归零：优先处理逃亡路线图节点循环，否则走原契约追捕流程
     if (state.players.ai.chips === 0) {
+      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+        const clearedIdx = activeEscapeNodeRef.current;
+        const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
+        if (!escapeClearQueuedForMatchRef.current) {
+          escapeClearQueuedForMatchRef.current = true;
+          if (sec00GuideActiveRef.current) {
+            setActiveExpression('surprise');
+            enqueueTask({
+              kind: 'opponent',
+              speaker: clearedNode?.opponentName ?? '匿名终端 [UNKNOWN_0x00]',
+              text: '算力归零。按黑域协议，这具虚拟实体归你了。……别回头，带上它走。',
+            });
+          }
+          const hasSkillLoot = Boolean(clearedNode?.rewardSkillChoices?.length);
+          pushToast(
+            'success',
+            `突破 ${clearedNode?.code ?? '节点'}：${clearedNode?.title ?? ''}`,
+            hasSkillLoot
+              ? '正在提取敌方协议技能，选择后即切回逃亡路线图...'
+              : '正在切回逃亡路线图，执行围堵转向钻缝撤离...'
+          );
+          scheduleTimeout(() => {
+            const latest = latestStateRef.current;
+            if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+            if (hasSkillLoot && clearedNode?.rewardSkillChoices) {
+              setPendingSkillClaim({
+                title: `击溃 ${clearedNode.opponentName} · 协议技能拆解`,
+                subtitle: `${clearedNode.code} ${clearedNode.title} 已突破！挑选 1 项额外技能（最多装备 ${MAX_EXTRA_SKILLS} 项，满额可替换）`,
+                choices: clearedNode.rewardSkillChoices,
+                clearedNodeIndex: clearedIdx,
+              });
+            } else {
+              setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
+              setViewMode('escape-map');
+            }
+          }, 1150);
+        }
+        return;
+      }
+
       const winnerCamp = latestCampaignRef.current;
       const currDossier = latestDossierRef.current;
       const currChar = latestCharRef.current;
@@ -1629,6 +1847,15 @@ export function App() {
         }
       });
     } else if (state.players.human.chips === 0) {
+      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+        pushToast(
+          'error',
+          '算力归零 · 当前节点突围受阻',
+          '点击右侧「算力归零！重开」或返回逃亡路线图重新挑战'
+        );
+        return;
+      }
+
       const loserCamp = latestCampaignRef.current;
       const currDossier = latestDossierRef.current;
       const currChar = latestCharRef.current;
@@ -1723,6 +1950,15 @@ export function App() {
   };
 
   const executeHumanAction = (action: GameAction) => {
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      if (!isSec00ActionAllowed(latest, action)) {
+        const g = getSec00Guidance(latest, { selectedHandIndex, scanMode, showRaiseTiers });
+        pushToast('info', '请按当前 SEC-00 教学步骤操作', g.instruction);
+        return;
+      }
+    }
     cancelHoldHalfRaise();
     setSelectedHandIndex(null);
     setDraggedHandIndex(null);
@@ -1762,6 +1998,16 @@ export function App() {
 
   const handleExecuteHack = (skill: HackSkillId) => {
     if (tutorialActive && !tutorialCaps.allowHack) return;
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      const caps = getSec00Capabilities(latest);
+      if (!caps.allowHack) {
+        const g = getSec00Guidance(latest, { selectedHandIndex, scanMode, showRaiseTiers });
+        pushToast('info', '黑客技尚未解锁', g.instruction);
+        return;
+      }
+    }
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0) {
       pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能使用黑客或扫描技能');
@@ -1771,11 +2017,20 @@ export function App() {
       pushToast('error', '该黑客技能已被封印', '本局对抗中无法再次使用该篡改协议');
       return;
     }
+    if (state.lockedHumanHackSkill === skill) {
+      pushToast('error', '已被「冷频封锁」冻结', '对端审计协议在本手冻结了该基础改牌技能');
+      return;
+    }
     if (selectedHandIndex === null) {
       pushToast('warn', '请先点击一张己方明牌', '黑客技能仅可对当前手上的公开明牌使用');
       return;
     }
     const action: GameAction = { type: 'hack', handIndex: selectedHandIndex, skill };
+    if (sec00GuideActiveRef.current && !isSec00ActionAllowed(state, action)) {
+      const g = getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers });
+      pushToast('info', '请按 SEC-00 教学指定动作注入', g.instruction);
+      return;
+    }
     if (!isActionLegal(state, action)) {
       const hc = state.players.human.hand[selectedHandIndex];
       const cost = getEffectiveHackCost(state, 'human', skill);
@@ -1790,6 +2045,14 @@ export function App() {
     }
     setState((prev) => applyAction(prev, action));
     pushToast('info', '黑客协议注入成功', '改变结果仅己方可见，且可继续交换或行动');
+    if (sec00GuideActiveRef.current) {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: state.players.ai.name,
+        msgKind: 'thought',
+        text: '（周围都是高算力猎手……只有对面这个无所事事的底层黑客毫不起眼。没时间挑了……只能选择这个人了。）',
+      });
+    }
   };
 
   const handleUseAcquiredSkill = (skillId: string) => {
@@ -1845,6 +2108,11 @@ export function App() {
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
     if (tutorialActive && !tutorialCaps.allowScan) return;
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      if (!getSec00Capabilities(latest).allowScan) return;
+    }
     if (!scanMode || state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0 && state.phase !== 'river') {
       setScanMode(false);
@@ -1852,6 +2120,11 @@ export function App() {
       return;
     }
     const action: GameAction = { type: 'scan', targetKind, targetIndex };
+    if (sec00GuideActiveRef.current && !isSec00ActionAllowed(state, action)) {
+      const g = getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers });
+      pushToast('info', '请扫描指定目标牌', g.instruction);
+      return;
+    }
     if (!isActionLegal(state, action)) {
       pushToast('warn', '该节点本轮已扫描过或算力不足');
       setScanMode(false);
@@ -2034,6 +2307,11 @@ export function App() {
       lastSoundActionIdRef.current = null;
       setTutorialActive(true);
       setTutorialStageIndex(clamped);
+      setSec00GuideActive(false);
+      sec00GuideActiveRef.current = false;
+      setSec00IntroIndex(null);
+      setActiveEscapeNodeIndex(null);
+      setViewMode('arena');
       setWelcomeDismissed(true);
       const tState = createTutorialStageState(clamped);
       setState(tState);
@@ -2152,7 +2430,9 @@ export function App() {
   const performFullReset = (
     customConfig?: GameConfig,
     nextCharacter?: ContractCharacter,
-    overrideAcquiredSkills?: string[]
+    overrideAcquiredSkills?: string[],
+    overrideChips?: Record<PlayerId, number>,
+    overrideOpponentName?: string
   ) => {
     if (tutorialActiveRef.current && !customConfig && !nextCharacter) {
       if (
@@ -2171,7 +2451,23 @@ export function App() {
       pushToast('info', '已向房主申请重置牌桌');
       return latestStateRef.current;
     }
+    if (sec00GuideActiveRef.current && !customConfig && !nextCharacter && !overrideChips) {
+      startSec00Tutorial(false);
+      return latestStateRef.current;
+    }
+    const activeEscNode =
+      activeEscapeNodeRef.current !== null && !overrideOpponentName && !nextCharacter
+        ? ESCAPE_ROUTE_NODES[activeEscapeNodeRef.current] ?? null
+        : null;
     const targetChar = nextCharacter ?? character;
+    const resolvedOpponentName = isP2pConnected
+      ? remotePeerRef.current?.name ?? '联机好友'
+      : overrideOpponentName ?? activeEscNode?.opponentName ?? targetChar.name;
+    const resolvedChips =
+      overrideChips ??
+      (activeEscNode
+        ? { human: state.config.startingChips, ai: activeEscNode.opponentChips }
+        : undefined);
     const cfg = customConfig ?? state.config;
     for (const id of timersRef.current) {
       window.clearTimeout(id);
@@ -2181,6 +2477,7 @@ export function App() {
     inFlightTaskRef.current = null;
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
+    escapeClearQueuedForMatchRef.current = false;
     setQueuedCount(0);
     setFloatingBubble(null);
     setCrushingActive(false);
@@ -2200,10 +2497,15 @@ export function App() {
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,
-      opponentName: isP2pConnected ? remotePeerRef.current?.name ?? '联机好友' : targetChar.name,
+      chips: resolvedChips,
+      opponentName: resolvedOpponentName,
+      opponentSignatureSkill: activeEscNode?.signatureSkillId,
       playerAcquiredSkills: isP2pConnected
         ? []
-        : overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
+        : overrideAcquiredSkills ??
+          (activeEscNode
+            ? escapeProgressRef.current.equippedSkills
+            : latestCampaignRef.current.acquiredSkills),
     });
     setState(freshState);
     if (isP2pHost) {
@@ -2218,12 +2520,362 @@ export function App() {
       {
         id: `reset-${Date.now()}`,
         sender: 'opponent',
-        speaker: targetChar.name,
-        text: '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
+        speaker: resolvedOpponentName,
+        text: activeEscNode
+          ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
+          : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
         crushed: false,
       },
     ]);
     return freshState;
+  };
+
+  const startSec00Tutorial = useCallback((showIntro = true) => {
+    for (const id of timersRef.current) {
+      window.clearTimeout(id);
+    }
+    timersRef.current = [];
+    queueRef.current = [];
+    inFlightTaskRef.current = null;
+    resetEpochRef.current += 1;
+    isAnimatingRef.current = false;
+    escapeClearQueuedForMatchRef.current = false;
+    setQueuedCount(0);
+    setFloatingBubble(null);
+    setCrushingActive(false);
+    setHistoryOffset(0);
+    setSelectedHandIndex(null);
+    setDraggedHandIndex(null);
+    setShowRaiseTiers(false);
+    setScanMode(false);
+    setPendingSkillTargetId(null);
+    setRoundLossFlicker(false);
+    setAiRoundLossFlicker(false);
+    setActiveExpression('calm');
+    setActiveModal({ type: 'none' });
+    setTutorialActive(false);
+    setActiveEscapeNodeIndex(0);
+    activeEscapeNodeRef.current = 0;
+    setSec00GuideActive(true);
+    sec00GuideActiveRef.current = true;
+    setSec00IntroIndex(showIntro ? 0 : null);
+    sec00IntroIndexRef.current = showIntro ? 0 : null;
+    lastHandledShowdownHandRef.current = 0;
+    lastSoundActionIdRef.current = null;
+    setViewMode('arena');
+    setState(createSec00TutorialState());
+    setMessages([]);
+  }, []);
+
+  const handleEnterEscapeNode = (nodeIndex: number) => {
+    const latestEsc = completeEscapeTransition(escapeProgressRef.current);
+    if (!canEnterEscapeNode(latestEsc, nodeIndex)) return;
+    const node = ESCAPE_ROUTE_NODES[nodeIndex];
+    if (!node || node.isExit) return;
+
+    if (isP2pSessionActive) {
+      disconnectP2p();
+    }
+    setTutorialActive(false);
+    setEscapeProgress(latestEsc);
+    escapeProgressRef.current = latestEsc;
+    setActiveEscapeNodeIndex(nodeIndex);
+    activeEscapeNodeRef.current = nodeIndex;
+    if (nodeIndex === 0 && !latestEsc.clearedIndices.includes(0)) {
+      startSec00Tutorial(true);
+      return;
+    }
+    setSec00GuideActive(false);
+    sec00GuideActiveRef.current = false;
+    setSec00IntroIndex(null);
+    setViewMode('arena');
+    performFullReset(
+      { ...state.config, aiDifficulty: node.difficulty },
+      undefined,
+      undefined,
+      { human: state.config.startingChips, ai: node.opponentChips },
+      node.opponentName
+    );
+    pushToast('info', `进入 ${node.code} · ${node.title}`, `对手：${node.opponentName}（算力 ${node.opponentChips}）`);
+  };
+
+  const handleCompleteEscapeTransition = useCallback(() => {
+    setEscapeProgress((prev) => completeEscapeTransition(prev));
+  }, []);
+
+  const handleRevealEscapeWall = useCallback((nodeIndex: number) => {
+    setEscapeProgress((prev) => markEscapeWallRevealed(prev, nodeIndex));
+  }, []);
+
+  const handleResetEscapeRoute = () => {
+    const fresh = resetEscapeProgress();
+    setEscapeProgress(fresh);
+    escapeProgressRef.current = fresh;
+    startSec00Tutorial(true);
+    pushToast('info', '已重置黑域逃亡路线', '重新从 SEC-00 公共暗区野桌单轮教学开始');
+  };
+
+  const handleRetreatToEscapeMap = () => {
+    if (activeEscapeNodeRef.current !== null && state.players.ai.chips === 0) {
+      const idx = activeEscapeNodeRef.current;
+      setEscapeProgress((prev) => {
+        if (prev.clearedIndices.includes(idx)) return prev;
+        return markEscapeNodeCleared(prev, idx);
+      });
+    }
+    setViewMode('escape-map');
+  };
+
+  const appendCmdLog = useCallback((tone: DebugCmdLogEntry['tone'], text: string) => {
+    setCmdLogs((prev) =>
+      [...prev, { id: `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tone, text }].slice(
+        -80
+      )
+    );
+  }, []);
+
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F9' || (e.code === 'Backquote' && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        const isTypingElsewhere =
+          (tag === 'input' || tag === 'textarea' || target?.isContentEditable) &&
+          target?.id !== 'cmd-terminal-input';
+        if (isTypingElsewhere) return;
+        e.preventDefault();
+        setActiveModal((prev) => (prev.type === 'cmd' ? { type: 'none' } : { type: 'cmd' }));
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, []);
+
+  const handleExecuteDebugCmd = (rawCommand: string) => {
+    appendCmdLog('cmd', `> ${rawCommand}`);
+    const parsed = parseDebugCommand(rawCommand);
+    if (!parsed.ok) {
+      appendCmdLog('error', `[ERR] ${parsed.error}`);
+      return;
+    }
+
+    switch (parsed.cmd) {
+      case 'help': {
+        for (const item of DEBUG_CHEAT_COMMANDS) {
+          appendCmdLog('info', `  ${item.syntax.padEnd(32, ' ')} — ${item.desc}`);
+        }
+        return;
+      }
+      case 'clear': {
+        setCmdLogs([]);
+        return;
+      }
+      case 'win': {
+        if (tutorialActiveRef.current) {
+          appendCmdLog('success', '[OK] 教程关直接过关，推进下一教学阶段');
+          setActiveModal({ type: 'none' });
+          handleTutorialNextStage();
+          return;
+        }
+        if (viewMode === 'escape-map') {
+          const base = completeEscapeTransition(escapeProgressRef.current);
+          if (base.escapedReality || base.highestUnlockedIndex >= 5) {
+            appendCmdLog('info', '[INFO] 当前已通关全部节点并抵达现实出口');
+            return;
+          }
+          const idxToClear = Math.min(4, base.highestUnlockedIndex);
+          const nextEsc = markEscapeNodeCleared(base, idxToClear);
+          setEscapeProgress(nextEsc);
+          setActiveModal({ type: 'none' });
+          appendCmdLog('success', `[OK] 直接突破 ${ESCAPE_ROUTE_NODES[idxToClear]?.code}，播放钻缝动画`);
+          return;
+        }
+        const curr = latestStateRef.current;
+        if (curr.phase === 'showdown' && curr.players.ai.chips === 0) {
+          setActiveModal({ type: 'none' });
+          handleRetreatToEscapeMap();
+          appendCmdLog('success', '[OK] 已切回逃亡路线图');
+          return;
+        }
+        const wonState = applyDebugWinHand(curr);
+        lastHandledShowdownHandRef.current = 0;
+        setSec00GuideActive(false);
+        sec00GuideActiveRef.current = false;
+        setSec00IntroIndex(null);
+        setState(wonState);
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已执行 win：对手算力归零，触发过关结算');
+        return;
+      }
+      case 'lose': {
+        const lostState = applyDebugLoseHand(latestStateRef.current);
+        lastHandledShowdownHandRef.current = 0;
+        setState(lostState);
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已执行 lose：己方算力清 0');
+        return;
+      }
+      case 'next': {
+        const base = completeEscapeTransition(escapeProgressRef.current);
+        if (base.escapedReality) {
+          appendCmdLog('info', '[INFO] 已抵达现实出口，可执行 reset 重新开始');
+          return;
+        }
+        const idxToClear = Math.min(4, base.highestUnlockedIndex);
+        const cleared = markEscapeNodeCleared(base, idxToClear);
+        const completed = completeEscapeTransition(cleared);
+        setEscapeProgress(completed);
+        escapeProgressRef.current = completed;
+        if (completed.escapedReality) {
+          setViewMode('escape-map');
+          setActiveModal({ type: 'none' });
+          appendCmdLog('success', '[OK] 已穿过零号闸门抵达现实出口');
+          return;
+        }
+        const nextIdx = Math.min(4, completed.currentNodeIndex);
+        setActiveEscapeNodeIndex(nextIdx);
+        activeEscapeNodeRef.current = nextIdx;
+        const node = ESCAPE_ROUTE_NODES[nextIdx];
+        setViewMode('arena');
+        setActiveModal({ type: 'none' });
+        performFullReset(
+          { ...state.config, aiDifficulty: node.difficulty },
+          undefined,
+          undefined,
+          { human: state.config.startingChips, ai: node.opponentChips },
+          node.opponentName
+        );
+        appendCmdLog('success', `[OK] 已推进并进入 ${node.code} · ${node.title}`);
+        return;
+      }
+      case 'goto': {
+        const idx = parsed.nodeIndex;
+        const node = ESCAPE_ROUTE_NODES[idx];
+        const base = completeEscapeTransition(escapeProgressRef.current);
+        const clearedRange = Array.from({ length: idx }, (_, i) => i);
+        const jumped: EscapeMapProgress = {
+          currentNodeIndex: idx,
+          highestUnlockedIndex: Math.max(base.highestUnlockedIndex, idx),
+          clearedIndices: Array.from(new Set([...base.clearedIndices, ...clearedRange])).sort(
+            (a, b) => a - b
+          ),
+          revealedWallIndices: base.revealedWallIndices,
+          equippedSkills: base.equippedSkills,
+          pendingTransition: null,
+          escapedReality: false,
+        };
+        setEscapeProgress(jumped);
+        escapeProgressRef.current = jumped;
+        setActiveEscapeNodeIndex(idx);
+        activeEscapeNodeRef.current = idx;
+        setTutorialActive(false);
+        setActiveModal({ type: 'none' });
+        if (idx === 0) {
+          startSec00Tutorial(true);
+        } else {
+          setSec00GuideActive(false);
+          sec00GuideActiveRef.current = false;
+          setSec00IntroIndex(null);
+          setViewMode('arena');
+          performFullReset(
+            { ...state.config, aiDifficulty: node.difficulty },
+            undefined,
+            undefined,
+            { human: state.config.startingChips, ai: node.opponentChips },
+            node.opponentName
+          );
+        }
+        appendCmdLog('success', `[OK] 已传送至 ${node.code} · ${node.title}`);
+        return;
+      }
+      case 'chips': {
+        setState((prev) => applyDebugChipsOverride(prev, parsed.target, parsed.amount));
+        appendCmdLog(
+          'success',
+          `[OK] 已将 ${parsed.target === 'human' ? '己方' : '对手'} 算力设为 ${parsed.amount}`
+        );
+        return;
+      }
+      case 'hand': {
+        setState((prev) => applyDebugPresetHand(prev, parsed.preset));
+        appendCmdLog('success', `[OK] 已发入调试牌型：${parsed.preset}`);
+        return;
+      }
+      case 'reveal': {
+        const nextVal = !latestStateRef.current.config.revealOpponentHidden;
+        setState((prev) => ({
+          ...prev,
+          config: { ...prev.config, revealOpponentHidden: nextVal },
+        }));
+        appendCmdLog('success', `[OK] 透视暗牌模式：${nextVal ? '开启' : '关闭'}`);
+        return;
+      }
+      case 'skill': {
+        const sk = getSkillById(parsed.skillId);
+        if (!sk) {
+          const validIds = SKILL_POOL_REGISTRY.map((s) => s.id).join(', ');
+          appendCmdLog('error', `[ERR] 未找到技能 "${parsed.skillId}"。可用 ID: ${validIds}`);
+          return;
+        }
+        const currEquipped =
+          activeEscapeNodeRef.current !== null
+            ? escapeProgressRef.current.equippedSkills
+            : latestCampaignRef.current.acquiredSkills;
+        if (currEquipped.includes(sk.id)) {
+          appendCmdLog('info', `[INFO] 已装备技能「${sk.name}」(${sk.id})`);
+          return;
+        }
+        if (needsSkillReplacement(currEquipped, sk.id)) {
+          setActiveModal({ type: 'none' });
+          setPendingSkillClaim({
+            title: `调试装配「${sk.name}」`,
+            subtitle: `当前额外技能已达 ${MAX_EXTRA_SKILLS}/${MAX_EXTRA_SKILLS} 上限，请选择被替换的旧槽位`,
+            choices: [sk.id],
+          });
+          appendCmdLog('info', `[OK] 槽位已满 3/3，已弹出「${sk.name}」替换选择窗`);
+          return;
+        }
+        const nextEquipped = equipExtraSkill(currEquipped, sk.id);
+        if (activeEscapeNodeRef.current !== null) {
+          setEscapeProgress((prev) => claimEscapeNodeSkill(prev, sk.id));
+        } else {
+          setCampaign((prev) => ({ ...prev, acquiredSkills: nextEquipped }));
+        }
+        setState((prev) => ({ ...prev, playerAcquiredSkills: nextEquipped }));
+        appendCmdLog('success', `[OK] 已装备额外技能「${sk.name}」（当前 ${nextEquipped.length}/3）`);
+        return;
+      }
+      case 'clearskills': {
+        setEscapeProgress((prev) => ({ ...prev, equippedSkills: [] }));
+        setCampaign((prev) => ({ ...prev, acquiredSkills: [] }));
+        setState((prev) => ({ ...prev, playerAcquiredSkills: [] }));
+        appendCmdLog('success', '[OK] 已清空当前全部额外协议技能槽 (0/3)');
+        return;
+      }
+      case 'reset': {
+        handleResetEscapeRoute();
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已重置逃亡路线、暗墙显形与牌桌状态');
+        return;
+      }
+      case 'resetprofile': {
+        const freshCamp = createInitialCampaign(campaign.playerCodename);
+        setCampaign(freshCamp);
+        saveCampaignState(freshCamp);
+        setTutorialCompleted(false);
+        setWelcomeDismissed(false);
+        saveTutorialCompleted(false);
+        setTutorialActive(false);
+        const freshEsc = resetEscapeProgress();
+        setEscapeProgress(freshEsc);
+        escapeProgressRef.current = freshEsc;
+        startSec00Tutorial(true);
+        setActiveModal({ type: 'none' });
+        pushToast('success', '玩家档案已彻底重置', '已清空逃亡路线、暗墙记录、实体技能与教程进度，回到 SEC-00 独白教学');
+        appendCmdLog('success', '[OK] 已彻底重置玩家全部本地档案（回到初始 SEC-00）');
+        return;
+      }
+    }
   };
 
   const advanceToNextPursuerMatch = async (nextCamp: typeof campaign) => {
@@ -2267,6 +2919,11 @@ export function App() {
     try {
       const nextChar = await loadContractCharacterByFile(fileName);
       const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
+      setSec00GuideActive(false);
+      sec00GuideActiveRef.current = false;
+      setSec00IntroIndex(null);
+      setActiveEscapeNodeIndex(null);
+      setViewMode('arena');
       setCharacter(nextChar);
       setActiveExpression('smile');
       setState((prev) => ({
@@ -2361,7 +3018,7 @@ export function App() {
       setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
     }
     setActiveExpression(res.expression);
-    enqueueOpponentSegments(character.name, res.segments);
+    enqueueOpponentSegments(latestStateRef.current.players.ai.name, res.segments);
   };
 
   const handleReplayBubble = () => {
@@ -2369,7 +3026,7 @@ export function App() {
       character.voice?.samples?.[0] ??
       character.quote ??
       '数据流正常，准备下一手博弈。';
-    enqueueTask({ kind: 'opponent', speaker: character.name, text: sample });
+    enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: sample });
   };
 
   // Live Hand Summaries (Respecting hidden tamper isolation: opponent only sees unmodified cards!)
@@ -2467,17 +3124,25 @@ export function App() {
     (vfxTestMode === 'human-low' ||
       (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（P2P 联机时展示好友立绘）
+  const activeEscapeNode =
+    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+  const isSec00Echo0 = activeEscapeNode?.index === 0 && !tutorialActive && !isP2pConnected;
+
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用女主 ECHO-0 匿名伪装立绘）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
-      : resolveVirtualEntityPortrait(character, activeExpression);
+      : isSec00Echo0
+        ? resolveEcho0Sprite(activeExpression)
+        : resolveVirtualEntityPortrait(character, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
-      : llmConfig.overloadPersona
-        ? '#FF4757'
-        : character.color || '#FF2E88';
+      : isSec00Echo0
+        ? '#00F0FF'
+        : llmConfig.overloadPersona
+          ? '#FF4757'
+          : character.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -2512,8 +3177,10 @@ export function App() {
     () =>
       tutorialActive
         ? getTutorialCapabilities(tutorialStageIndex)
-        : { allowHack: true, allowScan: true, allowRaise: true },
-    [tutorialActive, tutorialStageIndex]
+        : sec00GuideActive
+          ? getSec00Capabilities(state)
+          : { allowHack: true, allowScan: true, allowRaise: true },
+    [tutorialActive, tutorialStageIndex, sec00GuideActive, state]
   );
 
   const tutorialGuidance = useMemo(
@@ -2524,9 +3191,22 @@ export function App() {
     [tutorialActive, tutorialStageIndex, state, scanMode, selectedHandIndex]
   );
 
+  const sec00Guidance = useMemo(
+    () =>
+      sec00GuideActive && !tutorialActive
+        ? getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers })
+        : null,
+    [sec00GuideActive, tutorialActive, state, selectedHandIndex, scanMode, showRaiseTiers]
+  );
+
   // Highlight guided tutorial targets cleanly without leaving stale classes
   useEffect(() => {
-    const ids = tutorialActive && tutorialGuidance ? tutorialGuidance.focusIds : [];
+    const ids =
+      tutorialActive && tutorialGuidance
+        ? tutorialGuidance.focusIds
+        : sec00GuideActive && sec00IntroIndex === null && sec00Guidance
+          ? sec00Guidance.focusIds
+          : [];
     const elements: HTMLElement[] = [];
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -2540,10 +3220,27 @@ export function App() {
         el.classList.remove('is-tutorial-focus');
       }
     };
-  }, [tutorialActive, tutorialGuidance, showRaiseTiers, scanMode, selectedHandIndex, state.phase, state.currentTurn]);
+  }, [
+    tutorialActive,
+    tutorialGuidance,
+    sec00GuideActive,
+    sec00IntroIndex,
+    sec00Guidance,
+    showRaiseTiers,
+    scanMode,
+    selectedHandIndex,
+    state.phase,
+    state.currentTurn,
+  ]);
+
+  const hasTopGuideBar = tutorialActive || sec00GuideActive;
 
   return (
-    <div className={`lc-shell ${tutorialActive ? 'has-tutorial-bar' : ''}`}>
+    <div
+      className={`lc-shell ${hasTopGuideBar ? 'has-tutorial-bar' : ''} ${
+        viewMode === 'escape-map' ? 'is-escape-map-view' : ''
+      }`}
+    >
       <CyberBackdrop
         situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
         pot={state.pot}
@@ -2551,46 +3248,85 @@ export function App() {
         playerBankrupt={isHumanBankrupt}
       />
 
-      {tutorialActive && tutorialGuidance ? (
-        <TutorialOverlayBar
-          stageIndex={tutorialStageIndex}
-          guidance={tutorialGuidance}
-          onNextStage={handleTutorialNextStage}
-          onRetryStage={() => startTutorial(tutorialStageIndex)}
-          onExitTutorial={() => exitTutorial(false)}
-        />
+      {viewMode === 'escape-map' ? (
+        <Suspense fallback={null}>
+          <EscapeRouteMapView
+            progress={escapeProgress}
+            onEnterNode={handleEnterEscapeNode}
+            onCompleteTransition={handleCompleteEscapeTransition}
+            onRevealWall={handleRevealEscapeWall}
+            onReturnToArena={() => setViewMode('arena')}
+            onResetRoute={handleResetEscapeRoute}
+            onOpenCmd={() => setActiveModal({ type: 'cmd' })}
+          />
+        </Suspense>
       ) : (
-        !tutorialCompleted &&
-        !welcomeDismissed && (
-          <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程快速入口">
-            <span>初次进入黑域？2 分钟交互教程带你掌握换牌、双花色同花、篡改与扫描抓包</span>
-            <div style={{ display: 'inline-flex', gap: 6 }}>
-              <button
-                id="welcome-btn-start-tutorial"
-                type="button"
-                className="lc-tutorial-btn primary"
-                onClick={() => startTutorial(0)}
-              >
-                开始 6 关教程
-              </button>
-              <button
-                id="welcome-btn-dismiss"
-                type="button"
-                className="lc-tutorial-btn"
-                onClick={() => {
-                  setWelcomeDismissed(true);
-                  saveTutorialCompleted(true);
-                }}
-              >
-                跳过
-              </button>
-            </div>
-          </div>
-        )
-      )}
+        <>
+          {tutorialActive && tutorialGuidance ? (
+            <TutorialOverlayBar
+              stageIndex={tutorialStageIndex}
+              guidance={tutorialGuidance}
+              onNextStage={handleTutorialNextStage}
+              onRetryStage={() => startTutorial(tutorialStageIndex)}
+              onExitTutorial={() => exitTutorial(false)}
+            />
+          ) : sec00GuideActive && sec00Guidance ? (
+            <Sec00TutorialOverlay
+              introStepIndex={sec00IntroIndex}
+              guidance={sec00Guidance}
+              onSkipIntro={() => {
+                setSec00IntroIndex(null);
+                setMobileChatOpen(false);
+              }}
+              onOpenMobileChat={() => setMobileChatOpen(true)}
+              onRetrySec00={() => startSec00Tutorial(true)}
+              onDismissGuide={() => {
+                setSec00GuideActive(false);
+                sec00GuideActiveRef.current = false;
+                setSec00IntroIndex(null);
+                pushToast('info', '已关闭 SEC-00 步进引导', '你可自由按常规规则继续完成本局');
+              }}
+            />
+          ) : (
+            !tutorialCompleted &&
+            !welcomeDismissed && (
+              <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程与路线快速入口">
+                <span>初次进入《黑域协议：替壳者》？先打赢当前节点或用 2 分钟交互教程熟悉规则</span>
+                <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    id="welcome-btn-escape-map"
+                    type="button"
+                    className="lc-tutorial-btn"
+                    onClick={() => setViewMode('escape-map')}
+                  >
+                    查看逃亡路线图
+                  </button>
+                  <button
+                    id="welcome-btn-start-tutorial"
+                    type="button"
+                    className="lc-tutorial-btn primary"
+                    onClick={() => startTutorial(0)}
+                  >
+                    开始 6 关教程
+                  </button>
+                  <button
+                    id="welcome-btn-dismiss"
+                    type="button"
+                    className="lc-tutorial-btn"
+                    onClick={() => {
+                      setWelcomeDismissed(true);
+                      saveTutorialCompleted(true);
+                    }}
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            )
+          )}
 
-      {/* Centered & Aligned 3x3 Tactical Stage */}
-      <main className="lc-stage-grid" aria-label="牌桌主视区">
+          {/* Centered & Aligned 3x3 Tactical Stage */}
+          <main className="lc-stage-grid" aria-label="牌桌主视区">
         {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
         <aside className="lc-pool-slot" aria-label="算力池计量栏">
           <ComputePoolBar
@@ -2617,21 +3353,6 @@ export function App() {
           </button>
 
           <button
-            id="hud-btn-p2p-lobby"
-            type="button"
-            className="lc-stack-btn"
-            onClick={() => setActiveModal({ type: 'p2p' })}
-          >
-            <span className="lc-btn-inline">
-              <PixelBroadcastIcon size={14} />
-              {isP2pConnected ? '联机中' : '联机'}
-            </span>
-            <span className="lc-stack-sub">
-              {isP2pConnected ? `${p2pLatency ?? '--'}ms` : '好友对战'}
-            </span>
-          </button>
-
-          <button
             id="hud-btn-quick-restart"
             type="button"
             className="lc-stack-btn amber"
@@ -2642,6 +3363,24 @@ export function App() {
               快速重开
             </span>
             <span className="lc-stack-sub">重置牌桌</span>
+          </button>
+
+          <button
+            id="hud-btn-escape-map"
+            type="button"
+            className="lc-stack-btn"
+            onClick={() => setViewMode('escape-map')}
+            aria-label="切换至黑域逃亡路线关卡图"
+          >
+            <span className="lc-btn-inline">
+              <PixelNodesIcon size={15} />
+              路线图
+            </span>
+            <span className="lc-stack-sub">
+              {activeEscapeNode
+                ? `${activeEscapeNode.code} · ${escapeProgress.clearedIndices.length}/5`
+                : `进度 ${escapeProgress.clearedIndices.length}/5`}
+            </span>
           </button>
 
           <button
@@ -2671,7 +3410,7 @@ export function App() {
           className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
             isAiBankrupt ? 'is-bankrupt' : ''
           }`}
-          style={{ '--char-accent': accentColor } as CSSProperties}
+          style={{ '--char-accent': activeEscapeNode?.accentColor ?? accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
         >
           <header className="lc-opp-topbar">
@@ -2682,7 +3421,9 @@ export function App() {
                   ? state.players.ai.name
                   : isP2pConnected && remotePeer
                     ? `${remotePeer.name} · ${remotePeer.title}`
-                    : `${character.name} · ${dossier.identityTitle}`}
+                    : activeEscapeNode
+                      ? `${activeEscapeNode.code} · ${activeEscapeNode.title} · ${activeEscapeNode.opponentName}`
+                      : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
             <div className="lc-opp-topbar-right">
@@ -2693,7 +3434,9 @@ export function App() {
                   ? 'P2P 重连/握手中...'
                   : isP2pConnected
                     ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
-                    : isAiThinking
+                    : activeEscapeNode
+                      ? `黑域协议：替壳者 · ${escapeProgress.clearedIndices.length}/5`
+                      : isAiThinking
                       ? 'THINKING...'
                       : `${EXPRESSION_META[activeExpression].label} · ${
                           effectiveAiDifficulty === 'master'
@@ -2705,6 +3448,16 @@ export function App() {
                           CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
                         }`}
               </span>
+              <button
+                id="hud-btn-open-cmd"
+                type="button"
+                className="lc-cmd-chip-btn"
+                onClick={() => setActiveModal({ type: 'cmd' })}
+                title="打开调试控制台 (快捷键 ~ 或 F9)"
+                aria-label="打开调试控制台 CMD"
+              >
+                &gt;_ CMD
+              </button>
               <button
                 id="hud-btn-mobile-chat"
                 type="button"
@@ -2742,8 +3495,10 @@ export function App() {
             {/* Layer 2 (z:2): Character Portrait Cutout + V-Sync-Off Horizontal Tear Slices */}
             <img
               src={portraitSrc}
-              alt={`${character.name}半身立绘`}
-              className="lc-opp-portrait-img"
+              alt={`${isSec00Echo0 ? '匿名终端 [UNKNOWN_0x00]' : character.name}半身立绘`}
+              className={`lc-opp-portrait-img ${
+                isSec00Echo0 && !isShowdown ? 'is-echo0-disguised' : ''
+              } ${isSec00Echo0 ? 'is-echo0-framing' : ''}`}
               width={550}
               height={420}
             />
@@ -2754,7 +3509,9 @@ export function App() {
                   src={portraitSrc}
                   alt=""
                   aria-hidden="true"
-                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls}`}
+                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls} ${
+                    isSec00Echo0 ? 'is-echo0-framing' : ''
+                  }`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -2889,7 +3646,7 @@ export function App() {
                     }
                     actionHint={
                       canScanCard
-                        ? `点击扫描 ${character.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
+                        ? `点击扫描 ${ai.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
                             state,
                             'human'
                           )}）`
@@ -2945,11 +3702,14 @@ export function App() {
 
               const isPeeked = isHidden && state.peekedBoardIndices.includes(slot.index);
               const isFrozen = isHidden && state.frozenBoardIndices.includes(slot.index);
-              const nodeBackCode = isPeeked
-                ? `窥:${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
-                : isFrozen
-                  ? '锁槽'
-                  : `节点0${slot.index + 1}`;
+              const isConfirmedTrap = isHidden && state.confirmedTrapIndices?.includes(slot.index);
+              const nodeBackCode = isConfirmedTrap
+                ? 'TRAP!'
+                : isPeeked
+                  ? `窥:${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
+                  : isFrozen
+                    ? '锁槽'
+                    : `节点0${slot.index + 1}`;
               const hint = canScanBoard
                 ? `点击扫描对端换出的节点 #${slot.index + 1}（预支 ${getEffectiveScanCost(state, 'human')}）`
                 : pendingSkillTargetId && isHidden
@@ -3030,12 +3790,12 @@ export function App() {
                     state.result?.winner === 'human'
                       ? '我方胜出'
                       : state.result?.winner === 'ai'
-                        ? `${character.name}胜出`
+                        ? `${ai.name}胜出`
                         : '平局分池'
                   }`
-                : `等待 ${character.name} 行动...`
+                : `等待 ${ai.name} 行动...`
               : scanMode
-                ? `扫描模式激活：点击上方 ${character.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
+                ? `扫描模式激活：点击上方 ${ai.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
                 : diff > 0
                   ? `遭遇加注：请先点击右侧「跟注 +${paid}」（不消耗行动）`
                   : draggedHandIndex !== null
@@ -3182,6 +3942,7 @@ export function App() {
                   ] as const
                 ).map((btn) => {
                   const isSealed = human.sealedSkills.includes(btn.skill);
+                  const isColdLocked = state.lockedHumanHackSkill === btn.skill;
                   const usedThisTurn = state.usedHackThisTurn;
                   const lockedByTutorial = !tutorialCaps.allowHack;
                   const disabled =
@@ -3189,6 +3950,7 @@ export function App() {
                     !isHumanTurn ||
                     diff > 0 ||
                     isSealed ||
+                    isColdLocked ||
                     usedThisTurn ||
                     human.chips < btn.cost;
                   return (
@@ -3196,7 +3958,7 @@ export function App() {
                       key={btn.skill}
                       id={btn.id}
                       type="button"
-                      className={`lc-hack-btn ${isSealed ? 'is-sealed' : ''}`}
+                      className={`lc-hack-btn ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
                       disabled={disabled}
                       onClick={() => handleExecuteHack(btn.skill)}
                       title={
@@ -3206,9 +3968,11 @@ export function App() {
                             ? '遭遇加注，请先在右侧跟注后再使用技能'
                             : isSealed
                               ? '此技能已被扫描抓获封印'
-                              : usedThisTurn
-                                ? '黑客技能每回合限用 1 次'
-                                : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                              : isColdLocked
+                                ? '本手已被对手「冷频封锁」冻结'
+                                : usedThisTurn
+                                  ? '黑客技能每回合限用 1 次'
+                                  : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
                       }
                     >
                       {btn.icon}
@@ -3217,11 +3981,13 @@ export function App() {
                           ? `${btn.label}`
                           : isSealed
                             ? '封印'
-                            : usedThisTurn
-                              ? '已用'
-                              : btn.label}
+                            : isColdLocked
+                              ? '冷封'
+                              : usedThisTurn
+                                ? '已用'
+                                : btn.label}
                       </span>
-                      {!lockedByTutorial && !isSealed && !usedThisTurn && (
+                      {!lockedByTutorial && !isSealed && !isColdLocked && !usedThisTurn && (
                         <span className="lc-hack-cost">{btn.cost}</span>
                       )}
                     </button>
@@ -3264,9 +4030,12 @@ export function App() {
                 </button>
               </div>
 
-              {campaign.acquiredSkills.length > 0 && (
-                <div className="lc-acquired-skill-bar" role="group" aria-label="已掠夺协议技能槽">
-                  {campaign.acquiredSkills.map((sid, sIdx) => {
+              {state.playerAcquiredSkills.length > 0 && (
+                <div className="lc-acquired-skill-bar" role="group" aria-label="已装备额外协议技能槽">
+                  <span className="lc-micro-tag cyan">
+                    额外槽 {state.playerAcquiredSkills.length}/{MAX_EXTRA_SKILLS}
+                  </span>
+                  {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
                     const isPassive = sk.targetMode === 'passive';
@@ -3395,7 +4164,9 @@ export function App() {
 
             <div
               ref={chatFeedRef}
-              className="lc-chat-feed"
+              className={`lc-chat-feed ${
+                sec00GuideActive && sec00IntroIndex !== null ? 'has-monologue' : ''
+              }`}
               onWheel={handleFeedWheel}
               role="log"
               aria-live="polite"
@@ -3461,6 +4232,80 @@ export function App() {
                     </article>
                   );
                 })}
+
+                {sec00GuideActive && sec00IntroIndex !== null && (
+                  <article
+                    className="lc-chat-msg human is-monologue"
+                    aria-label="玩家开局自言自语"
+                  >
+                    {(() => {
+                      const step =
+                        SEC00_MONOLOGUE_STEPS[sec00IntroIndex] ?? SEC00_MONOLOGUE_STEPS[0];
+                      const isFirst = sec00IntroIndex <= 0;
+                      const isLast = sec00IntroIndex >= SEC00_MONOLOGUE_STEPS.length - 1;
+                      return (
+                        <div className="lc-chat-msg-inner">
+                          <div className="lc-chat-meta human">
+                            <span>潜行黑客（自言自语）</span>
+                            <span>{step.tag}</span>
+                          </div>
+                          <div className="lc-monologue-title">{step.title}</div>
+                          <div className="lc-monologue-text">{step.text}</div>
+                          <div className="lc-monologue-tip">{step.tip}</div>
+                          <div className="lc-monologue-actions">
+                            <button
+                              id="sec00-intro-skip"
+                              type="button"
+                              className="lc-tutorial-btn"
+                              onClick={() => {
+                                setSec00IntroIndex(null);
+                                setMobileChatOpen(false);
+                              }}
+                            >
+                              跳过
+                            </button>
+                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                              <button
+                                id="sec00-intro-prev"
+                                type="button"
+                                className="lc-tutorial-btn"
+                                disabled={isFirst}
+                                onClick={() =>
+                                  setSec00IntroIndex((prev) =>
+                                    prev !== null ? Math.max(0, prev - 1) : 0
+                                  )
+                                }
+                              >
+                                上一步
+                              </button>
+                              <button
+                                id="sec00-intro-next"
+                                type="button"
+                                className="lc-tutorial-btn primary"
+                                onClick={() => {
+                                  if (isLast) {
+                                    setSec00IntroIndex(null);
+                                    setMobileChatOpen(false);
+                                    enqueueTask({
+                                      kind: 'human',
+                                      text: '“行了，对面那点算力也就够练手。先动起来吧——”',
+                                    });
+                                  } else {
+                                    setSec00IntroIndex((prev) =>
+                                      prev !== null ? prev + 1 : 0
+                                    );
+                                  }
+                                }}
+                              >
+                                {isLast ? '开始实操' : '下一步'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </article>
+                )}
               </div>
             </div>
 
@@ -3487,7 +4332,7 @@ export function App() {
                 id="chat-input-preview"
                 type="text"
                 className="lc-chat-input"
-                placeholder={`向 ${character.name} 预输入对话（执行操作后随动作一起发送，回车直发）...`}
+                placeholder={`向 ${ai.name} 预输入对话（执行操作后随动作一起发送，回车直发）...`}
                 value={chatDraft}
                 maxLength={200}
                 onChange={(e) => setChatDraft(e.target.value)}
@@ -3542,6 +4387,19 @@ export function App() {
                       : `第 #${state.handNumber + 1} 局`}
                   </span>
                 </button>
+              ) : activeEscapeNode && human.chips > 0 ? (
+                <button
+                  id="action-btn-escape-retreat"
+                  type="button"
+                  className="lc-stack-btn"
+                  onClick={handleRetreatToEscapeMap}
+                >
+                  <span className="lc-btn-inline">
+                    <PixelNodesIcon size={15} />
+                    突围撤离
+                  </span>
+                  <span className="lc-stack-sub">切回逃亡路线图</span>
+                </button>
               ) : (
                 <button
                   id="action-btn-match-restart"
@@ -3565,11 +4423,13 @@ export function App() {
               >
                 <span className="lc-btn-inline">
                   <PixelMenuIcon kind="audit" size={15} />
-                  {state.result.reason === 'showdown' &&
-                  state.result.humanEval &&
-                  state.result.aiEval
-                    ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
-                    : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : character.name}弃牌`}
+                  {state.result.reason === 'scan-caught'
+                    ? `${state.result.winner === 'human' ? '我方' : ai.name}抓获篡改`
+                    : state.result.reason === 'showdown' &&
+                        state.result.humanEval &&
+                        state.result.aiEval
+                      ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
+                      : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : ai.name}弃牌`}
                 </span>
                 <span className="lc-stack-sub">奖池 {state.result.potWon}</span>
               </button>
@@ -3594,7 +4454,7 @@ export function App() {
                   <PixelSyncIcon size={15} />
                   对端推演中
                 </span>
-                <span className="lc-stack-sub">{character.name} 回合</span>
+                <span className="lc-stack-sub">{ai.name} 回合</span>
               </button>
               <button id="action-btn-ai-wait-2" type="button" className="lc-stack-btn pink" disabled>
                 <span className="lc-btn-inline">
@@ -3789,6 +4649,8 @@ export function App() {
           )}
         </div>
       </main>
+        </>
+      )}
 
       {/* Dual-Card Smooth Swap Flight Layer (Player & Opponent!) */}
       {swapFlight && (
@@ -3933,6 +4795,7 @@ export function App() {
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
                     if (item.keyName === 'tutorial') startTutorial(0);
+                    else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
                     else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
                     else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
                     else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
@@ -4101,6 +4964,76 @@ export function App() {
 
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
+        {pendingSkillClaim && (
+          <SkillLootReplaceModal
+            title={pendingSkillClaim.title}
+            subtitle={pendingSkillClaim.subtitle}
+            choices={pendingSkillClaim.choices}
+            equippedSkills={
+              activeEscapeNodeRef.current !== null
+                ? escapeProgress.equippedSkills
+                : campaign.acquiredSkills
+            }
+            onConfirm={(chosenSkillId, replaceSlotIndex) => {
+              const sk = getSkillById(chosenSkillId);
+              if (activeEscapeNodeRef.current !== null) {
+                const updatedEsc = claimEscapeNodeSkill(
+                  escapeProgressRef.current,
+                  chosenSkillId,
+                  replaceSlotIndex
+                );
+                const nextEsc =
+                  pendingSkillClaim.clearedNodeIndex !== undefined
+                    ? markEscapeNodeCleared(updatedEsc, pendingSkillClaim.clearedNodeIndex)
+                    : updatedEsc;
+                setEscapeProgress(nextEsc);
+                setState((prev) => ({
+                  ...prev,
+                  playerAcquiredSkills: nextEsc.equippedSkills,
+                }));
+                if (pendingSkillClaim.clearedNodeIndex !== undefined) {
+                  setViewMode('escape-map');
+                }
+              } else {
+                const nextSkills = equipExtraSkill(
+                  campaign.acquiredSkills,
+                  chosenSkillId,
+                  replaceSlotIndex
+                );
+                setCampaign((prev) => ({ ...prev, acquiredSkills: nextSkills }));
+                setState((prev) => ({ ...prev, playerAcquiredSkills: nextSkills }));
+              }
+              pushToast(
+                'success',
+                `已装备额外技能「${sk?.name ?? chosenSkillId}」`,
+                replaceSlotIndex !== undefined
+                  ? `已替换原槽位 #${replaceSlotIndex + 1}`
+                  : undefined
+              );
+              setPendingSkillClaim(null);
+            }}
+            onSkip={() => {
+              if (
+                activeEscapeNodeRef.current !== null &&
+                pendingSkillClaim.clearedNodeIndex !== undefined
+              ) {
+                const clearedIdx = pendingSkillClaim.clearedNodeIndex;
+                setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
+                setViewMode('escape-map');
+              }
+              setPendingSkillClaim(null);
+            }}
+          />
+        )}
+
+        {activeModal.type === 'cmd' && (
+          <DebugCmdModal
+            logs={cmdLogs}
+            onExecute={handleExecuteDebugCmd}
+            onClose={() => setActiveModal({ type: 'none' })}
+          />
+        )}
+
         {activeModal.type === 'p2p' && (
           <P2pLobbyModal
             status={p2pStatus}
@@ -4186,6 +5119,7 @@ export function App() {
         )}
 
         {!isP2pConnected &&
+          activeEscapeNodeIndex === null &&
           (campaign.status === 'loot-select' ||
             campaign.status === 'escaped' ||
             campaign.status === 'failed-ending' ||
@@ -4204,8 +5138,8 @@ export function App() {
                 chosen.isCore ? '警告：以本体迎战败北将触发失败结局' : '安全：当前实体可作为诱饵抵消一次失败'
               );
             }}
-            onClaimLootSkill={(skillId) => {
-              const nextCamp = claimVictoryLoot(campaign, skillId);
+            onClaimLootSkill={(skillId, replaceSlotIndex) => {
+              const nextCamp = claimVictoryLoot(campaign, skillId, replaceSlotIndex);
               setCampaign(nextCamp);
               void advanceToNextPursuerMatch(nextCamp);
             }}
@@ -4268,7 +5202,7 @@ export function App() {
       {activeModal.type === 'confirm-reset' && (
         <ConfirmCyberModal
           title="确认重置整场像素赌局？"
-          description={`此操作将终止当前牌局，并将你与「${character.name}」的算力全部重置为 ${state.config.startingChips}。`}
+          description={`此操作将终止当前牌局，并将你与「${ai.name}」的算力全部重置为 ${state.config.startingChips}。`}
           confirmLabel="确认重置战场"
           onConfirm={() => performFullReset()}
           onCancel={() => setActiveModal({ type: 'none' })}

@@ -9,6 +9,7 @@ import {
   type HackSkillId,
   type HandCard,
   type HandRoundSummary,
+  type OpponentSignatureSkillId,
   type Phase,
   type PlayerId,
   type PlayerState,
@@ -18,6 +19,7 @@ import {
   type VfxEvent,
 } from './types.ts';
 import { evaluateSevenCards, pickFirstActor } from './evaluator.ts';
+import { MAX_EXTRA_SKILLS } from './skillPool.ts';
 
 const SUITS: Suit[] = ['B', 'P'];
 const COPIES: Array<0 | 1> = [0, 1];
@@ -301,10 +303,33 @@ export interface CreateStateOptions {
   chips?: Record<PlayerId, number>;
   sealedSkills?: Record<PlayerId, HackSkillId[]>;
   playerAcquiredSkills?: string[];
+  opponentSignatureSkill?: OpponentSignatureSkillId;
+  trappedBoardIndices?: number[];
+  confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
   opponentName?: string;
   deckOverride?: Card[];
   rng?: () => number;
+}
+
+function pickRandomHackToLock(
+  sealed: HackSkillId[],
+  rng: () => number = Math.random
+): HackSkillId | undefined {
+  const candidates = (['plus-one', 'minus-one', 'flip-suit'] as HackSkillId[]).filter(
+    (s) => !sealed.includes(s)
+  );
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(rng() * candidates.length) % candidates.length];
+}
+
+function pickDefaultTrappedBoardIndices(rng: () => number = Math.random): number[] {
+  const pool = [0, 1, 2, 3];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 3).sort((a, b) => a - b);
 }
 
 export function createInitialState(options: CreateStateOptions = {}): GameState {
@@ -381,6 +406,16 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
 
   const pot = human.totalCommitted + ai.totalCommitted;
   const firstTurn = pickFirstActor(humanCards, aiCards, tieStarter);
+  const rngFn = options.rng ?? Math.random;
+  const sigSkill = options.opponentSignatureSkill;
+  const lockedHumanHackSkill =
+    sigSkill === 'cold-freq-lock' ? pickRandomHackToLock(human.sealedSkills, rngFn) : undefined;
+  const trappedBoardIndices =
+    options.trappedBoardIndices !== undefined
+      ? [...options.trappedBoardIndices]
+      : sigSkill === 'gate-minefield'
+        ? pickDefaultTrappedBoardIndices(rngFn)
+        : undefined;
 
   const initialState: GameState = {
     handNumber,
@@ -400,10 +435,18 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     usedHackThisTurn: false,
     usedScanThisTurn: false,
     scannedKeys: [],
-    playerAcquiredSkills: [...(options.playerAcquiredSkills ?? [])],
+    playerAcquiredSkills: [...(options.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     usedProtocolSkillThisHand: false,
     peekedBoardIndices: [],
     frozenBoardIndices: [],
+    opponentSignatureSkill: sigSkill,
+    lockedHumanHackSkill,
+    lockedAiHackSkill: undefined,
+    siphonUsedThisHand: { human: false, ai: false },
+    shroudUsedThisHand: false,
+    trappedBoardIndices,
+    confirmedTrapIndices: [...(options.confirmedTrapIndices ?? [])],
+    triggeredTrapIndex: undefined,
     pastHands: [...(options.pastHands ?? [])],
     lastAction: {
       id: makeEventId(),
@@ -475,7 +518,9 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
       human: [...prev.players.human.sealedSkills],
       ai: [...prev.players.ai.sealedSkills],
     },
-    playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])],
+    playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
+    opponentSignatureSkill: prev.opponentSignatureSkill,
+    confirmedTrapIndices: [...(prev.confirmedTrapIndices ?? [])],
     pastHands: nextPastHands.slice(-12),
   });
 }
@@ -554,6 +599,8 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     if (action.type === 'hack') {
       if (state.usedHackThisTurn) return false;
       if (actor.sealedSkills.includes(action.skill)) return false;
+      if (actorId === 'human' && state.lockedHumanHackSkill === action.skill) return false;
+      if (actorId === 'ai' && state.lockedAiHackSkill === action.skill) return false;
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
       const hCard = actor.hand[action.handIndex];
@@ -590,6 +637,8 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
         }
         case 'overclock-bluff':
           return actor.chips >= 35 && opp.chips > 0 && !opp.allIn;
+        case 'cold-freq-lock':
+          return !state.lockedAiHackSkill && actor.chips >= 45;
         default:
           return false;
       }
@@ -806,8 +855,60 @@ function autoRunoutToShowdown(state: GameState, actor: PlayerId): GameState {
   return settled;
 }
 
+function triggerGateTrapLoss(next: GameState, boardIndex: number): GameState {
+  const human = next.players.human;
+  const ai = next.players.ai;
+  next.board[boardIndex].isOpen = true;
+  next.board[boardIndex].source = 'flipped';
+  if (next.hackEscrowPot > 0) {
+    next.pot += next.hackEscrowPot;
+    next.hackEscrowPot = 0;
+  }
+  human.hiddenHackEscrow = 0;
+  ai.hiddenHackEscrow = 0;
+
+  const seizedChips = human.chips + next.pot;
+  ai.chips += seizedChips;
+  human.chips = 0;
+  next.pot = 0;
+  next.justCalledThisTurn = false;
+  next.phase = 'showdown';
+  next.triggeredTrapIndex = boardIndex;
+  next.confirmedTrapIndices = Array.from(
+    new Set([...(next.confirmedTrapIndices ?? []), boardIndex])
+  ).sort((a, b) => a - b);
+
+  next.result = {
+    winner: 'ai',
+    reason: 'showdown',
+    potWon: seizedChips,
+    payouts: { human: 0, ai: seizedChips },
+  };
+  const summary = `触发「闸门雷区」陷阱（公共节点 #${boardIndex + 1}）：算力瞬间熔断归零！`;
+  next.lastAction = {
+    id: makeEventId(),
+    type: 'showdown',
+    actor: 'ai',
+    boardIndex,
+    amount: seizedChips,
+    label: summary,
+  };
+  next.actionHistory.push({
+    id: makeEventId(),
+    handNumber: next.handNumber,
+    actor: 'system',
+    phase: 'showdown',
+    summary,
+    timestamp: Date.now(),
+  });
+  return next;
+}
+
 function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): GameState {
   const next = cloneState(state);
+  if (actorId === 'human' && next.trappedBoardIndices?.includes(boardIndex)) {
+    return triggerGateTrapLoss(next, boardIndex);
+  }
   const slot = next.board[boardIndex];
   slot.isOpen = true;
   slot.source = 'flipped';
@@ -819,6 +920,13 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
   const hiddenAfter = getHiddenBoardCount(next);
   const actorLabel = actorId === 'human' ? '我方' : next.players.ai.name;
   const cardTxt = formatCardShort(slot.card);
+  const useShroud =
+    actorId === 'ai' &&
+    next.opponentSignatureSkill === 'phantom-shroud' &&
+    !next.shroudUsedThisHand;
+  if (useShroud) {
+    next.shroudUsedThisHand = true;
+  }
 
   if (hiddenAfter === 0) {
     next.phase = 'river';
@@ -830,13 +938,15 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
     next.currentTurn = otherPlayer(actorId);
   }
 
-  const summary = `${actorLabel} 破译公共节点 #${boardIndex + 1}（${cardTxt}）`;
+  const summary = useShroud
+    ? `${actorLabel} 发动「伪影迷雾」破译了隐匿公共节点（槽位与牌面轨迹已混淆）`
+    : `${actorLabel} 破译公共节点 #${boardIndex + 1}（${cardTxt}）`;
   next.lastAction = {
     id: makeEventId(),
     type: 'flip',
     actor: actorId,
-    boardIndex,
-    cardLabel: cardTxt,
+    boardIndex: useShroud ? undefined : boardIndex,
+    cardLabel: useShroud ? undefined : cardTxt,
     label: summary,
   };
   next.actionHistory.push({
@@ -864,6 +974,9 @@ function performSwap(
   boardIndex: number
 ): GameState {
   const next = cloneState(state);
+  if (actorId === 'human' && next.trappedBoardIndices?.includes(boardIndex)) {
+    return triggerGateTrapLoss(next, boardIndex);
+  }
   const actor = next.players[actorId];
   const fee = getNextSwapFee(next, actorId);
 
@@ -899,9 +1012,18 @@ function performSwap(
   const hiddenAfter = getHiddenBoardCount(next);
   const actorLabel = actorId === 'human' ? '我方' : next.players.ai.name;
   const discardedTxt = formatCardShort(discarded);
-  const summary = `${actorLabel} 消耗 ${fee} 覆写换牌（释放 ${discardedTxt} 置换加密节点 #${
-    boardIndex + 1
-  }）`;
+  const useShroud =
+    actorId === 'ai' &&
+    next.opponentSignatureSkill === 'phantom-shroud' &&
+    !next.shroudUsedThisHand;
+  if (useShroud) {
+    next.shroudUsedThisHand = true;
+  }
+  const summary = useShroud
+    ? `${actorLabel} 发动「伪影迷雾」消耗 ${fee} 执行隐匿换牌（换入槽位与释放牌面已混淆）`
+    : `${actorLabel} 消耗 ${fee} 覆写换牌（释放 ${discardedTxt} 置换加密节点 #${
+        boardIndex + 1
+      }）`;
 
   if (actor.chips === 0) {
     actor.allIn = true;
@@ -930,10 +1052,10 @@ function performSwap(
     id: makeEventId(),
     type: 'swap',
     actor: actorId,
-    handIndex,
-    boardIndex,
+    handIndex: useShroud ? undefined : handIndex,
+    boardIndex: useShroud ? undefined : boardIndex,
     amount: fee,
-    cardLabel: discardedTxt,
+    cardLabel: useShroud ? undefined : discardedTxt,
     label: summary,
   };
   next.actionHistory.push({
@@ -1213,6 +1335,21 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       next.usedScanThisTurn = false;
       next.currentTurn = oppId;
       summary = `${actorLabel} 激活「超频脉压」：强行推进 ${cost} 算力，迫使对端响应`;
+    } else if (action.skillId === 'cold-freq-lock') {
+      const cost = 45;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      next.pot += cost;
+      const targetOpp = next.players[oppId];
+      const locked = pickRandomHackToLock(targetOpp.sealedSkills);
+      if (locked) {
+        next.lockedAiHackSkill = locked;
+      }
+      const lockedLabel =
+        locked === 'plus-one' ? '+1' : locked === 'minus-one' ? '-1' : '反色';
+      summary = locked
+        ? `${actorLabel} 激活「冷频封锁」（投入 ${cost}）：已冻结对端本手 [${lockedLabel}] 改牌权`
+        : `${actorLabel} 激活「冷频封锁」（投入 ${cost}）：对端基础改牌权已全被封印`;
     }
 
     next.lastAction = {
@@ -1330,6 +1467,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (action.type === 'raise') {
     const next = cloneState(state);
     const actor = next.players[actorId];
+    const opp = next.players[oppId];
     const diff = getBetDiff(next, actorId);
     const totalPay = diff + action.amount;
 
@@ -1337,6 +1475,21 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     actor.roundBet += totalPay;
     actor.totalCommitted += totalPay;
     next.pot += totalPay;
+
+    let siphonAmount = 0;
+    const hasSiphon =
+      actorId === 'human'
+        ? Boolean(next.playerAcquiredSkills?.includes('siphon-cache'))
+        : next.opponentSignatureSkill === 'siphon-cache';
+    const siphonTracker = next.siphonUsedThisHand ?? { human: false, ai: false };
+    if (hasSiphon && !siphonTracker[actorId] && opp.chips > 0) {
+      const baseSteal = actorId === 'ai' ? 25 : 20;
+      siphonAmount = Math.min(baseSteal, opp.chips);
+      opp.chips -= siphonAmount;
+      actor.chips += siphonAmount;
+      next.siphonUsedThisHand = { ...siphonTracker, [actorId]: true };
+    }
+
     if (actor.chips === 0) actor.allIn = true;
 
     next.justCalledThisTurn = false;
@@ -1356,7 +1509,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         : actor.allIn
           ? '全下过载加注'
           : '加注施压';
-    const summary = `${actorLabel} ${verb} +${action.amount}`;
+    const siphonSuffix = siphonAmount > 0 ? `（算力虹吸 +${siphonAmount}）` : '';
+    const summary = `${actorLabel} ${verb} +${action.amount}${siphonSuffix}`;
     const vfx: VfxEvent = {
       id: makeEventId(),
       type: 'raise',

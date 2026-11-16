@@ -504,3 +504,33 @@ export function PixelHoldIcon({ size = 14, className = '' }: IconProps) {
     </svg>
   );
 }
+
+export function PixelCheckIcon({ size = 14, className = '' }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      shapeRendering="crispEdges"
+      className={`lc-px-icon ${className}`}
+      aria-hidden="true"
+    >
+      <path d="M12 4h2v2h-2V4zm-2 2h2v2h-2V6zM8 8h2v2H8V8zm-2 2h2v2H6v-2zM4 8h2v2H4V8zM2 6h2v2H2V6z" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function PixelLockIcon({ size = 14, className = '' }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      shapeRendering="crispEdges"
+      className={`lc-px-icon ${className}`}
+      aria-hidden="true"
+    >
+      <path d="M5 2h6v2H5V2zM4 4h2v3H4V4zm6 0h2v3h-2V4zM2 7h12v7H2V7zm5 2v3h2V9H7z" fill="currentColor" />
+    </svg>
+  );
+}
