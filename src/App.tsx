@@ -117,6 +117,15 @@ import {
   type P2pRole,
   type P2pTransport,
 } from './engine/p2pTransport.ts';
+import {
+  actionToSoundCue,
+  loadSoundSettings,
+  playSound,
+  saveSoundSettings,
+  showdownToSoundCue,
+  unlockAudioContext,
+  type SoundSettings,
+} from './engine/soundEngine.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
@@ -395,6 +404,7 @@ export function App() {
   const [unreadMobileChat, setUnreadMobileChat] = useState(0);
   const mobileChatOpenRef = useRef(mobileChatOpen);
   mobileChatOpenRef.current = mobileChatOpen;
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => loadSoundSettings());
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
@@ -903,6 +913,8 @@ export function App() {
   const hasBootedRef = useRef(false);
   const lastHandledSwapIdRef = useRef<string | null>(null);
   const lastHandledShowdownHandRef = useRef<number>(0);
+  const lastSoundActionIdRef = useRef<string | null>(null);
+  const lastChargeStepRef = useRef<number>(-1);
   const pendingBundledChatRef = useRef<string | null>(null);
   const resetEpochRef = useRef(0);
   const chatDraftRef = useRef('');
@@ -1050,6 +1062,7 @@ export function App() {
           contactDy,
           dropDy,
         });
+        playSound('bubble');
 
         if (willCrush) {
           scheduleTimeout(() => {
@@ -1369,6 +1382,28 @@ export function App() {
     buildChatHistorySnapshot,
   ]);
 
+  // Unlock Web Audio API on first user gesture (iOS Safari / Chrome autoplay policy)
+  useEffect(() => {
+    const unlock = () => unlockAudioContext();
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  // Synchronized Action Sound Effects (Human, AI, and P2P Remote Actions)
+  useEffect(() => {
+    const evt = state.lastAction;
+    if (!evt || lastSoundActionIdRef.current === evt.id) return;
+    lastSoundActionIdRef.current = evt.id;
+    const cue = actionToSoundCue(evt);
+    if (cue) {
+      playSound(cue);
+    }
+  }, [state.lastAction]);
+
   // Scan action laser sweep VFX + toast feedback (Triggers for BOTH Player & Opponent!)
   useEffect(() => {
     const evt = state.lastAction;
@@ -1433,6 +1468,7 @@ export function App() {
       setAiRoundLossFlicker(true);
       window.setTimeout(() => setAiRoundLossFlicker(false), 1200);
     }
+    playSound(showdownToSoundCue(res, state.players.human.chips, state.players.ai.chips));
 
     const line =
       res.reason === 'scan-caught'
@@ -1640,14 +1676,22 @@ export function App() {
     const startMs = Date.now();
     const durationMs = 720;
     setHoldProgress(4);
+    lastChargeStepRef.current = 0;
+    playSound('charge-tick', { progress: 4 });
     holdIntervalRef.current = window.setInterval(() => {
       const pct = Math.min(100, Math.round(((Date.now() - startMs) / durationMs) * 100));
       setHoldProgress(pct);
+      const step = Math.floor(pct / 20);
+      if (step > lastChargeStepRef.current && pct < 100) {
+        lastChargeStepRef.current = step;
+        playSound('charge-tick', { progress: pct });
+      }
       if (pct >= 100) {
         if (holdIntervalRef.current !== null) {
           window.clearInterval(holdIntervalRef.current);
           holdIntervalRef.current = null;
         }
+        lastChargeStepRef.current = -1;
         setHoldProgress(0);
         executeHumanAction({ type: 'raise', amount: halfAmt, isHalfStack: true });
       }
@@ -1977,6 +2021,7 @@ export function App() {
     setActiveModal({ type: 'none' });
     setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
+    lastSoundActionIdRef.current = null;
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,
@@ -3635,6 +3680,58 @@ export function App() {
                 <PixelMenuIcon kind="back" size={15} />
                 返回牌局
               </button>
+            </div>
+
+            {/* Sound FX Mute & Volume Control Strip */}
+            <div className="lc-sound-strip">
+              <div className="lc-sound-row">
+                <button
+                  id="settings-btn-sound-toggle"
+                  type="button"
+                  className={`lc-vfx-chip ${soundSettings.enabled ? 'active' : ''}`}
+                  onClick={() => {
+                    const next = { ...soundSettings, enabled: !soundSettings.enabled };
+                    setSoundSettings(next);
+                    saveSoundSettings(next);
+                    if (next.enabled) {
+                      unlockAudioContext();
+                      playSound('ui-click');
+                    }
+                  }}
+                >
+                  {soundSettings.enabled ? '音效：开启' : '音效：已静音'}
+                </button>
+                <label htmlFor="settings-input-sound-volume" className="lc-sound-label">
+                  音量 {Math.round(soundSettings.volume * 100)}%
+                </label>
+                <input
+                  id="settings-input-sound-volume"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="lc-sound-slider"
+                  disabled={!soundSettings.enabled}
+                  value={Math.round(soundSettings.volume * 100)}
+                  onChange={(e) => {
+                    const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
+                    setSoundSettings(next);
+                    saveSoundSettings(next);
+                  }}
+                />
+                <button
+                  id="settings-btn-sound-test"
+                  type="button"
+                  className="lc-vfx-chip"
+                  disabled={!soundSettings.enabled}
+                  onClick={() => {
+                    unlockAudioContext();
+                    playSound('skill');
+                  }}
+                >
+                  试听
+                </button>
+              </div>
             </div>
 
             {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides independently */}
