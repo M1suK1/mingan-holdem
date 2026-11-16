@@ -2035,6 +2035,18 @@ button:disabled {
   padding: 20px;
 }
 
+.lc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: rgba(2, 4, 10, 0.84);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  overflow-y: auto;
+}
+
 .lc-settings-menu {
   width: min(100%, 420px);
   display: flex;
@@ -4295,14 +4307,13 @@ button:disabled {
    ========================================================================= */
 
 .lc-skill-loot-modal {
-  width: min(760px, 95vw);
-  max-height: min(680px, 90dvh);
-  padding: 16px;
+  width: min(780px, 94vw);
+  padding: 16px 18px;
   background: rgba(5, 8, 16, 0.98);
   display: flex;
   flex-direction: column;
   gap: 14px;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .lc-skill-modal-head {
@@ -4436,4 +4447,160 @@ button:disabled {
   .lc-skill-replace-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* =========================================================================
+   17. SEC-00 Player Monologue Overlay & ECHO-0 Disguise Silhouette Framing
+   ========================================================================= */
+
+.lc-sec00-intro-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+  background: rgba(3, 6, 14, 0.56);
+  backdrop-filter: blur(2px);
+}
+
+.lc-sec00-intro-card {
+  width: min(760px, 96vw);
+  padding: 16px 18px;
+  background: rgba(5, 10, 20, 0.96);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lc-sec00-intro-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lc-sec00-speaker-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #10f5a0;
+  letter-spacing: 0.05em;
+}
+
+.lc-sec00-intro-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #e6fbff;
+}
+
+.lc-sec00-intro-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: #e2e8f0;
+}
+
+.lc-sec00-intro-tip {
+  padding: 8px 10px;
+  border-left: 3px solid #00f0ff;
+  background: rgba(0, 240, 255, 0.08);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #a5f3fc;
+}
+
+.lc-sec00-intro-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.lc-sec00-dot {
+  width: 18px;
+  height: 4px;
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.lc-sec00-dot.is-active {
+  background: #00f0ff;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.85);
+}
+
+.lc-sec00-intro-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lc-opp-portrait-img.is-echo0-framing {
+  object-fit: cover;
+  object-position: 38% 12%;
+}
+
+.lc-opp-portrait-img.is-echo0-disguised {
+  filter: brightness(0.24) contrast(1.45) drop-shadow(0 0 14px rgba(0, 240, 255, 0.55));
+  opacity: 0.88;
+}
+
+/* Dashed Monologue Dialogue Box Inside Chat Feed */
+.lc-chat-feed.has-monologue {
+  overflow-y: auto;
+  justify-content: flex-end;
+}
+
+.lc-chat-msg.is-monologue {
+  align-self: stretch;
+  max-width: 100%;
+  max-height: none;
+  overflow: visible;
+  flex-shrink: 0;
+  border: 1.5px dashed rgba(0, 240, 255, 0.78) !important;
+  background: rgba(7, 21, 38, 0.92) !important;
+  box-shadow: inset 0 0 18px rgba(0, 240, 255, 0.08);
+  padding: 9px 11px;
+}
+
+.lc-chat-msg.is-monologue .lc-chat-meta {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 5px;
+}
+
+.lc-monologue-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #e6fbff;
+  margin-bottom: 4px;
+}
+
+.lc-monologue-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+.lc-monologue-tip {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-left: 2px dashed #10f5a0;
+  background: rgba(16, 245, 160, 0.08);
+  font-size: 11px;
+  line-height: 1.42;
+  color: #a7f3d0;
+}
+
+.lc-monologue-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
 }

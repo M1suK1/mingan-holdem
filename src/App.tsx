@@ -162,8 +162,18 @@ import {
   loadTutorialCompleted,
   saveTutorialCompleted,
 } from './engine/tutorial.ts';
+import {
+  SEC00_MONOLOGUE_STEPS,
+  createSec00TutorialState,
+  getSec00Capabilities,
+  getSec00Guidance,
+  isSec00ActionAllowed,
+  pickSec00AiAction,
+} from './engine/sec00Tutorial.ts';
+import { resolveEcho0Sprite } from './engine/storyCharacters.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import TutorialOverlayBar from './components/TutorialOverlayBar.tsx';
+import Sec00TutorialOverlay from './components/Sec00TutorialOverlay.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
 import {
@@ -386,9 +396,27 @@ export function App() {
   activeEscapeNodeRef.current = activeEscapeNodeIndex;
   const escapeClearQueuedForMatchRef = useRef(false);
 
+  const [sec00GuideActive, setSec00GuideActive] = useState<boolean>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0);
+  });
+  const [sec00IntroIndex, setSec00IntroIndex] = useState<number | null>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0) ? 0 : null;
+  });
+  const sec00GuideActiveRef = useRef(sec00GuideActive);
+  sec00GuideActiveRef.current = sec00GuideActive;
+  const sec00IntroIndexRef = useRef(sec00IntroIndex);
+  sec00IntroIndexRef.current = sec00IntroIndex;
+
   const [state, setState] = useState<GameState>(() => {
     const initEsc = loadEscapeProgress();
     const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    if (initNodeIdx === 0 && !initEsc.clearedIndices.includes(0)) {
+      return createSec00TutorialState();
+    }
     const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
     return createInitialState({
       config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
@@ -970,15 +998,23 @@ export function App() {
   }, []);
 
   // Chat Stack & FIFO Bubble Queue
-  const [messages, setMessages] = useState<ChatItem[]>([
-    {
-      id: 'init-msg-1',
-      sender: 'opponent',
-      speaker: FALLBACK_CONTRACT_CHARACTER.name,
-      text: '协议连接建立。直接拖牌互换或点击暗牌翻开，让我看看你的牌序。',
-      crushed: false,
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatItem[]>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    if (initNodeIdx === 0 && !initEsc.clearedIndices.includes(0)) {
+      return [];
+    }
+    const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    return [
+      {
+        id: 'init-msg-1',
+        sender: 'opponent',
+        speaker: initNode.opponentName,
+        text: `已接入 ${initNode.code} · ${initNode.title}。亮出你的牌序吧。`,
+        crushed: false,
+      },
+    ];
+  });
   const [crushingActive, setCrushingActive] = useState(false);
   const [historyOffset, setHistoryOffset] = useState(0);
   const [enteringId, setEnteringId] = useState<string | null>(null);
@@ -1361,17 +1397,82 @@ export function App() {
         isOwnPrivate: evt.actor === 'human',
       },
     });
-
-    const timer = window.setTimeout(() => {
-      setSwapFlight((curr) => (curr?.id === evt.id ? null : curr));
-    }, 580);
-
-    return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
+
+  useEffect(() => {
+    if (!swapFlight) return;
+    const activeId = swapFlight.id;
+    const timer = window.setTimeout(() => {
+      setSwapFlight((curr) => (curr?.id === activeId ? null : curr));
+    }, 580);
+    return () => window.clearTimeout(timer);
+  }, [swapFlight?.id]);
+
+  useEffect(() => {
+    if (state.phase === 'showdown' || pendingSkillClaim) {
+      setSwapFlight(null);
+    }
+  }, [state.phase, pendingSkillClaim]);
 
   // AI & Tutorial Turn Scheduler (Skipped during P2P friend multiplayer!)
   useEffect(() => {
     if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (sec00GuideActive && sec00IntroIndex !== null) return;
+
+    if (sec00GuideActive) {
+      let cancelled = false;
+      setIsAiThinking(true);
+      const timer = window.setTimeout(() => {
+        try {
+          const snapshot = latestStateRef.current;
+          if (
+            cancelled ||
+            !sec00GuideActiveRef.current ||
+            snapshot.phase === 'showdown' ||
+            snapshot.currentTurn !== 'ai'
+          ) {
+            return;
+          }
+          const act = pickSec00AiAction(snapshot);
+          if (act) {
+            setState((prev) => {
+              if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
+              return applyAction(prev, act);
+            });
+            if (act.type === 'hack') {
+              setActiveExpression('smile');
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（故意把篡改信号漏得这么明显……只要扫一眼就能抓到破绽。快一点，来击穿我。）',
+              });
+            } else if (act.type === 'flip') {
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（比牌型我已经输了……刚好。借这一局，把「那份东西」写进他的实体壳层里。）',
+              });
+            } else if (act.type === 'raise') {
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: '（信号极度不稳……追踪节点正在向这片野区合拢……必须……逃出去。）',
+              });
+            }
+          }
+        } finally {
+          if (!cancelled) setIsAiThinking(false);
+        }
+      }, 480);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+        setIsAiThinking(false);
+      };
+    }
 
     if (tutorialActive) {
       let cancelled = false;
@@ -1438,7 +1539,7 @@ export function App() {
         if (llmDecision) {
           setLlmLogs((prev) => [llmDecision.logEntry, ...prev].slice(0, 40));
           setActiveExpression(llmDecision.expression);
-          enqueueOpponentSegments(char.name, llmDecision.segments);
+          enqueueOpponentSegments(snapshot.players.ai.name, llmDecision.segments);
           setState((prev) => {
             if (prev.phase === 'showdown' || prev.currentTurn !== 'ai') return prev;
             return applyAction(prev, llmDecision.action);
@@ -1470,13 +1571,13 @@ export function App() {
           if (resetEpochRef.current !== epoch) return;
           if (chatRes.logEntry) setLlmLogs((prev) => [chatRes.logEntry!, ...prev].slice(0, 40));
           setActiveExpression(chatRes.expression);
-          enqueueOpponentSegments(char.name, chatRes.segments);
+          enqueueOpponentSegments(snapshot.players.ai.name, chatRes.segments);
         } else {
           setActiveExpression(decision.dialogue.expression);
           if (decision.action.type !== 'hack') {
             enqueueTask({
               kind: 'opponent',
-              speaker: char.name,
+              speaker: snapshot.players.ai.name,
               text: decision.dialogue.text,
             });
           }
@@ -1497,6 +1598,10 @@ export function App() {
     state.justCalledThisTurn,
     state.actionHistory.length,
     state.config.aiDelayMs,
+    sec00GuideActive,
+    sec00IntroIndex,
+    tutorialActive,
+    isP2pSessionActive,
     enqueueTask,
     enqueueOpponentSegments,
     buildChatHistorySnapshot,
@@ -1558,17 +1663,21 @@ export function App() {
     if (evt.caught) {
       pushToast(
         evt.actor === 'human' ? 'success' : 'error',
-        evt.actor === 'human' ? '扫描抓获对端篡改！' : `${character.name} 扫描抓获了我方篡改！`,
+        evt.actor === 'human'
+          ? '扫描抓获对端篡改！'
+          : `${state.players.ai.name} 扫描抓获了我方篡改！`,
         evt.label
       );
     } else {
       pushToast(
         'info',
-        evt.actor === 'human' ? '扫描核验完成：未被篡改' : `${character.name} 扫描未发现异常`,
+        evt.actor === 'human'
+          ? '扫描核验完成：未被篡改'
+          : `${state.players.ai.name} 扫描未发现异常`,
         `已预支 ${evt.amount ?? state.config.scanCost} 算力至奖池`
       );
     }
-  }, [state.lastAction, state.config.scanCost, character.name, pushToast]);
+  }, [state.lastAction, state.config.scanCost, state.players.ai.name, pushToast]);
 
   // Showdown reaction + Round Loss Mosaic Flicker (Both Player & Opponent!)
   useEffect(() => {
@@ -1658,12 +1767,14 @@ export function App() {
           enqueueOpponentSegments(currChar.name, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
         });
       } else {
-        enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+        enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
       }
       return;
     }
 
-    enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
+    if (!sec00GuideActiveRef.current || state.players.ai.chips > 0) {
+      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+    }
 
     // 整场算力归零：优先处理逃亡路线图节点循环，否则走原契约追捕流程
     if (state.players.ai.chips === 0) {
@@ -1672,6 +1783,14 @@ export function App() {
         const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
         if (!escapeClearQueuedForMatchRef.current) {
           escapeClearQueuedForMatchRef.current = true;
+          if (sec00GuideActiveRef.current) {
+            setActiveExpression('surprise');
+            enqueueTask({
+              kind: 'opponent',
+              speaker: clearedNode?.opponentName ?? '匿名终端 [UNKNOWN_0x00]',
+              text: '算力归零。按黑域协议，这具虚拟实体归你了。……别回头，带上它走。',
+            });
+          }
           const hasSkillLoot = Boolean(clearedNode?.rewardSkillChoices?.length);
           pushToast(
             'success',
@@ -1831,6 +1950,15 @@ export function App() {
   };
 
   const executeHumanAction = (action: GameAction) => {
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      if (!isSec00ActionAllowed(latest, action)) {
+        const g = getSec00Guidance(latest, { selectedHandIndex, scanMode, showRaiseTiers });
+        pushToast('info', '请按当前 SEC-00 教学步骤操作', g.instruction);
+        return;
+      }
+    }
     cancelHoldHalfRaise();
     setSelectedHandIndex(null);
     setDraggedHandIndex(null);
@@ -1870,6 +1998,16 @@ export function App() {
 
   const handleExecuteHack = (skill: HackSkillId) => {
     if (tutorialActive && !tutorialCaps.allowHack) return;
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      const caps = getSec00Capabilities(latest);
+      if (!caps.allowHack) {
+        const g = getSec00Guidance(latest, { selectedHandIndex, scanMode, showRaiseTiers });
+        pushToast('info', '黑客技尚未解锁', g.instruction);
+        return;
+      }
+    }
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0) {
       pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能使用黑客或扫描技能');
@@ -1888,6 +2026,11 @@ export function App() {
       return;
     }
     const action: GameAction = { type: 'hack', handIndex: selectedHandIndex, skill };
+    if (sec00GuideActiveRef.current && !isSec00ActionAllowed(state, action)) {
+      const g = getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers });
+      pushToast('info', '请按 SEC-00 教学指定动作注入', g.instruction);
+      return;
+    }
     if (!isActionLegal(state, action)) {
       const hc = state.players.human.hand[selectedHandIndex];
       const cost = getEffectiveHackCost(state, 'human', skill);
@@ -1902,6 +2045,14 @@ export function App() {
     }
     setState((prev) => applyAction(prev, action));
     pushToast('info', '黑客协议注入成功', '改变结果仅己方可见，且可继续交换或行动');
+    if (sec00GuideActiveRef.current) {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: state.players.ai.name,
+        msgKind: 'thought',
+        text: '（周围都是高算力猎手……只有对面这个无所事事的底层黑客毫不起眼。没时间挑了……只能选择这个人了。）',
+      });
+    }
   };
 
   const handleUseAcquiredSkill = (skillId: string) => {
@@ -1957,6 +2108,11 @@ export function App() {
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
     if (tutorialActive && !tutorialCaps.allowScan) return;
+    if (sec00GuideActiveRef.current) {
+      if (sec00IntroIndexRef.current !== null) return;
+      const latest = latestStateRef.current;
+      if (!getSec00Capabilities(latest).allowScan) return;
+    }
     if (!scanMode || state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0 && state.phase !== 'river') {
       setScanMode(false);
@@ -1964,6 +2120,11 @@ export function App() {
       return;
     }
     const action: GameAction = { type: 'scan', targetKind, targetIndex };
+    if (sec00GuideActiveRef.current && !isSec00ActionAllowed(state, action)) {
+      const g = getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers });
+      pushToast('info', '请扫描指定目标牌', g.instruction);
+      return;
+    }
     if (!isActionLegal(state, action)) {
       pushToast('warn', '该节点本轮已扫描过或算力不足');
       setScanMode(false);
@@ -2146,6 +2307,9 @@ export function App() {
       lastSoundActionIdRef.current = null;
       setTutorialActive(true);
       setTutorialStageIndex(clamped);
+      setSec00GuideActive(false);
+      sec00GuideActiveRef.current = false;
+      setSec00IntroIndex(null);
       setActiveEscapeNodeIndex(null);
       setViewMode('arena');
       setWelcomeDismissed(true);
@@ -2287,6 +2451,10 @@ export function App() {
       pushToast('info', '已向房主申请重置牌桌');
       return latestStateRef.current;
     }
+    if (sec00GuideActiveRef.current && !customConfig && !nextCharacter && !overrideChips) {
+      startSec00Tutorial(false);
+      return latestStateRef.current;
+    }
     const activeEscNode =
       activeEscapeNodeRef.current !== null && !overrideOpponentName && !nextCharacter
         ? ESCAPE_ROUTE_NODES[activeEscapeNodeRef.current] ?? null
@@ -2362,6 +2530,43 @@ export function App() {
     return freshState;
   };
 
+  const startSec00Tutorial = useCallback((showIntro = true) => {
+    for (const id of timersRef.current) {
+      window.clearTimeout(id);
+    }
+    timersRef.current = [];
+    queueRef.current = [];
+    inFlightTaskRef.current = null;
+    resetEpochRef.current += 1;
+    isAnimatingRef.current = false;
+    escapeClearQueuedForMatchRef.current = false;
+    setQueuedCount(0);
+    setFloatingBubble(null);
+    setCrushingActive(false);
+    setHistoryOffset(0);
+    setSelectedHandIndex(null);
+    setDraggedHandIndex(null);
+    setShowRaiseTiers(false);
+    setScanMode(false);
+    setPendingSkillTargetId(null);
+    setRoundLossFlicker(false);
+    setAiRoundLossFlicker(false);
+    setActiveExpression('calm');
+    setActiveModal({ type: 'none' });
+    setTutorialActive(false);
+    setActiveEscapeNodeIndex(0);
+    activeEscapeNodeRef.current = 0;
+    setSec00GuideActive(true);
+    sec00GuideActiveRef.current = true;
+    setSec00IntroIndex(showIntro ? 0 : null);
+    sec00IntroIndexRef.current = showIntro ? 0 : null;
+    lastHandledShowdownHandRef.current = 0;
+    lastSoundActionIdRef.current = null;
+    setViewMode('arena');
+    setState(createSec00TutorialState());
+    setMessages([]);
+  }, []);
+
   const handleEnterEscapeNode = (nodeIndex: number) => {
     const latestEsc = completeEscapeTransition(escapeProgressRef.current);
     if (!canEnterEscapeNode(latestEsc, nodeIndex)) return;
@@ -2376,6 +2581,13 @@ export function App() {
     escapeProgressRef.current = latestEsc;
     setActiveEscapeNodeIndex(nodeIndex);
     activeEscapeNodeRef.current = nodeIndex;
+    if (nodeIndex === 0 && !latestEsc.clearedIndices.includes(0)) {
+      startSec00Tutorial(true);
+      return;
+    }
+    setSec00GuideActive(false);
+    sec00GuideActiveRef.current = false;
+    setSec00IntroIndex(null);
     setViewMode('arena');
     performFullReset(
       { ...state.config, aiDifficulty: node.difficulty },
@@ -2397,19 +2609,10 @@ export function App() {
 
   const handleResetEscapeRoute = () => {
     const fresh = resetEscapeProgress();
-    const firstNode = ESCAPE_ROUTE_NODES[0];
     setEscapeProgress(fresh);
     escapeProgressRef.current = fresh;
-    setActiveEscapeNodeIndex(0);
-    activeEscapeNodeRef.current = 0;
-    performFullReset(
-      { ...state.config, aiDifficulty: firstNode.difficulty },
-      undefined,
-      undefined,
-      { human: state.config.startingChips, ai: firstNode.opponentChips },
-      firstNode.opponentName
-    );
-    pushToast('info', '已重置黑域逃亡路线', '重新从 SEC-00 公共暗区野桌开始突围');
+    startSec00Tutorial(true);
+    pushToast('info', '已重置黑域逃亡路线', '重新从 SEC-00 公共暗区野桌单轮教学开始');
   };
 
   const handleRetreatToEscapeMap = () => {
@@ -2496,6 +2699,9 @@ export function App() {
         }
         const wonState = applyDebugWinHand(curr);
         lastHandledShowdownHandRef.current = 0;
+        setSec00GuideActive(false);
+        sec00GuideActiveRef.current = false;
+        setSec00IntroIndex(null);
         setState(wonState);
         setActiveModal({ type: 'none' });
         appendCmdLog('success', '[OK] 已执行 win：对手算力归零，触发过关结算');
@@ -2563,15 +2769,22 @@ export function App() {
         setActiveEscapeNodeIndex(idx);
         activeEscapeNodeRef.current = idx;
         setTutorialActive(false);
-        setViewMode('arena');
         setActiveModal({ type: 'none' });
-        performFullReset(
-          { ...state.config, aiDifficulty: node.difficulty },
-          undefined,
-          undefined,
-          { human: state.config.startingChips, ai: node.opponentChips },
-          node.opponentName
-        );
+        if (idx === 0) {
+          startSec00Tutorial(true);
+        } else {
+          setSec00GuideActive(false);
+          sec00GuideActiveRef.current = false;
+          setSec00IntroIndex(null);
+          setViewMode('arena');
+          performFullReset(
+            { ...state.config, aiDifficulty: node.difficulty },
+            undefined,
+            undefined,
+            { human: state.config.startingChips, ai: node.opponentChips },
+            node.opponentName
+          );
+        }
         appendCmdLog('success', `[OK] 已传送至 ${node.code} · ${node.title}`);
         return;
       }
@@ -2654,21 +2867,11 @@ export function App() {
         saveTutorialCompleted(false);
         setTutorialActive(false);
         const freshEsc = resetEscapeProgress();
-        const firstNode = ESCAPE_ROUTE_NODES[0];
         setEscapeProgress(freshEsc);
         escapeProgressRef.current = freshEsc;
-        setActiveEscapeNodeIndex(0);
-        activeEscapeNodeRef.current = 0;
-        setViewMode('arena');
-        performFullReset(
-          { ...DEFAULT_CONFIG, aiDifficulty: firstNode.difficulty },
-          undefined,
-          [],
-          { human: DEFAULT_CONFIG.startingChips, ai: firstNode.opponentChips },
-          firstNode.opponentName
-        );
+        startSec00Tutorial(true);
         setActiveModal({ type: 'none' });
-        pushToast('success', '玩家档案已彻底重置', '已清空逃亡路线、暗墙记录、实体技能与教程进度');
+        pushToast('success', '玩家档案已彻底重置', '已清空逃亡路线、暗墙记录、实体技能与教程进度，回到 SEC-00 独白教学');
         appendCmdLog('success', '[OK] 已彻底重置玩家全部本地档案（回到初始 SEC-00）');
         return;
       }
@@ -2716,6 +2919,9 @@ export function App() {
     try {
       const nextChar = await loadContractCharacterByFile(fileName);
       const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
+      setSec00GuideActive(false);
+      sec00GuideActiveRef.current = false;
+      setSec00IntroIndex(null);
       setActiveEscapeNodeIndex(null);
       setViewMode('arena');
       setCharacter(nextChar);
@@ -2812,7 +3018,7 @@ export function App() {
       setLlmLogs((prev) => [res.logEntry!, ...prev].slice(0, 40));
     }
     setActiveExpression(res.expression);
-    enqueueOpponentSegments(character.name, res.segments);
+    enqueueOpponentSegments(latestStateRef.current.players.ai.name, res.segments);
   };
 
   const handleReplayBubble = () => {
@@ -2820,7 +3026,7 @@ export function App() {
       character.voice?.samples?.[0] ??
       character.quote ??
       '数据流正常，准备下一手博弈。';
-    enqueueTask({ kind: 'opponent', speaker: character.name, text: sample });
+    enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: sample });
   };
 
   // Live Hand Summaries (Respecting hidden tamper isolation: opponent only sees unmodified cards!)
@@ -2918,17 +3124,25 @@ export function App() {
     (vfxTestMode === 'human-low' ||
       (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（P2P 联机时展示好友立绘）
+  const activeEscapeNode =
+    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+  const isSec00Echo0 = activeEscapeNode?.index === 0 && !tutorialActive && !isP2pConnected;
+
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用女主 ECHO-0 匿名伪装立绘）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
-      : resolveVirtualEntityPortrait(character, activeExpression);
+      : isSec00Echo0
+        ? resolveEcho0Sprite(activeExpression)
+        : resolveVirtualEntityPortrait(character, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
-      : llmConfig.overloadPersona
-        ? '#FF4757'
-        : character.color || '#FF2E88';
+      : isSec00Echo0
+        ? '#00F0FF'
+        : llmConfig.overloadPersona
+          ? '#FF4757'
+          : character.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -2963,8 +3177,10 @@ export function App() {
     () =>
       tutorialActive
         ? getTutorialCapabilities(tutorialStageIndex)
-        : { allowHack: true, allowScan: true, allowRaise: true },
-    [tutorialActive, tutorialStageIndex]
+        : sec00GuideActive
+          ? getSec00Capabilities(state)
+          : { allowHack: true, allowScan: true, allowRaise: true },
+    [tutorialActive, tutorialStageIndex, sec00GuideActive, state]
   );
 
   const tutorialGuidance = useMemo(
@@ -2975,9 +3191,22 @@ export function App() {
     [tutorialActive, tutorialStageIndex, state, scanMode, selectedHandIndex]
   );
 
+  const sec00Guidance = useMemo(
+    () =>
+      sec00GuideActive && !tutorialActive
+        ? getSec00Guidance(state, { selectedHandIndex, scanMode, showRaiseTiers })
+        : null,
+    [sec00GuideActive, tutorialActive, state, selectedHandIndex, scanMode, showRaiseTiers]
+  );
+
   // Highlight guided tutorial targets cleanly without leaving stale classes
   useEffect(() => {
-    const ids = tutorialActive && tutorialGuidance ? tutorialGuidance.focusIds : [];
+    const ids =
+      tutorialActive && tutorialGuidance
+        ? tutorialGuidance.focusIds
+        : sec00GuideActive && sec00IntroIndex === null && sec00Guidance
+          ? sec00Guidance.focusIds
+          : [];
     const elements: HTMLElement[] = [];
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -2991,13 +3220,27 @@ export function App() {
         el.classList.remove('is-tutorial-focus');
       }
     };
-  }, [tutorialActive, tutorialGuidance, showRaiseTiers, scanMode, selectedHandIndex, state.phase, state.currentTurn]);
+  }, [
+    tutorialActive,
+    tutorialGuidance,
+    sec00GuideActive,
+    sec00IntroIndex,
+    sec00Guidance,
+    showRaiseTiers,
+    scanMode,
+    selectedHandIndex,
+    state.phase,
+    state.currentTurn,
+  ]);
 
-  const activeEscapeNode =
-    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+  const hasTopGuideBar = tutorialActive || sec00GuideActive;
 
   return (
-    <div className={`lc-shell ${tutorialActive ? 'has-tutorial-bar' : ''} ${viewMode === 'escape-map' ? 'is-escape-map-view' : ''}`}>
+    <div
+      className={`lc-shell ${hasTopGuideBar ? 'has-tutorial-bar' : ''} ${
+        viewMode === 'escape-map' ? 'is-escape-map-view' : ''
+      }`}
+    >
       <CyberBackdrop
         situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
         pot={state.pot}
@@ -3026,6 +3269,23 @@ export function App() {
               onNextStage={handleTutorialNextStage}
               onRetryStage={() => startTutorial(tutorialStageIndex)}
               onExitTutorial={() => exitTutorial(false)}
+            />
+          ) : sec00GuideActive && sec00Guidance ? (
+            <Sec00TutorialOverlay
+              introStepIndex={sec00IntroIndex}
+              guidance={sec00Guidance}
+              onSkipIntro={() => {
+                setSec00IntroIndex(null);
+                setMobileChatOpen(false);
+              }}
+              onOpenMobileChat={() => setMobileChatOpen(true)}
+              onRetrySec00={() => startSec00Tutorial(true)}
+              onDismissGuide={() => {
+                setSec00GuideActive(false);
+                sec00GuideActiveRef.current = false;
+                setSec00IntroIndex(null);
+                pushToast('info', '已关闭 SEC-00 步进引导', '你可自由按常规规则继续完成本局');
+              }}
             />
           ) : (
             !tutorialCompleted &&
@@ -3235,8 +3495,10 @@ export function App() {
             {/* Layer 2 (z:2): Character Portrait Cutout + V-Sync-Off Horizontal Tear Slices */}
             <img
               src={portraitSrc}
-              alt={`${character.name}半身立绘`}
-              className="lc-opp-portrait-img"
+              alt={`${isSec00Echo0 ? '匿名终端 [UNKNOWN_0x00]' : character.name}半身立绘`}
+              className={`lc-opp-portrait-img ${
+                isSec00Echo0 && !isShowdown ? 'is-echo0-disguised' : ''
+              } ${isSec00Echo0 ? 'is-echo0-framing' : ''}`}
               width={550}
               height={420}
             />
@@ -3247,7 +3509,9 @@ export function App() {
                   src={portraitSrc}
                   alt=""
                   aria-hidden="true"
-                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls}`}
+                  className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls} ${
+                    isSec00Echo0 ? 'is-echo0-framing' : ''
+                  }`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -3382,7 +3646,7 @@ export function App() {
                     }
                     actionHint={
                       canScanCard
-                        ? `点击扫描 ${character.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
+                        ? `点击扫描 ${ai.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
                             state,
                             'human'
                           )}）`
@@ -3526,12 +3790,12 @@ export function App() {
                     state.result?.winner === 'human'
                       ? '我方胜出'
                       : state.result?.winner === 'ai'
-                        ? `${character.name}胜出`
+                        ? `${ai.name}胜出`
                         : '平局分池'
                   }`
-                : `等待 ${character.name} 行动...`
+                : `等待 ${ai.name} 行动...`
               : scanMode
-                ? `扫描模式激活：点击上方 ${character.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
+                ? `扫描模式激活：点击上方 ${ai.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
                 : diff > 0
                   ? `遭遇加注：请先点击右侧「跟注 +${paid}」（不消耗行动）`
                   : draggedHandIndex !== null
@@ -3900,7 +4164,9 @@ export function App() {
 
             <div
               ref={chatFeedRef}
-              className="lc-chat-feed"
+              className={`lc-chat-feed ${
+                sec00GuideActive && sec00IntroIndex !== null ? 'has-monologue' : ''
+              }`}
               onWheel={handleFeedWheel}
               role="log"
               aria-live="polite"
@@ -3966,6 +4232,80 @@ export function App() {
                     </article>
                   );
                 })}
+
+                {sec00GuideActive && sec00IntroIndex !== null && (
+                  <article
+                    className="lc-chat-msg human is-monologue"
+                    aria-label="玩家开局自言自语"
+                  >
+                    {(() => {
+                      const step =
+                        SEC00_MONOLOGUE_STEPS[sec00IntroIndex] ?? SEC00_MONOLOGUE_STEPS[0];
+                      const isFirst = sec00IntroIndex <= 0;
+                      const isLast = sec00IntroIndex >= SEC00_MONOLOGUE_STEPS.length - 1;
+                      return (
+                        <div className="lc-chat-msg-inner">
+                          <div className="lc-chat-meta human">
+                            <span>潜行黑客（自言自语）</span>
+                            <span>{step.tag}</span>
+                          </div>
+                          <div className="lc-monologue-title">{step.title}</div>
+                          <div className="lc-monologue-text">{step.text}</div>
+                          <div className="lc-monologue-tip">{step.tip}</div>
+                          <div className="lc-monologue-actions">
+                            <button
+                              id="sec00-intro-skip"
+                              type="button"
+                              className="lc-tutorial-btn"
+                              onClick={() => {
+                                setSec00IntroIndex(null);
+                                setMobileChatOpen(false);
+                              }}
+                            >
+                              跳过
+                            </button>
+                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                              <button
+                                id="sec00-intro-prev"
+                                type="button"
+                                className="lc-tutorial-btn"
+                                disabled={isFirst}
+                                onClick={() =>
+                                  setSec00IntroIndex((prev) =>
+                                    prev !== null ? Math.max(0, prev - 1) : 0
+                                  )
+                                }
+                              >
+                                上一步
+                              </button>
+                              <button
+                                id="sec00-intro-next"
+                                type="button"
+                                className="lc-tutorial-btn primary"
+                                onClick={() => {
+                                  if (isLast) {
+                                    setSec00IntroIndex(null);
+                                    setMobileChatOpen(false);
+                                    enqueueTask({
+                                      kind: 'human',
+                                      text: '“行了，对面那点算力也就够练手。先动起来吧——”',
+                                    });
+                                  } else {
+                                    setSec00IntroIndex((prev) =>
+                                      prev !== null ? prev + 1 : 0
+                                    );
+                                  }
+                                }}
+                              >
+                                {isLast ? '开始实操' : '下一步'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </article>
+                )}
               </div>
             </div>
 
@@ -3992,7 +4332,7 @@ export function App() {
                 id="chat-input-preview"
                 type="text"
                 className="lc-chat-input"
-                placeholder={`向 ${character.name} 预输入对话（执行操作后随动作一起发送，回车直发）...`}
+                placeholder={`向 ${ai.name} 预输入对话（执行操作后随动作一起发送，回车直发）...`}
                 value={chatDraft}
                 maxLength={200}
                 onChange={(e) => setChatDraft(e.target.value)}
@@ -4083,11 +4423,13 @@ export function App() {
               >
                 <span className="lc-btn-inline">
                   <PixelMenuIcon kind="audit" size={15} />
-                  {state.result.reason === 'showdown' &&
-                  state.result.humanEval &&
-                  state.result.aiEval
-                    ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
-                    : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : character.name}弃牌`}
+                  {state.result.reason === 'scan-caught'
+                    ? `${state.result.winner === 'human' ? '我方' : ai.name}抓获篡改`
+                    : state.result.reason === 'showdown' &&
+                        state.result.humanEval &&
+                        state.result.aiEval
+                      ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
+                      : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : ai.name}弃牌`}
                 </span>
                 <span className="lc-stack-sub">奖池 {state.result.potWon}</span>
               </button>
@@ -4112,7 +4454,7 @@ export function App() {
                   <PixelSyncIcon size={15} />
                   对端推演中
                 </span>
-                <span className="lc-stack-sub">{character.name} 回合</span>
+                <span className="lc-stack-sub">{ai.name} 回合</span>
               </button>
               <button id="action-btn-ai-wait-2" type="button" className="lc-stack-btn pink" disabled>
                 <span className="lc-btn-inline">
@@ -4860,7 +5202,7 @@ export function App() {
       {activeModal.type === 'confirm-reset' && (
         <ConfirmCyberModal
           title="确认重置整场像素赌局？"
-          description={`此操作将终止当前牌局，并将你与「${character.name}」的算力全部重置为 ${state.config.startingChips}。`}
+          description={`此操作将终止当前牌局，并将你与「${ai.name}」的算力全部重置为 ${state.config.startingChips}。`}
           confirmLabel="确认重置战场"
           onConfirm={() => performFullReset()}
           onCancel={() => setActiveModal({ type: 'none' })}
