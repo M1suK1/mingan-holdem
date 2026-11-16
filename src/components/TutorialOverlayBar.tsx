@@ -24,6 +24,7 @@ export default function TutorialOverlayBar({
 
   return (
     <section
+      id="lc-tutorial-guide-bar"
       className={`lc-tutorial-bar ${guidance.stagePassed ? 'is-passed' : ''}`}
       aria-label="新手教学引导栏"
     >
