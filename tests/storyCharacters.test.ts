@@ -90,7 +90,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.ok(SEC01_CHARACTER_DOSSIER.traits.some((t) => t.name.includes('钦定王牌')));
   });
 
-  it('executes Ling Fei special cheat skill crown-ace to turn an open hand card into same-suit Ace secretly', () => {
+  it('treats crown-ace as a hack-tier skill usable multiple times across turns in the same hand and sealed independently on scan', () => {
     const skillMeta = getSkillById('crown-ace');
     assert.ok(skillMeta);
     assert.equal(skillMeta.name, '钦定王牌');
@@ -110,26 +110,45 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
         pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
       ],
     });
-    // Force AI turn with diff = 0 to test AI crown-ace
+    // Force AI turn with diff = 0 to test AI crown-ace as a hack-tier skill
     state = { ...state, currentTurn: 'ai' };
-    const legalAct = { type: 'use-skill' as const, skillId: 'crown-ace', targetIndex: 0 };
-    assert.equal(isActionLegal(state, legalAct), true);
+    const hackCrown0 = { type: 'hack' as const, handIndex: 0, skill: 'crown-ace' as const };
+    assert.equal(isActionLegal(state, hackCrown0), true);
 
-    const afterCheat = applyAction(state, legalAct);
+    const afterFirstCheat = applyAction(state, hackCrown0);
     // Card[0] was 3P -> becomes 14P (Ace of Pink), originalCard preserved as 3P
-    assert.equal(afterCheat.players.ai.hand[0].card.rank, 14);
-    assert.equal(afterCheat.players.ai.hand[0].card.suit, 'P');
-    assert.equal(afterCheat.players.ai.hand[0].originalCard?.rank, 3);
-    assert.equal(afterCheat.currentTurn, 'ai'); // Does NOT end turn
+    assert.equal(afterFirstCheat.players.ai.hand[0].card.rank, 14);
+    assert.equal(afterFirstCheat.players.ai.hand[0].card.suit, 'P');
+    assert.equal(afterFirstCheat.players.ai.hand[0].originalCard?.rank, 3);
+    assert.deepEqual(afterFirstCheat.players.ai.hand[0].tamperedBy, ['crown-ace']);
+    assert.equal(afterFirstCheat.currentTurn, 'ai'); // Does NOT end turn
+    assert.equal(afterFirstCheat.usedHackThisTurn, true);
+    assert.equal(afterFirstCheat.usedProtocolSkillThisHand, false); // Does NOT consume once-per-hand slot!
     // Human viewer still sees unmodified 3P and unmodified chips!
-    assert.equal(getVisibleHandCard(afterCheat.players.ai.hand[0], 'human', 'ai', false).rank, 3);
-    assert.equal(getVisiblePlayerChips(afterCheat, 'ai', 'human'), 590); // 600 - 10 ante
+    assert.equal(getVisibleHandCard(afterFirstCheat.players.ai.hand[0], 'human', 'ai', false).rank, 3);
+    assert.equal(getVisiblePlayerChips(afterFirstCheat, 'ai', 'human'), 590);
 
-    // Human can scan and catch the crown-ace tamper!
-    const humanTurnState = applyAction(afterCheat, { type: 'flip', boardIndex: 1 });
+    // Same turn cannot hack twice, so AI flips board[1], then human flips board[2], returning turn to AI
+    assert.equal(isActionLegal(afterFirstCheat, { type: 'hack', handIndex: 1, skill: 'crown-ace' }), false);
+    const afterAiFlip = applyAction(afterFirstCheat, { type: 'flip', boardIndex: 1 });
+    const backToAi = applyAction(afterAiFlip, { type: 'flip', boardIndex: 2 });
+    assert.equal(backToAi.currentTurn, 'ai');
+    assert.equal(backToAi.usedHackThisTurn, false);
+
+    // Second turn in the SAME hand: AI can use crown-ace AGAIN on card[1] (12B -> 14B)!
+    const hackCrown1 = { type: 'hack' as const, handIndex: 1, skill: 'crown-ace' as const };
+    assert.equal(isActionLegal(backToAi, hackCrown1), true);
+    const afterSecondCheat = applyAction(backToAi, hackCrown1);
+    assert.equal(afterSecondCheat.players.ai.hand[1].card.rank, 14);
+    assert.equal(afterSecondCheat.players.ai.hand[1].card.suit, 'B');
+
+    // Human scans card[0] and catches crown-ace -> seals 'crown-ace' specifically, NOT 'plus-one'
+    const humanTurnState = applyAction(afterSecondCheat, { type: 'flip', boardIndex: 3 });
     const afterScan = applyAction(humanTurnState, { type: 'scan', targetKind: 'hand', targetIndex: 0 });
     assert.equal(afterScan.phase, 'showdown');
     assert.equal(afterScan.result?.reason, 'scan-caught');
     assert.equal(afterScan.result?.winner, 'human');
+    assert.ok(afterScan.players.ai.sealedSkills.includes('crown-ace'));
+    assert.ok(!afterScan.players.ai.sealedSkills.includes('plus-one'));
   });
 });

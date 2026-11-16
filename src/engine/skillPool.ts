@@ -99,11 +99,11 @@ export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
     id: 'crown-ace',
     name: '钦定王牌',
     category: 'hack',
-    summary: '预支 60 算力挑选己方手中 1 张非 A 明牌，直接篡改为对应花色的 A（结果仅己方可见）。',
+    summary: '与 +1 / -1 / 反色同级改牌技（一轮内可跨回合多次使用，每回合限 1 次）：预支 60 算力挑选己方 1 张非 A 明牌变为对应花色的 A。',
     costHint: 60,
     targetMode: 'human-open-hand',
     implemented: true,
-    tags: ['主动·每局限1次', '千金特权改牌'],
+    tags: ['同级改牌·每回合限1次', '千金特权'],
   },
   {
     id: 'siphon-cache',

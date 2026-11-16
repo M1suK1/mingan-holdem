@@ -17,7 +17,7 @@ export interface Card {
 
 export type PlayerId = 'human' | 'ai';
 
-export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit';
+export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit' | 'crown-ace';
 
 export type OpponentSignatureSkillId =
   | 'siphon-cache'

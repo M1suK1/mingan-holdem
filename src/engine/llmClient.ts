@@ -3,6 +3,7 @@ import type {
   ContractExpression,
   GameAction,
   GameState,
+  HackSkillId,
   OpponentMood,
   PursuerDossier,
 } from './types.ts';
@@ -997,9 +998,11 @@ export function enumerateLegalActionHints(state: GameState): string[] {
     const openHandIdx = ai.hand
       .map((h, i) => (h.visibility === 'open' ? i : -1))
       .filter((i) => i >= 0);
-    const availableSkills = (['plus-one', 'minus-one', 'flip-suit'] as const).filter(
-      (s) => !ai.sealedSkills.includes(s)
-    );
+    const candidateSkills: HackSkillId[] =
+      state.aiSpecialCheatSkill === 'crown-ace'
+        ? ['plus-one', 'minus-one', 'flip-suit', 'crown-ace']
+        : ['plus-one', 'minus-one', 'flip-suit'];
+    const availableSkills = candidateSkills.filter((s) => !ai.sealedSkills.includes(s));
     if (openHandIdx.length > 0 && availableSkills.length > 0 && ai.chips >= 40) {
       hints.push(
         `{"type":"hack","handIndex":${openHandIdx.join('|')},"skill":"${availableSkills.join('|')}"}`
