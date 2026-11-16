@@ -95,7 +95,11 @@ export function evaluateFiveCards(cards: Card[]): HandEvaluation {
     throw new Error(`evaluateFiveCards expects 5 cards, got ${cards.length}`);
   }
   const ranksDesc = cards.map((c) => c.rank).sort((a, b) => b - a);
-  const isFlush = cards.every((c) => c.suit === cards[0].suit);
+  const pinkWeight = cards.reduce(
+    (acc, c) => acc + (c.suit === 'P' ? (c.isDoublePink ? 2 : 1) : 0),
+    0
+  );
+  const isFlush = cards.every((c) => c.suit === 'B') || pinkWeight >= 5;
 
   const counts = new Map<number, number>();
   for (const r of ranksDesc) {
@@ -295,7 +299,8 @@ export function evaluateVisibleHandSummary(
   const suitCounts = new Map<string, number>();
   for (const c of validKnown) {
     rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
-    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+    const suitWeight = c.suit === 'P' && c.isDoublePink ? 2 : 1;
+    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + suitWeight);
   }
   const counts = Array.from(rankCounts.values()).sort((a, b) => b - a);
   const maxSuit = Math.max(...suitCounts.values());
@@ -316,7 +321,7 @@ export function evaluateVisibleHandSummary(
     category = 1;
   }
 
-  const drawTag = n >= 4 && maxSuit === 4 ? ' · 同花听牌' : '';
+  const drawTag = n >= 4 && maxSuit >= 4 ? ' · 同花听牌' : '';
   return {
     knownCount: n,
     hiddenCount,

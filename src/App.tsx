@@ -29,6 +29,7 @@ import {
   formatTamperLabel,
   getBetDiff,
   getCurrentRaiseCap,
+  getDisplayCardForTable,
   getEffectiveHackCost,
   getEffectiveScanCost,
   getHalfStackRaiseAmount,
@@ -169,10 +170,13 @@ import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
   isMuteGarbledCharacter,
+  isNeonDragonCharacter,
   pickMuteActionThought,
+  pickNeonDragonActionLine,
   resolveEcho0Sprite,
   resolveSec01Sprite,
   resolveSec02Sprite,
+  resolveSec03Sprite,
 } from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
@@ -1602,10 +1606,13 @@ export function App() {
         } else {
           setActiveExpression(decision.dialogue.expression);
           if (decision.action.type !== 'hack') {
+            const neonLine = isNeonDragonCharacter(char.id)
+              ? pickNeonDragonActionLine(decision.action.type)
+              : null;
             enqueueTask({
               kind: 'opponent',
               speaker: snapshot.players.ai.name,
-              text: decision.dialogue.text,
+              text: neonLine ?? decision.dialogue.text,
             });
             if (isMuteGarbledCharacter(char.id)) {
               const innerThought = pickMuteActionThought(decision.action.type);
@@ -2105,6 +2112,13 @@ export function App() {
         pushToast('warn', '仅可对己方公开明牌使用篡改技能');
       } else if (hc.card.isBlank) {
         pushToast('warn', '该牌已被抹除为废牌，无法再次篡改');
+      } else if (skill === 'pink-double') {
+        pushToast(
+          'warn',
+          hc.card.isDoublePink
+            ? '该粉色明牌已激活双粉映象'
+            : '双粉映象仅可对真实花色为粉色的明牌使用'
+        );
       } else {
         pushToast(
           'warn',
@@ -3042,28 +3056,61 @@ export function App() {
     enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: sample });
   };
 
-  // Live Hand Summaries (Respecting hidden tamper isolation: opponent only sees unmodified cards!)
-  const openBoardCardsForHuman = useMemo(
-    () =>
-      state.board
-        .filter((b) => b.isOpen || state.config.revealOpponentHidden)
-        .map((b) => getVisibleBoardCard(b, 'human', state.phase === 'showdown' || state.config.revealOpponentHidden)),
-    [state.board, state.config.revealOpponentHidden, state.phase]
-  );
+  // Live Hand Summaries (Respecting hidden tamper isolation & pink-mirage visual filter before showdown)
+  const openBoardCardsForHuman = useMemo(() => {
+    const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+    return state.board
+      .filter((b) => b.isOpen || state.config.revealOpponentHidden)
+      .map((b) =>
+        getDisplayCardForTable(getVisibleBoardCard(b, 'human', revealAll), {
+          isOpen: b.isOpen,
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      );
+  }, [state.board, state.config.revealOpponentHidden, state.opponentSignatureSkill, state.phase]);
 
   const humanSummary = useMemo(() => {
-    const known = [...state.players.human.hand.map((h) => h.card), ...openBoardCardsForHuman];
+    const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+    const known = [
+      ...state.players.human.hand.map((h) =>
+        getDisplayCardForTable(h.card, {
+          isOpen: h.visibility === 'open',
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      ),
+      ...openBoardCardsForHuman,
+    ];
     return evaluateVisibleHandSummary(known, 0);
-  }, [state.players.human.hand, openBoardCardsForHuman]);
+  }, [
+    state.players.human.hand,
+    openBoardCardsForHuman,
+    state.opponentSignatureSkill,
+    state.phase,
+    state.config.revealOpponentHidden,
+  ]);
 
   const opponentSummary = useMemo(() => {
     const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
     const knownAi = state.players.ai.hand
       .filter((h) => revealAll || h.visibility === 'open')
-      .map((h) => getVisibleHandCard(h, 'human', 'ai', revealAll));
+      .map((h) =>
+        getDisplayCardForTable(getVisibleHandCard(h, 'human', 'ai', revealAll), {
+          isOpen: h.visibility === 'open',
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      );
     const hiddenAiCount = state.players.ai.hand.length - knownAi.length;
     return evaluateVisibleHandSummary([...knownAi, ...openBoardCardsForHuman], hiddenAiCount);
-  }, [state.players.ai.hand, openBoardCardsForHuman, state.phase, state.config.revealOpponentHidden]);
+  }, [
+    state.players.ai.hand,
+    openBoardCardsForHuman,
+    state.phase,
+    state.config.revealOpponentHidden,
+    state.opponentSignatureSkill,
+  ]);
 
   // Sliding Window Math for Chat
   const crushedCount = messages.filter((m) => m.crushed).length;
@@ -3140,8 +3187,9 @@ export function App() {
   const isSec00Echo0 = activeEscapeNode?.index === 0 && !isP2pConnected;
   const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
   const isSec02Boss = activeEscapeNode?.index === 2 && !isP2pConnected;
+  const isSec03Boss = activeEscapeNode?.index === 3 && !isP2pConnected;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰）
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰，SEC-03 使用霓影·绯夜）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
@@ -3151,7 +3199,9 @@ export function App() {
           ? resolveSec01Sprite(activeExpression)
           : isSec02Boss
             ? resolveSec02Sprite(activeExpression)
-            : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
+            : isSec03Boss
+              ? resolveSec03Sprite(activeExpression)
+              : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
@@ -3161,9 +3211,11 @@ export function App() {
           ? '#FFB020'
           : isSec02Boss
             ? '#38BDF8'
-            : llmConfig.overloadPersona
-              ? '#FF4757'
-              : effectiveCharacter.color || '#FF2E88';
+            : isSec03Boss
+              ? '#FF2E88'
+              : llmConfig.overloadPersona
+                ? '#FF4757'
+                : effectiveCharacter.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -3488,7 +3540,9 @@ export function App() {
                 isSec00Echo0 && !isShowdown ? 'is-echo0-disguised' : ''
               } ${isSec00Echo0 ? 'is-echo0-framing' : ''} ${
                 isSec01Boss ? 'is-sec01-framing' : ''
-              } ${isSec02Boss ? 'is-sec02-framing' : ''}`}
+              } ${isSec02Boss ? 'is-sec02-framing' : ''} ${
+                isSec03Boss ? 'is-sec03-framing' : ''
+              }`}
               width={550}
               height={420}
             />
@@ -3503,7 +3557,7 @@ export function App() {
                     isSec00Echo0 ? 'is-echo0-framing' : ''
                   } ${isSec01Boss ? 'is-sec01-framing' : ''} ${
                     isSec02Boss ? 'is-sec02-framing' : ''
-                  }`}
+                  } ${isSec03Boss ? 'is-sec03-framing' : ''}`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -3596,7 +3650,14 @@ export function App() {
               {ai.hand.map((hc, idx) => {
                 const isPrivate = hc.visibility === 'private';
                 const showFace = !isPrivate || revealAllAi;
-                const visibleCard = getVisibleHandCard(hc, 'human', 'ai', revealAllAi);
+                const visibleCard = getDisplayCardForTable(
+                  getVisibleHandCard(hc, 'human', 'ai', revealAllAi),
+                  {
+                    isOpen: hc.visibility === 'open',
+                    signatureSkill: state.opponentSignatureSkill,
+                    revealAll: revealAllAi,
+                  }
+                );
                 const isSwappingHidden = Boolean(
                   swapFlight && swapFlight.actor === 'ai' && swapFlight.handIndex === idx
                 );
@@ -3656,6 +3717,9 @@ export function App() {
               <PixelNodesIcon size={13} />
               BOARD // 公共加密节点
             </span>
+            {state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi && (
+              <span className="lc-micro-tag pink">粉曜迷彩 · 明牌全粉</span>
+            )}
             <span className="lc-micro-tag cyan">
               剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}
             </span>
@@ -3666,7 +3730,14 @@ export function App() {
               const isHidden = !slot.isOpen;
               const clickableHidden = isHumanTurn && isHidden && !scanMode;
               const showFace = slot.isOpen || (isHidden && state.config.revealOpponentHidden);
-              const visibleBoardCard = getVisibleBoardCard(slot, 'human', revealAllAi);
+              const visibleBoardCard = getDisplayCardForTable(
+                getVisibleBoardCard(slot, 'human', revealAllAi),
+                {
+                  isOpen: slot.isOpen,
+                  signatureSkill: state.opponentSignatureSkill,
+                  revealAll: revealAllAi,
+                }
+              );
               const isDropTarget = draggedHandIndex !== null && clickableHidden && diff === 0;
               const isDropHover = isDropTarget && dragOverBoardIndex === slot.index;
               const isSwappingHidden = Boolean(
@@ -3854,12 +3925,17 @@ export function App() {
                     swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
                   );
                   const tamperLabel = formatTamperLabel(hc.card, hc.originalCard);
+                  const displayHumanCard = getDisplayCardForTable(hc.card, {
+                    isOpen: hc.visibility === 'open',
+                    signatureSkill: state.opponentSignatureSkill,
+                    revealAll: revealAllAi,
+                  });
 
                   return (
                     <CyberCard3D
                       key={`human-hand-${idx}`}
                       id={`human-hand-card-${idx}`}
-                      card={hc.card}
+                      card={displayHumanCard}
                       faceDown={false}
                       size="lg"
                       isOwnPrivate={isPrivate}
@@ -3937,7 +4013,9 @@ export function App() {
                           ? { id: 'hack-btn-crown-ace', label: '钦定A', icon: <PixelPlusOneIcon size={12} /> }
                           : skill === 'null-erase'
                             ? { id: 'hack-btn-null-erase', label: '抹除', icon: <PixelSeverIcon size={12} /> }
-                            : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
+                            : skill === 'pink-double'
+                              ? { id: 'hack-btn-pink-double', label: '双粉', icon: <PixelFlipSuitIcon size={12} /> }
+                              : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
                   const cost = getEffectiveHackCost(state, 'human', skill);
                   const isSealed = human.sealedSkills.includes(skill);
                   const isColdLocked = state.lockedHumanHackSkill === skill;
@@ -4038,7 +4116,7 @@ export function App() {
                   {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
-                    if (sid === 'crown-ace' || sid === 'null-erase') {
+                    if (sid === 'crown-ace' || sid === 'null-erase' || sid === 'pink-double') {
                       const hackId = sid as HackSkillId;
                       const isSealed = human.sealedSkills.includes(hackId);
                       const isColdLocked = state.lockedHumanHackSkill === hackId;

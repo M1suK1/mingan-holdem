@@ -375,7 +375,7 @@ describe('Dialogue segments (1-3 items, <=200 chars, thought + speech)', () => {
 
 describe('Protocol Skill Pool mechanics (passive & active skills)', () => {
   it('defines 13 implemented skills in SKILL_POOL_REGISTRY', () => {
-    assert.equal(SKILL_POOL_REGISTRY.length, 13);
+    assert.equal(SKILL_POOL_REGISTRY.length, 14);
     assert.ok(SKILL_POOL_REGISTRY.every((s) => s.implemented === true));
   });
 

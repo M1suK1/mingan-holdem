@@ -65,7 +65,7 @@ function scoreCurrentPartialHand(hand: Card[], openBoard: Card[]): number {
   let strength = 0.2 + three.category * 0.28 + (three.tiebreakers[0] ?? 7) / 45;
   const suitCounts = new Map<string, number>();
   for (const c of combined) {
-    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + (c.suit === 'P' && c.isDoublePink ? 2 : 1));
   }
   const maxSuit = Math.max(0, ...suitCounts.values());
   if (maxSuit >= 4) strength += 0.08;
@@ -191,7 +191,7 @@ function scoreCardPotential(hand: Card[], openBoard: Card[]): number {
   const suitMap = new Map<string, number>();
   for (const c of combined) {
     rankMap.set(c.rank, (rankMap.get(c.rank) ?? 0) + 1);
-    suitMap.set(c.suit, (suitMap.get(c.suit) ?? 0) + 1);
+    suitMap.set(c.suit, (suitMap.get(c.suit) ?? 0) + (c.suit === 'P' && c.isDoublePink ? 2 : 1));
   }
   let score = 0;
   for (const cnt of rankMap.values()) {
@@ -369,6 +369,56 @@ function pickSpecialNullEraseAction(
   return bestIdx !== null && bestScore > -40
     ? { type: 'hack', handIndex: bestIdx, skill: 'null-erase' }
     : null;
+}
+
+function pickSpecialPinkDoubleAction(
+  state: GameState,
+  actorId: PlayerId
+): GameAction | null {
+  if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'pink-double') return null;
+  if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
+
+  const actor = state.players[actorId];
+  if (actor.chips < 180) return null;
+
+  const openBoard = state.board
+    .filter((b) => b.isOpen)
+    .map((b) => getVisibleBoardCard(b, actorId, false));
+  const handCards = actor.hand.map((h) => h.card);
+  const baseScore = scoreCardPotential(handCards, openBoard);
+
+  let bestAct: GameAction | null = null;
+  let bestGain = -Infinity;
+  let bestPinkTotal = 0;
+
+  for (let idx = 0; idx < actor.hand.length; idx += 1) {
+    const hc = actor.hand[idx];
+    if (
+      hc.visibility !== 'open' ||
+      hc.card.isBlank ||
+      hc.card.suit !== 'P' ||
+      hc.card.isDoublePink ||
+      (hc.tamperedBy && hc.tamperedBy.length > 0)
+    ) {
+      continue;
+    }
+    const act: GameAction = { type: 'hack', handIndex: idx, skill: 'pink-double' };
+    if (!isActionLegal(state, act)) continue;
+
+    const simHand = handCards.map((c, i) => (i === idx ? { ...c, isDoublePink: true } : c));
+    const gain = scoreCardPotential(simHand, openBoard) - baseScore;
+    const pinkTotal = [...simHand, ...openBoard].reduce(
+      (sum, c) => sum + (!c.isBlank && c.suit === 'P' ? (c.isDoublePink ? 2 : 1) : 0),
+      0
+    );
+    if (gain > bestGain || (gain === bestGain && pinkTotal > bestPinkTotal)) {
+      bestGain = gain;
+      bestPinkTotal = pinkTotal;
+      bestAct = act;
+    }
+  }
+
+  return bestAct && (bestGain >= 50 || bestPinkTotal >= 4) ? bestAct : null;
 }
 
 function pickBestSwappableHandIndex(
@@ -691,6 +741,20 @@ export class LocalAiAgent implements OpponentAgent {
             '整理一下这一轮的牌面节奏。',
             telemetry,
             'calm'
+          ),
+        };
+      }
+
+      const pinkDoubleAct = pickSpecialPinkDoubleAction(state, this.playerId);
+      if (pinkDoubleAct && roll < 0.52) {
+        return {
+          action: pinkDoubleAct,
+          dialogue: buildDialogue(
+            speaker,
+            'idle',
+            '让我理一下这手粉嘟嘟的牌面节奏。',
+            telemetry,
+            'smile'
           ),
         };
       }
