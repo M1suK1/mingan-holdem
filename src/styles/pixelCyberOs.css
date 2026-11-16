@@ -123,26 +123,6 @@ button:disabled {
   height: min(670px, calc(100dvh - 96px));
 }
 
-.lc-welcome-tutorial-strip {
-  position: fixed;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 42;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: min(760px, calc(100vw - 16px));
-  padding: 6px 12px;
-  background: rgba(6, 10, 18, 0.94);
-  border: 1px solid var(--neon-cyan);
-  box-shadow: 0 0 18px rgba(0, 240, 255, 0.25);
-  font-size: 12px;
-  color: var(--text-main);
-  flex-wrap: wrap;
-}
-
 .lc-tutorial-bar {
   position: relative;
   z-index: 20;
