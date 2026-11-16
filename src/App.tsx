@@ -2650,11 +2650,13 @@ export function App() {
           aria-label="己方手牌序列区"
         >
           <div className="lc-player-portrait-layer" aria-hidden="true">
-            <img
-              src={activeDisguise.virtualPortrait}
-              alt=""
-              className={`lc-player-portrait-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
-            />
+            <div className="lc-player-portrait-frame">
+              <img
+                src={activeDisguise.virtualPortrait}
+                alt=""
+                className={`lc-player-portrait-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
+              />
+            </div>
             <div className="lc-player-portrait-fade" />
           </div>
 
