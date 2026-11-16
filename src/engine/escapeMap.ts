@@ -1,4 +1,10 @@
-import { MAX_EXTRA_SKILLS, equipExtraSkill } from './skillPool.ts';
+import {
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
+  MAX_SUPPORT_SKILLS,
+  equipGroupedSkill,
+  getSkillGroup,
+} from './skillPool.ts';
 import type { AiDifficulty, OpponentSignatureSkillId } from './types.ts';
 
 export interface EscapePoint {
@@ -48,6 +54,7 @@ export interface EscapeMapProgress {
   highestUnlockedIndex: number;
   clearedIndices: number[];
   revealedWallIndices: number[];
+  equippedCheatSkills: string[];
   equippedSkills: string[];
   pendingTransition: EscapeTransition | null;
   escapedReality: boolean;
@@ -237,6 +244,7 @@ export function createInitialEscapeProgress(): EscapeMapProgress {
     highestUnlockedIndex: 0,
     clearedIndices: [],
     revealedWallIndices: [],
+    equippedCheatSkills: [...DEFAULT_CHEAT_SKILLS],
     equippedSkills: [],
     pendingTransition: null,
     escapedReality: false,
@@ -248,9 +256,16 @@ export function claimEscapeNodeSkill(
   skillId: string,
   replaceSlotIndex?: number
 ): EscapeMapProgress {
+  const { cheat, support } = equipGroupedSkill(
+    progress.equippedCheatSkills ?? DEFAULT_CHEAT_SKILLS,
+    progress.equippedSkills,
+    skillId,
+    replaceSlotIndex
+  );
   return {
     ...progress,
-    equippedSkills: equipExtraSkill(progress.equippedSkills, skillId, replaceSlotIndex),
+    equippedCheatSkills: cheat,
+    equippedSkills: support,
   };
 }
 
@@ -348,11 +363,24 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
       ).sort((a, b) => a - b)
     : [];
 
-  const equippedSkills = Array.isArray(obj.equippedSkills)
+  const rawSupport = Array.isArray(obj.equippedSkills)
     ? Array.from(
         new Set(obj.equippedSkills.filter((s): s is string => typeof s === 'string' && s.length > 0))
-      ).slice(0, MAX_EXTRA_SKILLS)
+      )
     : [];
+  const rawCheat = Array.isArray(obj.equippedCheatSkills)
+    ? Array.from(
+        new Set(obj.equippedCheatSkills.filter((s): s is string => typeof s === 'string' && s.length > 0))
+      ).slice(0, MAX_CHEAT_SKILLS)
+    : [...DEFAULT_CHEAT_SKILLS];
+
+  const equippedCheatSkills = (rawCheat.length > 0 ? rawCheat : [...DEFAULT_CHEAT_SKILLS]).slice(
+    0,
+    MAX_CHEAT_SKILLS
+  );
+  const equippedSkills = rawSupport
+    .filter((s) => getSkillGroup(s) === 'support')
+    .slice(0, MAX_SUPPORT_SKILLS);
 
   const maxClearedNext = clearedIndices.length > 0 ? Math.max(...clearedIndices) + 1 : 0;
   const rawHighest =
@@ -389,6 +417,7 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
     highestUnlockedIndex,
     clearedIndices,
     revealedWallIndices,
+    equippedCheatSkills,
     equippedSkills,
     pendingTransition,
     escapedReality: Boolean(obj.escapedReality) && highestUnlockedIndex >= MAX_NODE_INDEX,

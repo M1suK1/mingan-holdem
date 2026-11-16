@@ -3,6 +3,7 @@ import type {
   AiCheatProfile,
   AiPlayStyle,
   PursuerDossier,
+  SkillGroup,
   SkillPoolEntry,
 } from './types.ts';
 
@@ -59,6 +60,45 @@ export function resolvePursuerStrategyProfile(
 }
 
 export const MAX_EXTRA_SKILLS = 3;
+export const MAX_CHEAT_SKILLS = 3;
+export const MAX_SUPPORT_SKILLS = 3;
+export const DEFAULT_CHEAT_SKILLS: string[] = ['plus-one', 'minus-one', 'flip-suit'];
+
+export const BASE_CHEAT_SKILLS: SkillPoolEntry[] = [
+  {
+    id: 'plus-one',
+    name: '点数 +1',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '基础作弊技能：预支 40 算力将己方 1 张明牌点数 +1（最高至 A，仅己方可见）。',
+    costHint: 40,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '每回合限1次'],
+  },
+  {
+    id: 'minus-one',
+    name: '点数 -1',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '基础作弊技能：预支 40 算力将己方 1 张明牌点数 -1（最低至 2，仅己方可见）。',
+    costHint: 40,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '每回合限1次'],
+  },
+  {
+    id: 'flip-suit',
+    name: '反转花色',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '基础作弊技能：预支 55 算力将己方 1 张明牌花色在黑/粉之间反转（仅己方可见）。',
+    costHint: 55,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '每回合限1次'],
+  },
+];
 
 export function needsSkillReplacement(currentSkills: string[], newSkillId: string): boolean {
   if (!newSkillId) return false;
@@ -91,126 +131,185 @@ export function equipExtraSkill(
   return cleanCurrent;
 }
 
+export function getSkillGroup(skillId: string): SkillGroup {
+  const found =
+    SKILL_POOL_REGISTRY.find((s) => s.id === skillId) ??
+    BASE_CHEAT_SKILLS.find((s) => s.id === skillId);
+  if (found?.skillGroup) return found.skillGroup;
+  if (skillId === 'plus-one' || skillId === 'minus-one' || skillId === 'flip-suit' || skillId === 'crown-ace' || skillId === 'parity-spoof') {
+    return 'cheat';
+  }
+  return 'support';
+}
+
+export function needsGroupedSkillReplacement(
+  cheatSkills: string[],
+  supportSkills: string[],
+  newSkillId: string
+): boolean {
+  if (!newSkillId) return false;
+  const group = getSkillGroup(newSkillId);
+  return group === 'cheat'
+    ? needsSkillReplacement(cheatSkills, newSkillId)
+    : needsSkillReplacement(supportSkills, newSkillId);
+}
+
+export function equipGroupedSkill(
+  cheatSkills: string[],
+  supportSkills: string[],
+  newSkillId: string,
+  replaceSlotIndex?: number
+): { cheat: string[]; support: string[] } {
+  const cleanCheat = cheatSkills.slice(0, MAX_CHEAT_SKILLS);
+  const cleanSupport = supportSkills.slice(0, MAX_SUPPORT_SKILLS);
+  if (!newSkillId) {
+    return { cheat: cleanCheat, support: cleanSupport };
+  }
+  const group = getSkillGroup(newSkillId);
+  if (group === 'cheat') {
+    return {
+      cheat: equipExtraSkill(cleanCheat, newSkillId, replaceSlotIndex),
+      support: cleanSupport,
+    };
+  }
+  return {
+    cheat: cleanCheat,
+    support: equipExtraSkill(cleanSupport, newSkillId, replaceSlotIndex),
+  };
+}
+
 /**
- * 黑域协议技能池（已实装 12 项可掠夺/专属协议技能，最多同时装备 3 项，超限需替换）。
+ * 黑域协议可获取技能池（分为作弊技能与非作弊辅助技能，各上限 3 槽，超限需替换）。
  */
 export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
   {
     id: 'crown-ace',
     name: '钦定王牌',
     category: 'hack',
+    skillGroup: 'cheat',
     summary: '与 +1 / -1 / 反色同级改牌技（一轮内可跨回合多次使用，每回合限 1 次）：预支 60 算力挑选己方 1 张非 A 明牌变为对应花色的 A。',
     costHint: 60,
     targetMode: 'human-open-hand',
     implemented: true,
-    tags: ['同级改牌·每回合限1次', '千金特权'],
+    tags: ['作弊技能', '同级改牌·每回合限1次'],
   },
   {
     id: 'siphon-cache',
     name: '算力虹吸',
     category: 'passive',
-    summary: '触发被动：每手己方首次主动加注成功时，额外从对手吸取 20 点算力转移至己方终端。',
+    skillGroup: 'support',
+    summary: '非作弊辅助 · 触发被动：每手己方首次主动加注成功时，额外从对手吸取 20 点算力转移至己方终端。',
     costHint: 0,
     targetMode: 'passive',
     implemented: true,
-    tags: ['触发被动', '算力掠夺'],
+    tags: ['辅助技能', '触发被动'],
   },
   {
     id: 'cold-freq-lock',
     name: '冷频封锁',
     category: 'protocol',
-    summary: '预支 45 算力对对端终端执行频率冻结，随机禁用对手本手 1 项基础黑客改牌技能。',
+    skillGroup: 'support',
+    summary: '非作弊辅助：预支 45 算力对对端终端执行频率冻结，随机禁用对手本手 1 项基础作弊改牌技能。',
     costHint: 45,
     targetMode: 'instant',
     implemented: true,
-    tags: ['主动·每局限1次', '封锁改牌'],
+    tags: ['辅助技能', '主动·每局限1次'],
   },
   {
     id: 'ghost-packet',
     name: '幽灵封包',
-    category: 'hack',
-    summary: '预支 40 算力注入一次性的底层掩护护盾，可抵消对手下一次「扫描」抓获判负与技能封印。',
+    category: 'protocol',
+    skillGroup: 'support',
+    summary: '非作弊辅助：预支 40 算力注入一次性的底层掩护护盾，可抵消对手下一次「扫描」抓获判负与技能封印。',
     costHint: 40,
     targetMode: 'instant',
     implemented: true,
-    tags: ['主动·每局限1次', '反扫描护盾'],
+    tags: ['辅助技能', '反扫描护盾'],
   },
   {
     id: 'parity-spoof',
     name: '奇偶跃迁',
     category: 'hack',
-    summary: '预支 55 算力使选中的己方明牌点数沿同奇偶跳变（<=Q 时 +2，否则 -2），结果仅己方可见。',
+    skillGroup: 'cheat',
+    summary: '作弊技能：预支 55 算力使选中的己方明牌点数沿同奇偶跳变（<=Q 时 +2，否则 -2），结果仅己方可见。',
     costHint: 55,
     targetMode: 'human-open-hand',
     implemented: true,
-    tags: ['主动·每局限1次', '跨阶改牌'],
+    tags: ['作弊技能', '主动·每局限1次'],
   },
   {
     id: 'phantom-swap',
     name: '幻影解绑',
-    category: 'hack',
-    summary: '预支 45 算力解除已锁定的己方私有暗牌换牌封锁，使其可再次与公共暗牌互换。',
+    category: 'protocol',
+    skillGroup: 'support',
+    summary: '非作弊辅助：预支 45 算力解除已锁定的己方私有暗牌换牌封锁，使其可再次与公共暗牌互换。',
     costHint: 45,
     targetMode: 'human-locked-hand',
     implemented: true,
-    tags: ['主动·每局限1次', '机动重换'],
+    tags: ['辅助技能', '机动重换'],
   },
   {
     id: 'zero-day-peek',
     name: '零日窥视',
     category: 'recon',
-    summary: '预支 50 算力在不公开公共暗牌的情况下，直接窥视中央节点池 1 张暗牌的真实点数与花色。',
+    skillGroup: 'support',
+    summary: '非作弊辅助：预支 50 算力在不公开公共暗牌的情况下，直接窥视中央节点池 1 张暗牌的真实点数与花色。',
     costHint: 50,
     targetMode: 'hidden-board',
     implemented: true,
-    tags: ['主动·每局限1次', '暗槽透视'],
+    tags: ['辅助技能', '暗槽透视'],
   },
   {
     id: 'ice-firewall',
     name: '冰墙锁槽',
     category: 'protocol',
-    summary: '预支 45 算力冻结中央节点池 1 张未公开暗槽，本局内对端禁止向该槽位换入暗牌。',
+    skillGroup: 'support',
+    summary: '非作弊辅助：预支 45 算力冻结中央节点池 1 张未公开暗槽，本局内对端禁止向该槽位换入暗牌。',
     costHint: 45,
     targetMode: 'hidden-board',
     implemented: true,
-    tags: ['主动·每局限1次', '公共牌封锁'],
+    tags: ['辅助技能', '公共牌封锁'],
   },
   {
     id: 'overclock-bluff',
     name: '超频脉压',
     category: 'protocol',
-    summary: '向底池强行推入 35 算力计入本轮下注并移交回应权（可无视普通段内加注次数上限逼注）。',
+    skillGroup: 'support',
+    summary: '非作弊辅助：向底池强行推入 35 算力计入本轮下注并移交回应权（可无视普通段内加注次数上限逼注）。',
     costHint: 35,
     targetMode: 'instant',
     implemented: true,
-    tags: ['主动·每局限1次', '破限压迫'],
+    tags: ['辅助技能', '破限压迫'],
   },
   {
     id: 'mirror-checksum',
     name: '镜像降耗',
     category: 'passive',
-    summary: '永久被动：你的通用「扫描」技能预支算力永久降低 15 点（最低 15）。',
+    skillGroup: 'support',
+    summary: '非作弊辅助 · 永久被动：你的通用「扫描」技能预支算力永久降低 15 点（最低 15）。',
     targetMode: 'passive',
     implemented: true,
-    tags: ['永久被动', '扫描减费'],
+    tags: ['辅助技能', '永久被动'],
   },
   {
     id: 'entropy-shield',
     name: '熵减缓冲',
     category: 'passive',
-    summary: '永久被动：你的每次明暗「换牌门票」费用永久降低 10 点（最低 10）。',
+    skillGroup: 'support',
+    summary: '非作弊辅助 · 永久被动：你的每次明暗「换牌门票」费用永久降低 10 点（最低 10）。',
     targetMode: 'passive',
     implemented: true,
-    tags: ['永久被动', '换牌减费'],
+    tags: ['辅助技能', '永久被动'],
   },
   {
     id: 'trace-scramble',
     name: '追踪扰频',
     category: 'passive',
-    summary: '永久被动：你的黑客改牌技能（+1 / -1 / 反色）预支费用永久降低 15 点（最低 15）。',
+    skillGroup: 'support',
+    summary: '非作弊辅助 · 永久被动：你的黑客作弊技能（+1 / -1 / 反色 / 钦定王牌）预支费用永久降低 15 点（最低 15）。',
     targetMode: 'passive',
     implemented: true,
-    tags: ['永久被动', '改牌减费'],
+    tags: ['辅助技能', '永久被动'],
   },
 ];
 
@@ -253,7 +352,10 @@ const PURSUER_ROLES: Array<{
 ];
 
 export function getSkillById(id: string): SkillPoolEntry | undefined {
-  return SKILL_POOL_REGISTRY.find((s) => s.id === id);
+  return (
+    SKILL_POOL_REGISTRY.find((s) => s.id === id) ??
+    BASE_CHEAT_SKILLS.find((s) => s.id === id)
+  );
 }
 
 export function buildPursuerDossier(

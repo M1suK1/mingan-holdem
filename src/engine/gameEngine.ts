@@ -19,7 +19,7 @@ import {
   type VfxEvent,
 } from './types.ts';
 import { evaluateSevenCards, pickFirstActor } from './evaluator.ts';
-import { MAX_EXTRA_SKILLS } from './skillPool.ts';
+import { DEFAULT_CHEAT_SKILLS, MAX_CHEAT_SKILLS, MAX_EXTRA_SKILLS } from './skillPool.ts';
 
 const SUITS: Suit[] = ['B', 'P'];
 const COPIES: Array<0 | 1> = [0, 1];
@@ -304,6 +304,7 @@ export interface CreateStateOptions {
   tieStarter?: PlayerId;
   chips?: Record<PlayerId, number>;
   sealedSkills?: Record<PlayerId, HackSkillId[]>;
+  playerCheatSkills?: string[];
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
   aiSpecialCheatSkill?: 'crown-ace';
@@ -438,6 +439,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     usedHackThisTurn: false,
     usedScanThisTurn: false,
     scannedKeys: [],
+    playerCheatSkills: [...(options.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS)].slice(0, MAX_CHEAT_SKILLS),
     playerAcquiredSkills: [...(options.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     usedProtocolSkillThisHand: false,
     peekedBoardIndices: [],
@@ -522,6 +524,7 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
       human: [...prev.players.human.sealedSkills],
       ai: [...prev.players.ai.sealedSkills],
     },
+    playerCheatSkills: [...(prev.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS)].slice(0, MAX_CHEAT_SKILLS),
     playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     opponentSignatureSkill: prev.opponentSignatureSkill,
     aiSpecialCheatSkill: prev.aiSpecialCheatSkill,
@@ -606,12 +609,14 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       if (actor.sealedSkills.includes(action.skill)) return false;
       if (actorId === 'human' && state.lockedHumanHackSkill === action.skill) return false;
       if (actorId === 'ai' && state.lockedAiHackSkill === action.skill) return false;
-      if (action.skill === 'crown-ace') {
-        const hasCrownAce =
-          actorId === 'human'
-            ? Boolean(state.playerAcquiredSkills?.includes('crown-ace'))
-            : state.aiSpecialCheatSkill === 'crown-ace';
-        if (!hasCrownAce) return false;
+      if (actorId === 'human') {
+        const equippedCheat = state.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS;
+        const allowed =
+          equippedCheat.includes(action.skill) ||
+          (action.skill === 'crown-ace' && Boolean(state.playerAcquiredSkills?.includes('crown-ace')));
+        if (!allowed) return false;
+      } else if (action.skill === 'crown-ace' && state.aiSpecialCheatSkill !== 'crown-ace') {
+        return false;
       }
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
@@ -628,7 +633,10 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     if (action.type === 'use-skill') {
       if (actorId !== 'human') return false;
       if (state.usedProtocolSkillThisHand) return false;
-      if (!state.playerAcquiredSkills?.includes(action.skillId)) return false;
+      const hasSkill =
+        Boolean(state.playerAcquiredSkills?.includes(action.skillId)) ||
+        (action.skillId === 'parity-spoof' && Boolean(state.playerCheatSkills?.includes('parity-spoof')));
+      if (!hasSkill) return false;
       const idx = action.targetIndex ?? 0;
       switch (action.skillId) {
         case 'ghost-packet':
@@ -755,6 +763,8 @@ function cloneState(state: GameState): GameState {
       },
     },
     scannedKeys: [...state.scannedKeys],
+    playerCheatSkills: [...(state.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS)],
+    playerAcquiredSkills: [...(state.playerAcquiredSkills ?? [])],
     actionHistory: [...state.actionHistory],
   };
 }

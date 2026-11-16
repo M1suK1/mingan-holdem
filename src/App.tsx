@@ -67,14 +67,17 @@ import {
   claimVictoryLoot,
 } from './engine/campaign.ts';
 import {
-  MAX_EXTRA_SKILLS,
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
+  MAX_SUPPORT_SKILLS,
   PLAY_STYLE_META,
   CHEAT_PROFILE_META,
   SKILL_POOL_REGISTRY,
   buildPursuerDossier,
-  equipExtraSkill,
+  equipGroupedSkill,
   getSkillById,
-  needsSkillReplacement,
+  getSkillGroup,
+  needsGroupedSkillReplacement,
   resolvePursuerStrategyProfile,
 } from './engine/skillPool.ts';
 import {
@@ -422,6 +425,7 @@ export function App() {
       opponentName: initNode.opponentName,
       opponentSignatureSkill: initNode.signatureSkillId,
       aiSpecialCheatSkill: initNode.specialCheatSkillId,
+      playerCheatSkills: initEsc.equippedCheatSkills,
       playerAcquiredSkills: initEsc.equippedSkills,
     });
   });
@@ -1783,7 +1787,7 @@ export function App() {
             if (hasSkillLoot && clearedNode?.rewardSkillChoices) {
               setPendingSkillClaim({
                 title: `击溃 ${clearedNode.opponentName} · 协议技能拆解`,
-                subtitle: `${clearedNode.code} ${clearedNode.title} 已突破！挑选 1 项额外技能（最多装备 ${MAX_EXTRA_SKILLS} 项，满额可替换）`,
+                subtitle: `${clearedNode.code} ${clearedNode.title} 已突破！挑选 1 项技能（作弊槽上限 ${MAX_CHEAT_SKILLS} · 非作弊辅助槽上限 ${MAX_SUPPORT_SKILLS}，满额可替换）`,
                 choices: clearedNode.rewardSkillChoices,
                 clearedNodeIndex: clearedIdx,
               });
@@ -2369,6 +2373,11 @@ export function App() {
       opponentName: resolvedOpponentName,
       opponentSignatureSkill: activeEscNode?.signatureSkillId,
       aiSpecialCheatSkill: activeEscNode?.specialCheatSkillId,
+      playerCheatSkills: isP2pConnected
+        ? DEFAULT_CHEAT_SKILLS
+        : activeEscNode
+          ? escapeProgressRef.current.equippedCheatSkills
+          : (latestCampaignRef.current.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS),
       playerAcquiredSkills: isP2pConnected
         ? []
         : overrideAcquiredSkills ??
@@ -2629,6 +2638,7 @@ export function App() {
             (a, b) => a - b
           ),
           revealedWallIndices: base.revealedWallIndices,
+          equippedCheatSkills: base.equippedCheatSkills,
           equippedSkills: base.equippedSkills,
           pendingTransition: null,
           escapedReality: false,
@@ -2685,39 +2695,70 @@ export function App() {
           appendCmdLog('error', `[ERR] 未找到技能 "${parsed.skillId}"。可用 ID: ${validIds}`);
           return;
         }
-        const currEquipped =
+        const currCheat =
+          activeEscapeNodeRef.current !== null
+            ? (escapeProgressRef.current.equippedCheatSkills ?? DEFAULT_CHEAT_SKILLS)
+            : (latestCampaignRef.current.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS);
+        const currSupport =
           activeEscapeNodeRef.current !== null
             ? escapeProgressRef.current.equippedSkills
             : latestCampaignRef.current.acquiredSkills;
-        if (currEquipped.includes(sk.id)) {
-          appendCmdLog('info', `[INFO] 已装备技能「${sk.name}」(${sk.id})`);
+        const skGroup = getSkillGroup(sk.id);
+        const targetPool = skGroup === 'cheat' ? currCheat : currSupport;
+        if (targetPool.includes(sk.id)) {
+          appendCmdLog('info', `[INFO] 已装备${skGroup === 'cheat' ? '作弊' : '辅助'}技能「${sk.name}」(${sk.id})`);
           return;
         }
-        if (needsSkillReplacement(currEquipped, sk.id)) {
+        if (needsGroupedSkillReplacement(currCheat, currSupport, sk.id)) {
+          const cap = skGroup === 'cheat' ? MAX_CHEAT_SKILLS : MAX_SUPPORT_SKILLS;
+          const label = skGroup === 'cheat' ? '作弊技能槽' : '非作弊辅助槽';
           setActiveModal({ type: 'none' });
           setPendingSkillClaim({
             title: `调试装配「${sk.name}」`,
-            subtitle: `当前额外技能已达 ${MAX_EXTRA_SKILLS}/${MAX_EXTRA_SKILLS} 上限，请选择被替换的旧槽位`,
+            subtitle: `当前${label}已达 ${cap}/${cap} 上限，请选择被替换的旧槽位`,
             choices: [sk.id],
           });
-          appendCmdLog('info', `[OK] 槽位已满 3/3，已弹出「${sk.name}」替换选择窗`);
+          appendCmdLog('info', `[OK] ${label}已满 ${cap}/${cap}，已弹出「${sk.name}」替换选择窗`);
           return;
         }
-        const nextEquipped = equipExtraSkill(currEquipped, sk.id);
+        const grouped = equipGroupedSkill(currCheat, currSupport, sk.id);
         if (activeEscapeNodeRef.current !== null) {
           setEscapeProgress((prev) => claimEscapeNodeSkill(prev, sk.id));
         } else {
-          setCampaign((prev) => ({ ...prev, acquiredSkills: nextEquipped }));
+          setCampaign((prev) => ({
+            ...prev,
+            acquiredCheatSkills: grouped.cheat,
+            acquiredSkills: grouped.support,
+          }));
         }
-        setState((prev) => ({ ...prev, playerAcquiredSkills: nextEquipped }));
-        appendCmdLog('success', `[OK] 已装备额外技能「${sk.name}」（当前 ${nextEquipped.length}/3）`);
+        setState((prev) => ({
+          ...prev,
+          playerCheatSkills: grouped.cheat,
+          playerAcquiredSkills: grouped.support,
+        }));
+        appendCmdLog(
+          'success',
+          `[OK] 已装备${skGroup === 'cheat' ? '作弊' : '辅助'}技能「${sk.name}」（作弊 ${grouped.cheat.length}/3 · 辅助 ${grouped.support.length}/3）`
+        );
         return;
       }
       case 'clearskills': {
-        setEscapeProgress((prev) => ({ ...prev, equippedSkills: [] }));
-        setCampaign((prev) => ({ ...prev, acquiredSkills: [] }));
-        setState((prev) => ({ ...prev, playerAcquiredSkills: [] }));
-        appendCmdLog('success', '[OK] 已清空当前全部额外协议技能槽 (0/3)');
+        setEscapeProgress((prev) => ({
+          ...prev,
+          equippedCheatSkills: [...DEFAULT_CHEAT_SKILLS],
+          equippedSkills: [],
+        }));
+        setCampaign((prev) => ({
+          ...prev,
+          acquiredCheatSkills: [...DEFAULT_CHEAT_SKILLS],
+          acquiredSkills: [],
+        }));
+        setState((prev) => ({
+          ...prev,
+          playerCheatSkills: [...DEFAULT_CHEAT_SKILLS],
+          playerAcquiredSkills: [],
+        }));
+        appendCmdLog('success', '[OK] 已清空辅助技能槽并将作弊技能重置为初始 3 槽（+1 / -1 / 反色）');
         return;
       }
       case 'reset': {
@@ -3751,37 +3792,49 @@ export function App() {
                 })}
               </div>
 
-              {/* Hacker Skills (+1 / -1 / Flip Suit) + Universal Scan Bar */}
-              <div className="lc-hack-bar" role="group" aria-label="黑客与扫描技能栏">
-                {(
-                  [
-                    {
-                      id: 'hack-btn-plus-one',
-                      skill: 'plus-one' as const,
-                      label: '+1',
-                      cost: getEffectiveHackCost(state, 'human', 'plus-one'),
-                      icon: <PixelPlusOneIcon size={12} />,
-                    },
-                    {
-                      id: 'hack-btn-minus-one',
-                      skill: 'minus-one' as const,
-                      label: '-1',
-                      cost: getEffectiveHackCost(state, 'human', 'minus-one'),
-                      icon: <PixelMinusOneIcon size={12} />,
-                    },
-                    {
-                      id: 'hack-btn-flip-suit',
-                      skill: 'flip-suit' as const,
-                      label: '反色',
-                      cost: getEffectiveHackCost(state, 'human', 'flip-suit'),
-                      icon: <PixelFlipSuitIcon size={12} />,
-                    },
-                  ] as const
-                ).map((btn) => {
-                  const isSealed = human.sealedSkills.includes(btn.skill);
-                  const isColdLocked = state.lockedHumanHackSkill === btn.skill;
-                  const usedThisTurn = state.usedHackThisTurn;
+              {/* Cheat Skills (3-Slot Cap, Replaceable) + Universal Scan Bar */}
+              <div className="lc-hack-bar" role="group" aria-label="作弊与扫描技能栏">
+                {(state.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS).slice(0, MAX_CHEAT_SKILLS).map((cheatId) => {
                   const lockedByTutorial = !tutorialCaps.allowHack;
+                  if (cheatId === 'parity-spoof') {
+                    const sk = getSkillById('parity-spoof');
+                    const cost = sk?.costHint ?? 55;
+                    const usedHand = state.usedProtocolSkillThisHand;
+                    const disabled =
+                      lockedByTutorial ||
+                      !isHumanTurn ||
+                      diff > 0 ||
+                      usedHand ||
+                      human.chips < cost;
+                    return (
+                      <button
+                        key={cheatId}
+                        id="hack-btn-parity-spoof"
+                        type="button"
+                        className="lc-hack-btn"
+                        disabled={disabled}
+                        onClick={() => handleUseAcquiredSkill('parity-spoof')}
+                        title={sk?.summary ?? '奇偶跃迁'}
+                      >
+                        <PixelPlusOneIcon size={12} />
+                        <span>{usedHand ? '已用' : '奇偶'}</span>
+                        {!lockedByTutorial && !usedHand && <span className="lc-hack-cost">{cost}</span>}
+                      </button>
+                    );
+                  }
+                  const skill = cheatId as HackSkillId;
+                  const meta =
+                    skill === 'plus-one'
+                      ? { id: 'hack-btn-plus-one', label: '+1', icon: <PixelPlusOneIcon size={12} /> }
+                      : skill === 'minus-one'
+                        ? { id: 'hack-btn-minus-one', label: '-1', icon: <PixelMinusOneIcon size={12} /> }
+                        : skill === 'crown-ace'
+                          ? { id: 'hack-btn-crown-ace', label: '钦定A', icon: <PixelPlusOneIcon size={12} /> }
+                          : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
+                  const cost = getEffectiveHackCost(state, 'human', skill);
+                  const isSealed = human.sealedSkills.includes(skill);
+                  const isColdLocked = state.lockedHumanHackSkill === skill;
+                  const usedThisTurn = state.usedHackThisTurn;
                   const disabled =
                     lockedByTutorial ||
                     !isHumanTurn ||
@@ -3789,43 +3842,43 @@ export function App() {
                     isSealed ||
                     isColdLocked ||
                     usedThisTurn ||
-                    human.chips < btn.cost;
+                    human.chips < cost;
                   return (
                     <button
-                      key={btn.skill}
-                      id={btn.id}
+                      key={skill}
+                      id={meta.id}
                       type="button"
                       className={`lc-hack-btn ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
                       disabled={disabled}
-                      onClick={() => handleExecuteHack(btn.skill)}
+                      onClick={() => handleExecuteHack(skill)}
                       title={
                         lockedByTutorial
-                          ? '当前教学步骤尚未解锁黑客技能（按上方指引推进）'
+                          ? '当前教学步骤尚未解锁黑客作弊技能（按上方指引推进）'
                           : diff > 0
                             ? '遭遇加注，请先在右侧跟注后再使用技能'
                             : isSealed
-                              ? '此技能已被扫描抓获封印'
+                              ? '此作弊技能已被扫描抓获封印'
                               : isColdLocked
                                 ? '本手已被对手「冷频封锁」冻结'
                                 : usedThisTurn
-                                  ? '黑客技能每回合限用 1 次'
-                                  : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                                  ? '作弊技能每回合限用 1 次（下回合刷新）'
+                                  : `作弊技能：先选中己方明牌再点击（预支 ${cost}，每回合限 1 次）`
                       }
                     >
-                      {btn.icon}
+                      {meta.icon}
                       <span>
                         {lockedByTutorial
-                          ? `${btn.label}`
+                          ? `${meta.label}`
                           : isSealed
                             ? '封印'
                             : isColdLocked
                               ? '冷封'
                               : usedThisTurn
                                 ? '已用'
-                                : btn.label}
+                                : meta.label}
                       </span>
                       {!lockedByTutorial && !isSealed && !isColdLocked && !usedThisTurn && (
-                        <span className="lc-hack-cost">{btn.cost}</span>
+                        <span className="lc-hack-cost">{cost}</span>
                       )}
                     </button>
                   );
@@ -3868,9 +3921,9 @@ export function App() {
               </div>
 
               {state.playerAcquiredSkills.length > 0 && (
-                <div className="lc-acquired-skill-bar" role="group" aria-label="已装备额外协议技能槽">
+                <div className="lc-acquired-skill-bar" role="group" aria-label="非作弊辅助技能槽">
                   <span className="lc-micro-tag cyan">
-                    额外槽 {state.playerAcquiredSkills.length}/{MAX_EXTRA_SKILLS}
+                    辅助槽 {state.playerAcquiredSkills.filter((sid) => getSkillGroup(sid) === 'support').length}/{MAX_SUPPORT_SKILLS}
                   </span>
                   {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
@@ -4848,6 +4901,11 @@ export function App() {
             title={pendingSkillClaim.title}
             subtitle={pendingSkillClaim.subtitle}
             choices={pendingSkillClaim.choices}
+            equippedCheatSkills={
+              activeEscapeNodeRef.current !== null
+                ? (escapeProgress.equippedCheatSkills ?? DEFAULT_CHEAT_SKILLS)
+                : (campaign.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS)
+            }
             equippedSkills={
               activeEscapeNodeRef.current !== null
                 ? escapeProgress.equippedSkills
@@ -4868,23 +4926,33 @@ export function App() {
                 setEscapeProgress(nextEsc);
                 setState((prev) => ({
                   ...prev,
+                  playerCheatSkills: nextEsc.equippedCheatSkills,
                   playerAcquiredSkills: nextEsc.equippedSkills,
                 }));
                 if (pendingSkillClaim.clearedNodeIndex !== undefined) {
                   setViewMode('escape-map');
                 }
               } else {
-                const nextSkills = equipExtraSkill(
+                const grouped = equipGroupedSkill(
+                  campaign.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS,
                   campaign.acquiredSkills,
                   chosenSkillId,
                   replaceSlotIndex
                 );
-                setCampaign((prev) => ({ ...prev, acquiredSkills: nextSkills }));
-                setState((prev) => ({ ...prev, playerAcquiredSkills: nextSkills }));
+                setCampaign((prev) => ({
+                  ...prev,
+                  acquiredCheatSkills: grouped.cheat,
+                  acquiredSkills: grouped.support,
+                }));
+                setState((prev) => ({
+                  ...prev,
+                  playerCheatSkills: grouped.cheat,
+                  playerAcquiredSkills: grouped.support,
+                }));
               }
               pushToast(
                 'success',
-                `已装备额外技能「${sk?.name ?? chosenSkillId}」`,
+                `已装备${getSkillGroup(chosenSkillId) === 'cheat' ? '作弊' : '辅助'}技能「${sk?.name ?? chosenSkillId}」`,
                 replaceSlotIndex !== undefined
                   ? `已替换原槽位 #${replaceSlotIndex + 1}`
                   : undefined

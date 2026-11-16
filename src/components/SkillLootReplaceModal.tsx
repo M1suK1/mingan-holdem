@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
-import { MAX_EXTRA_SKILLS, getSkillById, needsSkillReplacement } from '../engine/skillPool.ts';
+import {
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
+  MAX_SUPPORT_SKILLS,
+  getSkillById,
+  getSkillGroup,
+  needsGroupedSkillReplacement,
+} from '../engine/skillPool.ts';
 import { PixelCheckIcon, PixelSurgeIcon } from './CyberIcons.tsx';
 
 interface SkillLootReplaceModalProps {
   title: string;
   subtitle: string;
   choices: string[];
+  equippedCheatSkills?: string[];
   equippedSkills: string[];
   onConfirm: (chosenSkillId: string, replaceSlotIndex?: number) => void;
   onSkip: () => void;
@@ -15,6 +23,7 @@ export default function SkillLootReplaceModal({
   title,
   subtitle,
   choices,
+  equippedCheatSkills = DEFAULT_CHEAT_SKILLS,
   equippedSkills,
   onConfirm,
   onSkip,
@@ -39,10 +48,14 @@ export default function SkillLootReplaceModal({
   }, [onSkip]);
 
   const activeSkill = getSkillById(selectedSkillId) ?? getSkillById(choices[0] ?? '');
+  const activeGroup = activeSkill ? getSkillGroup(activeSkill.id) : 'support';
+  const groupSlots = activeGroup === 'cheat' ? equippedCheatSkills : equippedSkills;
+  const groupCap = activeGroup === 'cheat' ? MAX_CHEAT_SKILLS : MAX_SUPPORT_SKILLS;
+  const groupLabel = activeGroup === 'cheat' ? '作弊技能槽' : '非作弊辅助槽';
   const mustReplace = activeSkill
-    ? needsSkillReplacement(equippedSkills, activeSkill.id)
+    ? needsGroupedSkillReplacement(equippedCheatSkills, equippedSkills, activeSkill.id)
     : false;
-  const alreadyOwned = activeSkill ? equippedSkills.includes(activeSkill.id) : false;
+  const alreadyOwned = activeSkill ? groupSlots.includes(activeSkill.id) : false;
 
   return (
     <div
@@ -58,28 +71,32 @@ export default function SkillLootReplaceModal({
         <header className="lc-skill-modal-head">
           <div>
             <div className="lc-escape-brief-tag">
-              PROTOCOL EXTRACTION // 额外协议槽位 ({equippedSkills.length}/{MAX_EXTRA_SKILLS})
+              PROTOCOL EXTRACTION // 作弊槽 {equippedCheatSkills.length}/{MAX_CHEAT_SKILLS} · 辅助槽 {equippedSkills.length}/{MAX_SUPPORT_SKILLS}
             </div>
             <h2 id="skill-loot-modal-title" className="lc-cmd-title">
               {title}
             </h2>
             <p className="lc-cmd-subtitle">{subtitle}</p>
           </div>
-          <span className={`lc-slot-cap-badge ${equippedSkills.length >= MAX_EXTRA_SKILLS ? 'is-full' : ''}`}>
-            槽位上限 {equippedSkills.length} / {MAX_EXTRA_SKILLS}
+          <span className={`lc-slot-cap-badge ${groupSlots.length >= groupCap ? 'is-full' : ''}`}>
+            {groupLabel} {groupSlots.length} / {groupCap}
           </span>
         </header>
 
         <section className="lc-skill-modal-sec" aria-label="可选协议技能">
           <div className="lc-skill-sec-label">
-            {choices.length > 1 ? '1. 选择要提取的额外协议技能' : '1. 即将装备的新协议技能'}
+            {choices.length > 1 ? '1. 选择要提取的协议技能' : '1. 即将装备的新协议技能'}
           </div>
           <div className="lc-skill-choice-grid">
             {choices.map((sid, idx) => {
               const sk = getSkillById(sid);
               if (!sk) return null;
+              const skGroup = getSkillGroup(sid);
               const picked = activeSkill?.id === sid;
-              const owned = equippedSkills.includes(sid);
+              const owned =
+                skGroup === 'cheat'
+                  ? equippedCheatSkills.includes(sid)
+                  : equippedSkills.includes(sid);
               return (
                 <button
                   key={sid}
@@ -91,7 +108,7 @@ export default function SkillLootReplaceModal({
                   <div className="lc-skill-choice-top">
                     <strong>{sk.name}</strong>
                     <span className="lc-skill-choice-badge">
-                      {owned ? '已装备' : sk.costHint ? `费用 ${sk.costHint}` : '被动'}
+                      {skGroup === 'cheat' ? '作弊技能' : '非作弊辅助'} · {owned ? '已装备' : sk.costHint ? `费用 ${sk.costHint}` : '被动'}
                     </span>
                   </div>
                   <p className="lc-skill-choice-desc">{sk.summary}</p>
@@ -105,10 +122,10 @@ export default function SkillLootReplaceModal({
         {mustReplace && activeSkill && (
           <section className="lc-skill-modal-sec is-replace-zone" aria-label="槽位已满需替换">
             <div className="lc-skill-sec-label danger">
-              2. 额外技能槽已达上限 (3/3) — 请选择 1 个现有槽位替换为「{activeSkill.name}」
+              2. {groupLabel}已达上限 ({groupCap}/{groupCap}) — 请选择 1 个现有槽位替换为「{activeSkill.name}」
             </div>
             <div className="lc-skill-replace-grid">
-              {equippedSkills.slice(0, MAX_EXTRA_SKILLS).map((oldId, slotIdx) => {
+              {groupSlots.slice(0, groupCap).map((oldId, slotIdx) => {
                 const oldSk = getSkillById(oldId);
                 const selected = replaceSlotIndex === slotIdx;
                 return (
@@ -120,7 +137,7 @@ export default function SkillLootReplaceModal({
                     onClick={() => setReplaceSlotIndex(slotIdx)}
                   >
                     <div className="lc-skill-choice-top">
-                      <span>槽位 #{slotIdx + 1}</span>
+                      <span>{groupLabel} #{slotIdx + 1}</span>
                       <span className="lc-skill-replace-tag">
                         {selected ? '将被替换' : '点击选中'}
                       </span>

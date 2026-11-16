@@ -266,6 +266,7 @@ export interface GameState {
   usedHackThisTurn: boolean;
   usedScanThisTurn: boolean;
   scannedKeys: string[];
+  playerCheatSkills?: string[];
   playerAcquiredSkills: string[];
   usedProtocolSkillThisHand: boolean;
   peekedBoardIndices: number[];
@@ -315,10 +316,13 @@ export interface OpponentAgent {
   }>;
 }
 
+export type SkillGroup = 'cheat' | 'support';
+
 export interface SkillPoolEntry {
   id: string;
   name: string;
   category: 'hack' | 'recon' | 'protocol' | 'passive';
+  skillGroup?: SkillGroup;
   summary: string;
   costHint?: number;
   targetMode?: 'instant' | 'human-open-hand' | 'human-locked-hand' | 'hidden-board' | 'passive';
@@ -358,6 +362,7 @@ export interface CampaignState {
   coreEntity: VirtualEntity;
   capturedEntities: VirtualEntity[];
   activeDisguiseId: string;
+  acquiredCheatSkills?: string[];
   acquiredSkills: string[];
   defeatedPursuers: Array<{
     name: string;
