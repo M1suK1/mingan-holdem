@@ -108,6 +108,16 @@ export function sanitizeStateForGuest(hostState: GameState): GameState {
   cloned.deck = [];
   if (!revealAll) {
     cloned.hackEscrowPot = 0;
+    const hostEscrow = cloned.players.human.hiddenHackEscrow ?? 0;
+    if (hostEscrow > 0) {
+      cloned.players.human.chips += hostEscrow;
+      cloned.players.human.totalCommitted = Math.max(
+        0,
+        cloned.players.human.totalCommitted - hostEscrow
+      );
+    }
+    cloned.players.human.hiddenHackEscrow = 0;
+    cloned.players.human.ghostShield = false;
   }
 
   // Host (human) hand sanitization

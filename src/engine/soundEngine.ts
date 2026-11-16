@@ -74,9 +74,12 @@ export function saveSoundSettings(settings: SoundSettings): void {
 }
 
 export function actionToSoundCue(
-  action: Pick<VfxEvent, 'type' | 'amount' | 'caught'> | null | undefined
+  action: (Pick<VfxEvent, 'type' | 'amount' | 'caught'> & { actor?: VfxEvent['actor'] }) | null | undefined
 ): SoundCue | null {
   if (!action) return null;
+  if ((action.type === 'hack' || action.type === 'use-skill') && action.actor && action.actor !== 'human') {
+    return null;
+  }
   switch (action.type) {
     case 'flip':
       return 'flip';

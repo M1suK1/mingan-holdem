@@ -35,7 +35,8 @@ describe('soundEngine: action/showdown cue mapping, settings clamping & Node fal
     assert.equal(actionToSoundCue({ type: 'raise', amount: 20 }), 'raise');
     assert.equal(actionToSoundCue({ type: 'raise', amount: 120 }), 'raise-heavy');
     assert.equal(actionToSoundCue({ type: 'fold' }), 'fold');
-    assert.equal(actionToSoundCue({ type: 'hack' }), 'hack');
+    assert.equal(actionToSoundCue({ type: 'hack', actor: 'human' }), 'hack');
+    assert.equal(actionToSoundCue({ type: 'hack', actor: 'ai' }), null);
     assert.equal(actionToSoundCue({ type: 'scan', caught: false }), 'scan-clean');
     assert.equal(actionToSoundCue({ type: 'scan', caught: true }), 'scan-caught');
     assert.equal(actionToSoundCue({ type: 'use-skill' }), 'skill');

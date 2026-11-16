@@ -36,6 +36,7 @@ import {
   getNextSwapFee,
   getVisibleBoardCard,
   getVisibleHandCard,
+  getVisiblePlayerChips,
   isActionLegal,
   otherPlayer,
   startNextHand,
@@ -2278,6 +2279,7 @@ export function App() {
   const evt = state.lastAction;
 
   // Damage & Defeat VFX State (Strictly isolated between Opponent and Player!)
+  const visibleAiChips = getVisiblePlayerChips(state, 'ai', 'human');
   const isAiBankrupt =
     vfxTestMode === 'ai-bankrupt' || (isShowdown && ai.chips === 0);
   const isHumanBankrupt =
@@ -2285,7 +2287,7 @@ export function App() {
   const isAiLowCompute =
     !isAiBankrupt &&
     (vfxTestMode === 'ai-low' ||
-      (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
+      (visibleAiChips > 0 && visibleAiChips <= state.config.startingChips * 0.3));
   const isHumanLowCompute =
     !isHumanBankrupt &&
     (vfxTestMode === 'human-low' ||
@@ -2588,7 +2590,7 @@ export function App() {
               <span className="lc-micro-tag pink">
                 对端：{opponentSummary.label} · {opponentSummary.detail}
               </span>
-              <span className="lc-micro-tag">可用算力 {ai.chips}</span>
+              <span className="lc-micro-tag">可用算力 {visibleAiChips}</span>
             </div>
 
             <div className="lc-cards-row">
@@ -3962,7 +3964,13 @@ export function App() {
           <ProtocolManualModal
             initialTab={activeModal.tab}
             config={state.config}
-            history={state.actionHistory}
+            history={
+              revealAllAi
+                ? state.actionHistory
+                : state.actionHistory.filter(
+                    (entry) => !(entry.actor === 'ai' && entry.summary.includes('终端篡改'))
+                  )
+            }
             onClose={() => setActiveModal({ type: 'none' })}
           />
         )}
