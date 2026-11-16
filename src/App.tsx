@@ -421,6 +421,7 @@ export function App() {
       chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
       opponentName: initNode.opponentName,
       opponentSignatureSkill: initNode.signatureSkillId,
+      aiSpecialCheatSkill: initNode.specialCheatSkillId,
       playerAcquiredSkills: initEsc.equippedSkills,
     });
   });
@@ -1560,7 +1561,10 @@ export function App() {
           enqueueOpponentSegments(snapshot.players.ai.name, chatRes.segments);
         } else {
           setActiveExpression(decision.dialogue.expression);
-          if (decision.action.type !== 'hack') {
+          const isSecretCheat =
+            decision.action.type === 'hack' ||
+            (decision.action.type === 'use-skill' && decision.action.skillId === 'crown-ace');
+          if (!isSecretCheat) {
             enqueueTask({
               kind: 'opponent',
               speaker: snapshot.players.ai.name,
@@ -2364,6 +2368,7 @@ export function App() {
       chips: resolvedChips,
       opponentName: resolvedOpponentName,
       opponentSignatureSkill: activeEscNode?.signatureSkillId,
+      aiSpecialCheatSkill: activeEscNode?.specialCheatSkillId,
       playerAcquiredSkills: isP2pConnected
         ? []
         : overrideAcquiredSkills ??

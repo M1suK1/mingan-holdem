@@ -271,6 +271,7 @@ export interface GameState {
   peekedBoardIndices: number[];
   frozenBoardIndices: number[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
+  aiSpecialCheatSkill?: 'crown-ace';
   lockedHumanHackSkill?: HackSkillId;
   lockedAiHackSkill?: HackSkillId;
   siphonUsedThisHand?: { human: boolean; ai: boolean };

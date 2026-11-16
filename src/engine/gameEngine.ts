@@ -304,6 +304,7 @@ export interface CreateStateOptions {
   sealedSkills?: Record<PlayerId, HackSkillId[]>;
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
+  aiSpecialCheatSkill?: 'crown-ace';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
@@ -440,6 +441,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     peekedBoardIndices: [],
     frozenBoardIndices: [],
     opponentSignatureSkill: sigSkill,
+    aiSpecialCheatSkill: options.aiSpecialCheatSkill,
     lockedHumanHackSkill,
     lockedAiHackSkill: undefined,
     siphonUsedThisHand: { human: false, ai: false },
@@ -520,6 +522,7 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
     },
     playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     opponentSignatureSkill: prev.opponentSignatureSkill,
+    aiSpecialCheatSkill: prev.aiSpecialCheatSkill,
     confirmedTrapIndices: [...(prev.confirmedTrapIndices ?? [])],
     pastHands: nextPastHands.slice(-12),
   });
@@ -610,12 +613,22 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       return true;
     }
 
-    // Acquired Protocol Skills (once per hand, human player)
+    // Acquired / Special Protocol Skills (once per hand)
     if (action.type === 'use-skill') {
-      if (actorId !== 'human') return false;
       if (state.usedProtocolSkillThisHand) return false;
-      if (!state.playerAcquiredSkills?.includes(action.skillId)) return false;
       const idx = action.targetIndex ?? 0;
+      if (action.skillId === 'crown-ace') {
+        const hasSkill =
+          actorId === 'human'
+            ? Boolean(state.playerAcquiredSkills?.includes('crown-ace'))
+            : state.aiSpecialCheatSkill === 'crown-ace';
+        if (!hasSkill) return false;
+        if (actor.sealedSkills.includes('plus-one')) return false;
+        const hc = actor.hand[idx];
+        return Boolean(hc && hc.visibility === 'open' && hc.card.rank < 14 && actor.chips >= 60);
+      }
+      if (actorId !== 'human') return false;
+      if (!state.playerAcquiredSkills?.includes(action.skillId)) return false;
       switch (action.skillId) {
         case 'ghost-packet':
           return !actor.ghostShield && actor.chips >= 40;
@@ -1279,7 +1292,18 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     next.usedProtocolSkillThisHand = true;
 
     let summary = '';
-    if (action.skillId === 'ghost-packet') {
+    if (action.skillId === 'crown-ace') {
+      const cost = 60;
+      actor.chips -= cost;
+      actor.totalCommitted += cost;
+      actor.hiddenHackEscrow = (actor.hiddenHackEscrow ?? 0) + cost;
+      next.hackEscrowPot += cost;
+      const hc = actor.hand[idx];
+      if (!hc.originalCard) hc.originalCard = { ...hc.card };
+      hc.card = { ...hc.card, rank: 14 };
+      hc.tamperedBy = Array.from(new Set([...(hc.tamperedBy ?? []), 'plus-one']));
+      summary = `${actorLabel} 预支 ${cost} 算力注入特权协议（钦定王牌 · 仅己方可见）`;
+    } else if (action.skillId === 'ghost-packet') {
       const cost = 40;
       actor.chips -= cost;
       actor.totalCommitted += cost;
@@ -1357,7 +1381,12 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       type: 'use-skill',
       actor: actorId,
       boardIndex: action.skillId === 'zero-day-peek' || action.skillId === 'ice-firewall' ? idx : undefined,
-      handIndex: action.skillId === 'parity-spoof' || action.skillId === 'phantom-swap' ? idx : undefined,
+      handIndex:
+        action.skillId === 'parity-spoof' ||
+        action.skillId === 'phantom-swap' ||
+        action.skillId === 'crown-ace'
+          ? idx
+          : undefined,
       label: summary,
     };
     next.actionHistory.push({

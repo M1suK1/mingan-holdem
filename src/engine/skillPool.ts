@@ -92,9 +92,19 @@ export function equipExtraSkill(
 }
 
 /**
- * 黑域协议技能池（已实装 11 项可掠夺协议技能，最多同时装备 3 项，超限需替换）。
+ * 黑域协议技能池（已实装 12 项可掠夺/专属协议技能，最多同时装备 3 项，超限需替换）。
  */
 export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
+  {
+    id: 'crown-ace',
+    name: '钦定王牌',
+    category: 'hack',
+    summary: '预支 60 算力挑选己方手中 1 张非 A 明牌，直接篡改为对应花色的 A（结果仅己方可见）。',
+    costHint: 60,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['主动·每局限1次', '千金特权改牌'],
+  },
   {
     id: 'siphon-cache',
     name: '算力虹吸',
