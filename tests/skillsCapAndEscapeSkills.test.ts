@@ -1,17 +1,27 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
   MAX_EXTRA_SKILLS,
+  MAX_SUPPORT_SKILLS,
   SKILL_POOL_REGISTRY,
   equipExtraSkill,
+  equipGroupedSkill,
   getSkillById,
+  getSkillGroup,
+  needsGroupedSkillReplacement,
   needsSkillReplacement,
 } from '../src/engine/skillPool.ts';
 import { claimVictoryLoot, createInitialCampaign, resolveMatchVictory } from '../src/engine/campaign.ts';
 import { buildPursuerDossier } from '../src/engine/skillPool.ts';
 import { FALLBACK_CONTRACT_CHARACTER } from '../src/engine/contractCards.ts';
 import { applyAction, createInitialState, isActionLegal, startNextHand } from '../src/engine/gameEngine.ts';
-import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
+import {
+  ESCAPE_ROUTE_NODES,
+  claimEscapeNodeSkill,
+  createInitialEscapeProgress,
+} from '../src/engine/escapeMap.ts';
 import { parseDebugCommand } from '../src/engine/debugCmd.ts';
 
 describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能', () => {
@@ -168,5 +178,71 @@ describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能'
       skillId: 'siphon-cache',
     });
     assert.deepEqual(parseDebugCommand('clearskills'), { ok: true, cmd: 'clearskills' });
+  });
+
+  it('classifies cheat skills (+1/-1/flip-suit/crown-ace/parity-spoof) vs support skills (siphon-cache/ghost-packet) with independent 3-slot caps', () => {
+    assert.equal(MAX_CHEAT_SKILLS, 3);
+    assert.equal(MAX_SUPPORT_SKILLS, 3);
+    assert.deepEqual(DEFAULT_CHEAT_SKILLS, ['plus-one', 'minus-one', 'flip-suit']);
+
+    assert.equal(getSkillGroup('plus-one'), 'cheat');
+    assert.equal(getSkillGroup('minus-one'), 'cheat');
+    assert.equal(getSkillGroup('flip-suit'), 'cheat');
+    assert.equal(getSkillGroup('crown-ace'), 'cheat');
+    assert.equal(getSkillGroup('parity-spoof'), 'cheat');
+
+    assert.equal(getSkillGroup('siphon-cache'), 'support');
+    assert.equal(getSkillGroup('ghost-packet'), 'support');
+    assert.equal(getSkillGroup('cold-freq-lock'), 'support');
+    assert.equal(getSkillGroup('trace-scramble'), 'support');
+
+    // Equipping support skills fills support pool without disturbing 3 cheat slots
+    let cheat = [...DEFAULT_CHEAT_SKILLS];
+    let support: string[] = [];
+    assert.equal(needsGroupedSkillReplacement(cheat, support, 'ghost-packet'), false);
+    ({ cheat, support } = equipGroupedSkill(cheat, support, 'ghost-packet'));
+    ({ cheat, support } = equipGroupedSkill(cheat, support, 'siphon-cache'));
+    ({ cheat, support } = equipGroupedSkill(cheat, support, 'zero-day-peek'));
+    assert.deepEqual(cheat, DEFAULT_CHEAT_SKILLS);
+    assert.deepEqual(support, ['ghost-packet', 'siphon-cache', 'zero-day-peek']);
+
+    // 4th support skill triggers replacement in support pool ONLY
+    assert.equal(needsGroupedSkillReplacement(cheat, support, 'ice-firewall'), true);
+    ({ cheat, support } = equipGroupedSkill(cheat, support, 'ice-firewall', 1));
+    assert.deepEqual(support, ['ghost-packet', 'ice-firewall', 'zero-day-peek']);
+    assert.deepEqual(cheat, DEFAULT_CHEAT_SKILLS);
+
+    // Acquiring a new cheat skill (crown-ace) triggers replacement in cheat pool ONLY
+    assert.equal(needsGroupedSkillReplacement(cheat, support, 'crown-ace'), true);
+    ({ cheat, support } = equipGroupedSkill(cheat, support, 'crown-ace', 1));
+    assert.deepEqual(cheat, ['plus-one', 'crown-ace', 'flip-suit']);
+    assert.deepEqual(support, ['ghost-packet', 'ice-firewall', 'zero-day-peek']);
+  });
+
+  it('persists separate cheat and support 3-slot pools in EscapeMapProgress and blocks replaced cheat skill in gameEngine', () => {
+    let esc = createInitialEscapeProgress();
+    assert.deepEqual(esc.equippedCheatSkills, ['plus-one', 'minus-one', 'flip-suit']);
+    assert.deepEqual(esc.equippedSkills, []);
+
+    esc = claimEscapeNodeSkill(esc, 'siphon-cache');
+    assert.deepEqual(esc.equippedSkills, ['siphon-cache']);
+    assert.deepEqual(esc.equippedCheatSkills, ['plus-one', 'minus-one', 'flip-suit']);
+
+    // Replace minus-one (slot 1) with crown-ace
+    esc = claimEscapeNodeSkill(esc, 'crown-ace', 1);
+    assert.deepEqual(esc.equippedCheatSkills, ['plus-one', 'crown-ace', 'flip-suit']);
+    assert.deepEqual(esc.equippedSkills, ['siphon-cache']);
+
+    const state = createInitialState({
+      chips: { human: 600, ai: 600 },
+      playerCheatSkills: esc.equippedCheatSkills,
+      playerAcquiredSkills: esc.equippedSkills,
+    });
+    const humanTurn = { ...state, currentTurn: 'human' as const };
+    // Replaced minus-one is no longer usable, while crown-ace IS usable!
+    assert.equal(isActionLegal(humanTurn, { type: 'hack', handIndex: 0, skill: 'minus-one' }), false);
+    if (humanTurn.players.human.hand[0].card.rank < 14) {
+      assert.equal(isActionLegal(humanTurn, { type: 'hack', handIndex: 0, skill: 'crown-ace' }), true);
+    }
   });
 });

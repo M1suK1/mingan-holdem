@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { AlertTriangle, Check, ShieldAlert, Skull, Sparkles, UserCheck, Zap } from 'lucide-react';
 import type { CampaignState } from '../engine/types.ts';
 import { getActiveDisguiseEntity } from '../engine/campaign.ts';
-import { MAX_EXTRA_SKILLS, getSkillById, needsSkillReplacement } from '../engine/skillPool.ts';
+import {
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
+  MAX_SUPPORT_SKILLS,
+  getSkillById,
+  getSkillGroup,
+  needsGroupedSkillReplacement,
+} from '../engine/skillPool.ts';
 
 interface CampaignOutcomeModalProps {
   campaign: CampaignState;
@@ -34,7 +41,17 @@ export default function CampaignOutcomeModal({
   if (campaign.status === 'loot-select' && campaign.pendingLoot) {
     const loot = campaign.pendingLoot;
     const effectivePickedSkill = selectedSkillId || loot.skillChoices[0] || '';
-    const mustReplaceSkill = needsSkillReplacement(campaign.acquiredSkills, effectivePickedSkill);
+    const cheatPool = campaign.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS;
+    const supportPool = campaign.acquiredSkills;
+    const activeGroup = effectivePickedSkill ? getSkillGroup(effectivePickedSkill) : 'support';
+    const targetSlots = activeGroup === 'cheat' ? cheatPool : supportPool;
+    const targetCap = activeGroup === 'cheat' ? MAX_CHEAT_SKILLS : MAX_SUPPORT_SKILLS;
+    const groupTitle = activeGroup === 'cheat' ? '作弊技能槽' : '非作弊辅助槽';
+    const mustReplaceSkill = needsGroupedSkillReplacement(
+      cheatPool,
+      supportPool,
+      effectivePickedSkill
+    );
     return (
       <div
         className="cyber-modal-scrim"
@@ -78,7 +95,7 @@ export default function CampaignOutcomeModal({
 
             <div className="cyber-panel-box">
               <strong style={{ fontSize: 13, color: 'var(--neon-pink-soft)' }}>
-                2. 从追捕者技能池挑选 1 项协议技能（额外技能上限 {campaign.acquiredSkills.length}/{MAX_EXTRA_SKILLS}）
+                2. 从追捕者技能池挑选 1 项技能（作弊槽 {cheatPool.length}/{MAX_CHEAT_SKILLS} · 辅助槽 {supportPool.length}/{MAX_SUPPORT_SKILLS}）
               </strong>
               {loot.skillChoices.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -120,10 +137,10 @@ export default function CampaignOutcomeModal({
             {mustReplaceSkill && (
               <div className="cyber-panel-box">
                 <strong style={{ fontSize: 13, color: 'var(--neon-amber)' }}>
-                  3. 额外技能槽位已满 (3/3) — 选择要被替换的旧技能
+                  3. {groupTitle}已满 ({targetCap}/{targetCap}) — 选择要被替换的旧技能
                 </strong>
                 <div className="lc-skill-loot-grid">
-                  {campaign.acquiredSkills.slice(0, MAX_EXTRA_SKILLS).map((oldId, rIdx) => {
+                  {targetSlots.slice(0, targetCap).map((oldId, rIdx) => {
                     const oldSk = getSkillById(oldId);
                     const isTarget = replaceSlotIndex === rIdx;
                     return (

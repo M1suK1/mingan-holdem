@@ -3,7 +3,13 @@ import {
   resolveVirtualEntityPortrait,
   type ContractCharacter,
 } from './contractCards.ts';
-import { MAX_EXTRA_SKILLS, equipExtraSkill, pickLootSkillChoices } from './skillPool.ts';
+import {
+  DEFAULT_CHEAT_SKILLS,
+  MAX_CHEAT_SKILLS,
+  MAX_EXTRA_SKILLS,
+  equipGroupedSkill,
+  pickLootSkillChoices,
+} from './skillPool.ts';
 import type { CampaignState, PursuerDossier, VirtualEntity } from './types.ts';
 
 export const CAMPAIGN_STORAGE_KEY = 'mingan-cyber-holdem:campaign:v1';
@@ -31,6 +37,7 @@ export function createInitialCampaign(playerCodename = 'ZERO-BYTE'): CampaignSta
     coreEntity: core,
     capturedEntities: [],
     activeDisguiseId: core.id,
+    acquiredCheatSkills: [...DEFAULT_CHEAT_SKILLS],
     acquiredSkills: [],
     defeatedPursuers: [],
     pendingLoot: null,
@@ -107,9 +114,11 @@ export function claimVictoryLoot(
     ...campaign.capturedEntities.filter((e) => e.id !== loot.seizedEntity.id),
   ];
 
-  const nextSkills = chosenSkillId
-    ? equipExtraSkill(campaign.acquiredSkills, chosenSkillId, replaceSlotIndex)
-    : campaign.acquiredSkills.slice(0, MAX_EXTRA_SKILLS);
+  const currentCheat = (campaign.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS).slice(0, MAX_CHEAT_SKILLS);
+  const currentSupport = campaign.acquiredSkills.slice(0, MAX_EXTRA_SKILLS);
+  const grouped = chosenSkillId
+    ? equipGroupedSkill(currentCheat, currentSupport, chosenSkillId, replaceSlotIndex)
+    : { cheat: currentCheat, support: currentSupport };
 
   return {
     ...campaign,
@@ -117,7 +126,8 @@ export function claimVictoryLoot(
     bounty: campaign.bounty + 800 + campaign.wantedLevel * 250,
     roundIndex: campaign.roundIndex + 1,
     capturedEntities: nextCaptured,
-    acquiredSkills: nextSkills,
+    acquiredCheatSkills: grouped.cheat,
+    acquiredSkills: grouped.support,
     defeatedPursuers: [
       {
         name: loot.pursuerName,
