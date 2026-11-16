@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --experimental-strip-types --test tests/evaluator.test.ts tests/gameEngine.test.ts tests/aiAgent.test.ts tests/contractAndLlm.test.ts tests/campaignAndWorldbook.test.ts tests/p2pProtocol.test.ts tests/soundEngine.test.ts tests/sec00Tutorial.test.ts tests/escapeMap.test.ts tests/debugCmd.test.ts tests/skillsCapAndEscapeSkills.test.ts tests/tutorialSpotlight.test.ts tests/uiQuality.test.ts"
+    "test": "node --experimental-strip-types --test tests/evaluator.test.ts tests/gameEngine.test.ts tests/aiAgent.test.ts tests/contractAndLlm.test.ts tests/campaignAndWorldbook.test.ts tests/p2pProtocol.test.ts tests/soundEngine.test.ts tests/sec00Tutorial.test.ts tests/escapeMap.test.ts tests/debugCmd.test.ts tests/skillsCapAndEscapeSkills.test.ts tests/tutorialSpotlight.test.ts tests/storyCharacters.test.ts tests/uiQuality.test.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
