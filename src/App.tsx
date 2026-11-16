@@ -127,7 +127,17 @@ import {
   unlockAudioContext,
   type SoundSettings,
 } from './engine/soundEngine.ts';
+import {
+  TUTORIAL_STAGES,
+  createTutorialStageState,
+  decideTutorialOpponentAction,
+  getTutorialCapabilities,
+  getTutorialGuidance,
+  loadTutorialCompleted,
+  saveTutorialCompleted,
+} from './engine/tutorial.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
+import TutorialOverlayBar from './components/TutorialOverlayBar.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
 import {
@@ -165,11 +175,12 @@ const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
+  keyName: 'tutorial' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
+  { id: 'menu-tutorial', keyName: 'tutorial', label: '新手教程 (6关)', note: '无黑客换牌翻牌 -> 加注跟注 -> 双花色同花 -> 篡改 -> 扫描封印 -> 实战', icon: 'rules' },
   { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
   { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
@@ -406,6 +417,14 @@ export function App() {
   const mobileChatOpenRef = useRef(mobileChatOpen);
   mobileChatOpenRef.current = mobileChatOpen;
   const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => loadSoundSettings());
+  const [tutorialActive, setTutorialActive] = useState(false);
+  const [tutorialStageIndex, setTutorialStageIndex] = useState(0);
+  const [tutorialCompleted, setTutorialCompleted] = useState(() => loadTutorialCompleted());
+  const [welcomeDismissed, setWelcomeDismissed] = useState(() => loadTutorialCompleted());
+  const tutorialActiveRef = useRef(tutorialActive);
+  tutorialActiveRef.current = tutorialActive;
+  const tutorialStageRef = useRef(tutorialStageIndex);
+  tutorialStageRef.current = tutorialStageIndex;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
 
@@ -1283,9 +1302,42 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
 
-  // AI Turn Scheduler (Skipped during P2P friend multiplayer, including brief reconnect windows!)
+  // AI & Tutorial Turn Scheduler (Skipped during P2P friend multiplayer!)
   useEffect(() => {
     if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+
+    if (tutorialActive) {
+      let cancelled = false;
+      setIsAiThinking(true);
+      const timer = window.setTimeout(async () => {
+        try {
+          const snapshot = latestStateRef.current;
+          if (
+            cancelled ||
+            !tutorialActiveRef.current ||
+            snapshot.phase === 'showdown' ||
+            snapshot.currentTurn !== 'ai'
+          ) {
+            return;
+          }
+          const stageIdx = tutorialStageRef.current;
+          const act = await decideTutorialOpponentAction(stageIdx, snapshot);
+          if (!cancelled && tutorialActiveRef.current && act) {
+            const latest = latestStateRef.current;
+            if (latest.phase !== 'showdown' && latest.currentTurn === 'ai') {
+              setState(applyAction(latest, act));
+            }
+          }
+        } finally {
+          if (!cancelled) setIsAiThinking(false);
+        }
+      }, 460);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+        setIsAiThinking(false);
+      };
+    }
 
     let cancelled = false;
     setIsAiThinking(true);
@@ -1481,6 +1533,15 @@ export function App() {
           : res.winner === 'human'
             ? `漂亮的牌序博弈，本局算力池 ${res.potWon} 到手！`
             : `完全同分平局，双方平分算力池 ${res.potWon}。`;
+
+    if (tutorialActiveRef.current) {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: '训练靶机',
+        text: line,
+      });
+      return;
+    }
 
     if (isP2pConnected) {
       enqueueTask({
@@ -1700,6 +1761,7 @@ export function App() {
   };
 
   const handleExecuteHack = (skill: HackSkillId) => {
+    if (tutorialActive && !tutorialCaps.allowHack) return;
     if (state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0) {
       pushToast('warn', '遭遇加注，请先跟注', '必须先补齐跟注差额，才能使用黑客或扫描技能');
@@ -1782,6 +1844,7 @@ export function App() {
   };
 
   const handleExecuteScan = (targetKind: 'hand' | 'board', targetIndex: number) => {
+    if (tutorialActive && !tutorialCaps.allowScan) return;
     if (!scanMode || state.currentTurn !== 'human' || state.phase === 'showdown') return;
     if (getBetDiff(state, 'human') > 0 && state.phase !== 'river') {
       setScanMode(false);
@@ -1941,7 +2004,107 @@ export function App() {
     });
   };
 
+  const startTutorial = useCallback(
+    (stageIdx = 0) => {
+      if (isP2pSessionActive) {
+        disconnectP2p();
+      }
+      const clamped = Math.max(0, Math.min(TUTORIAL_STAGES.length - 1, stageIdx));
+      for (const id of timersRef.current) {
+        window.clearTimeout(id);
+      }
+      timersRef.current = [];
+      queueRef.current = [];
+      inFlightTaskRef.current = null;
+      resetEpochRef.current += 1;
+      isAnimatingRef.current = false;
+      setQueuedCount(0);
+      setFloatingBubble(null);
+      setCrushingActive(false);
+      setSelectedHandIndex(null);
+      setDraggedHandIndex(null);
+      setShowRaiseTiers(false);
+      setScanMode(false);
+      setPendingSkillTargetId(null);
+      setRoundLossFlicker(false);
+      setAiRoundLossFlicker(false);
+      setActiveExpression('calm');
+      setActiveModal({ type: 'none' });
+      lastHandledShowdownHandRef.current = 0;
+      lastSoundActionIdRef.current = null;
+      setTutorialActive(true);
+      setTutorialStageIndex(clamped);
+      setWelcomeDismissed(true);
+      const tState = createTutorialStageState(clamped);
+      setState(tState);
+      setMessages([
+        {
+          id: `tut-start-${clamped}-${Date.now()}`,
+          sender: 'opponent',
+          speaker: '黑域教学协议',
+          text: `${TUTORIAL_STAGES[clamped].title}：${TUTORIAL_STAGES[clamped].mechanicTip}`,
+          crushed: false,
+        },
+      ]);
+    },
+    [disconnectP2p, isP2pSessionActive]
+  );
+
+  const exitTutorial = useCallback(
+    (markCompleted = false) => {
+      if (markCompleted) {
+        setTutorialCompleted(true);
+        saveTutorialCompleted(true);
+      }
+      setTutorialActive(false);
+      setWelcomeDismissed(true);
+      setSelectedHandIndex(null);
+      setDraggedHandIndex(null);
+      setShowRaiseTiers(false);
+      setScanMode(false);
+      setPendingSkillTargetId(null);
+      setRoundLossFlicker(false);
+      setAiRoundLossFlicker(false);
+      lastHandledShowdownHandRef.current = 0;
+      lastSoundActionIdRef.current = null;
+      const normalState = createInitialState({
+        config: state.config,
+        opponentName: character.name,
+        playerAcquiredSkills: latestCampaignRef.current.acquiredSkills,
+      });
+      setState(normalState);
+      setMessages([
+        {
+          id: `tut-exit-${Date.now()}`,
+          sender: 'opponent',
+          speaker: character.name,
+          text: markCompleted
+            ? '教程通关！现在进入正式的黑域追捕对局，亮出你的牌吧。'
+            : '已退出教学模式，回到正式黑域牌桌。',
+          crushed: false,
+        },
+      ]);
+    },
+    [character.name, state.config]
+  );
+
+  const handleTutorialNextStage = useCallback(() => {
+    if (tutorialStageIndex >= TUTORIAL_STAGES.length - 1) {
+      exitTutorial(true);
+      pushToast('success', '新手协议通关！', '已解锁正式黑域追捕对局');
+      return;
+    }
+    startTutorial(tutorialStageIndex + 1);
+  }, [exitTutorial, pushToast, startTutorial, tutorialStageIndex]);
+
   const handleNextHand = () => {
+    if (tutorialActive) {
+      setSelectedHandIndex(null);
+      setShowRaiseTiers(false);
+      setActiveExpression('calm');
+      setState(startNextHand(latestStateRef.current));
+      return;
+    }
     if (isP2pConnected) {
       if (isP2pGuest) {
         const nextReady = reduceNextHandReadyState(p2pNextHandReadyRef.current, 'guest', true);
@@ -1991,6 +2154,17 @@ export function App() {
     nextCharacter?: ContractCharacter,
     overrideAcquiredSkills?: string[]
   ) => {
+    if (tutorialActiveRef.current && !customConfig && !nextCharacter) {
+      if (
+        latestStateRef.current.players.ai.chips === 0 &&
+        tutorialStageRef.current >= TUTORIAL_STAGES.length - 1
+      ) {
+        exitTutorial(true);
+      } else {
+        startTutorial(tutorialStageRef.current);
+      }
+      return latestStateRef.current;
+    }
     if (p2pStatus === 'connected' && p2pRoleRef.current === 'guest') {
       p2pTransportRef.current?.send({ type: 'REMATCH_REQ' });
       setActiveModal({ type: 'none' });
@@ -2334,14 +2508,86 @@ export function App() {
     return null;
   }, [floatingBubble, messages]);
 
+  const tutorialCaps = useMemo(
+    () =>
+      tutorialActive
+        ? getTutorialCapabilities(tutorialStageIndex)
+        : { allowHack: true, allowScan: true, allowRaise: true },
+    [tutorialActive, tutorialStageIndex]
+  );
+
+  const tutorialGuidance = useMemo(
+    () =>
+      tutorialActive
+        ? getTutorialGuidance(tutorialStageIndex, state, { scanMode, selectedHandIndex })
+        : null,
+    [tutorialActive, tutorialStageIndex, state, scanMode, selectedHandIndex]
+  );
+
+  // Highlight guided tutorial targets cleanly without leaving stale classes
+  useEffect(() => {
+    const ids = tutorialActive && tutorialGuidance ? tutorialGuidance.focusIds : [];
+    const elements: HTMLElement[] = [];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.add('is-tutorial-focus');
+        elements.push(el);
+      }
+    }
+    return () => {
+      for (const el of elements) {
+        el.classList.remove('is-tutorial-focus');
+      }
+    };
+  }, [tutorialActive, tutorialGuidance, showRaiseTiers, scanMode, selectedHandIndex, state.phase, state.currentTurn]);
+
   return (
-    <div className="lc-shell">
+    <div className={`lc-shell ${tutorialActive ? 'has-tutorial-bar' : ''}`}>
       <CyberBackdrop
         situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
         pot={state.pot}
         playerLowCompute={isHumanLowCompute}
         playerBankrupt={isHumanBankrupt}
       />
+
+      {tutorialActive && tutorialGuidance ? (
+        <TutorialOverlayBar
+          stageIndex={tutorialStageIndex}
+          guidance={tutorialGuidance}
+          onNextStage={handleTutorialNextStage}
+          onRetryStage={() => startTutorial(tutorialStageIndex)}
+          onExitTutorial={() => exitTutorial(false)}
+        />
+      ) : (
+        !tutorialCompleted &&
+        !welcomeDismissed && (
+          <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程快速入口">
+            <span>初次进入黑域？2 分钟交互教程带你掌握换牌、双花色同花、篡改与扫描抓包</span>
+            <div style={{ display: 'inline-flex', gap: 6 }}>
+              <button
+                id="welcome-btn-start-tutorial"
+                type="button"
+                className="lc-tutorial-btn primary"
+                onClick={() => startTutorial(0)}
+              >
+                开始 6 关教程
+              </button>
+              <button
+                id="welcome-btn-dismiss"
+                type="button"
+                className="lc-tutorial-btn"
+                onClick={() => {
+                  setWelcomeDismissed(true);
+                  saveTutorialCompleted(true);
+                }}
+              >
+                跳过
+              </button>
+            </div>
+          </div>
+        )
+      )}
 
       {/* Centered & Aligned 3x3 Tactical Stage */}
       <main className="lc-stage-grid" aria-label="牌桌主视区">
@@ -2432,14 +2678,18 @@ export function App() {
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
               <span>
-                {isP2pConnected && remotePeer
-                  ? `${remotePeer.name} · ${remotePeer.title}`
-                  : `${character.name} · ${dossier.identityTitle}`}
+                {tutorialActive
+                  ? state.players.ai.name
+                  : isP2pConnected && remotePeer
+                    ? `${remotePeer.name} · ${remotePeer.title}`
+                    : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
             <div className="lc-opp-topbar-right">
               <span className="lc-opp-codename">
-                {p2pStatus === 'connecting' || p2pStatus === 'gathering'
+                {tutorialActive
+                  ? `TUTORIAL // ${TUTORIAL_STAGES[tutorialStageIndex]?.badge ?? ''}`
+                  : p2pStatus === 'connecting' || p2pStatus === 'gathering'
                   ? 'P2P 重连/握手中...'
                   : isP2pConnected
                     ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
@@ -2933,7 +3183,14 @@ export function App() {
                 ).map((btn) => {
                   const isSealed = human.sealedSkills.includes(btn.skill);
                   const usedThisTurn = state.usedHackThisTurn;
-                  const disabled = !isHumanTurn || diff > 0 || isSealed || usedThisTurn || human.chips < btn.cost;
+                  const lockedByTutorial = !tutorialCaps.allowHack;
+                  const disabled =
+                    lockedByTutorial ||
+                    !isHumanTurn ||
+                    diff > 0 ||
+                    isSealed ||
+                    usedThisTurn ||
+                    human.chips < btn.cost;
                   return (
                     <button
                       key={btn.skill}
@@ -2943,18 +3200,30 @@ export function App() {
                       disabled={disabled}
                       onClick={() => handleExecuteHack(btn.skill)}
                       title={
-                        diff > 0
-                          ? '遭遇加注，请先在右侧跟注后再使用技能'
-                          : isSealed
-                            ? '此技能已被扫描抓获封印'
-                            : usedThisTurn
-                              ? '黑客技能每回合限用 1 次'
-                              : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                        lockedByTutorial
+                          ? '当前教程关卡暂未解锁黑客技能（第 4 关开启）'
+                          : diff > 0
+                            ? '遭遇加注，请先在右侧跟注后再使用技能'
+                            : isSealed
+                              ? '此技能已被扫描抓获封印'
+                              : usedThisTurn
+                                ? '黑客技能每回合限用 1 次'
+                                : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
                       }
                     >
                       {btn.icon}
-                      <span>{isSealed ? '封印' : usedThisTurn ? '已用' : btn.label}</span>
-                      {!isSealed && !usedThisTurn && <span className="lc-hack-cost">{btn.cost}</span>}
+                      <span>
+                        {lockedByTutorial
+                          ? `${btn.label}`
+                          : isSealed
+                            ? '封印'
+                            : usedThisTurn
+                              ? '已用'
+                              : btn.label}
+                      </span>
+                      {!lockedByTutorial && !isSealed && !usedThisTurn && (
+                        <span className="lc-hack-cost">{btn.cost}</span>
+                      )}
                     </button>
                   );
                 })}
@@ -2964,6 +3233,7 @@ export function App() {
                   type="button"
                   className={`lc-hack-btn is-scan ${scanMode ? 'is-active' : ''}`}
                   disabled={
+                    !tutorialCaps.allowScan ||
                     !isHumanTurn ||
                     (diff > 0 && state.phase !== 'river') ||
                     state.usedScanThisTurn ||
@@ -2974,14 +3244,16 @@ export function App() {
                     setScanMode((s) => !s);
                   }}
                   title={
-                    diff > 0 && state.phase !== 'river'
-                      ? '公共牌未全明时遭遇加注，请先在右侧跟注后再进行扫描'
-                      : state.usedScanThisTurn
-                        ? '扫描技能每回合限用 1 次'
-                        : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${getEffectiveScanCost(
-                            state,
-                            'human'
-                          )}，公共牌全明时可先扫描再决定是否跟注）`
+                    !tutorialCaps.allowScan
+                      ? '当前教程关卡暂未解锁扫描技能（第 5 关开启）'
+                      : diff > 0 && state.phase !== 'river'
+                        ? '公共牌未全明时遭遇加注，请先在右侧跟注后再进行扫描'
+                        : state.usedScanThisTurn
+                          ? '扫描技能每回合限用 1 次'
+                          : `激活后点击对手手牌或换出牌检测是否被篡改（预支 ${getEffectiveScanCost(
+                              state,
+                              'human'
+                            )}，公共牌全明时可先扫描再决定是否跟注）`
                   }
                 >
                   <PixelScanIcon size={12} />
@@ -3482,7 +3754,7 @@ export function App() {
                 id="lc-action-btn-open-raise"
                 type="button"
                 className="lc-stack-btn pink"
-                disabled={!raiseRange.allowed}
+                disabled={!tutorialCaps.allowRaise || !raiseRange.allowed}
                 onClick={() => {
                   setSelectedHandIndex(null);
                   setShowRaiseTiers(true);
@@ -3493,9 +3765,11 @@ export function App() {
                   加注施压
                 </span>
                 <span className="lc-stack-sub">
-                  {raiseRange.allowed
-                    ? `三档 (${state.raisesInSubPhase}/${maxRaises})`
-                    : '翻/换牌后重置'}
+                  {!tutorialCaps.allowRaise
+                    ? '第 2 关解锁'
+                    : raiseRange.allowed
+                      ? `三档 (${state.raisesInSubPhase}/${maxRaises})`
+                      : '翻/换牌后重置'}
                 </span>
               </button>
 
@@ -3658,7 +3932,8 @@ export function App() {
                   className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
-                    if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
+                    if (item.keyName === 'tutorial') startTutorial(0);
+                    else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
                     else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
                     else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
                     else if (item.keyName === 'preset-wb')
