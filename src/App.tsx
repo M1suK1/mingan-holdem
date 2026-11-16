@@ -18,6 +18,7 @@ import {
   type GameConfig,
   type GameState,
   type HackSkillId,
+  type PlayerId,
 } from './engine/types.ts';
 import {
   applyAction,
@@ -128,6 +129,26 @@ import {
   type SoundSettings,
 } from './engine/soundEngine.ts';
 import {
+  DEBUG_CHEAT_COMMANDS,
+  applyDebugChipsOverride,
+  applyDebugLoseHand,
+  applyDebugPresetHand,
+  applyDebugWinHand,
+  parseDebugCommand,
+} from './engine/debugCmd.ts';
+import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
+import {
+  ESCAPE_ROUTE_NODES,
+  canEnterEscapeNode,
+  completeEscapeTransition,
+  loadEscapeProgress,
+  markEscapeNodeCleared,
+  markEscapeWallRevealed,
+  resetEscapeProgress,
+  saveEscapeProgress,
+  type EscapeMapProgress,
+} from './engine/escapeMap.ts';
+import {
   TUTORIAL_STAGES,
   createTutorialStageState,
   decideTutorialOpponentAction,
@@ -172,15 +193,18 @@ const CampaignOutcomeModal = lazy(() => import('./components/CampaignOutcomeModa
 const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.tsx'));
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
 const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
+const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.tsx'));
+const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'tutorial' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
+  keyName: 'tutorial' | 'cmd' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
   { id: 'menu-tutorial', keyName: 'tutorial', label: '新手教程 (6关)', note: '无黑客换牌翻牌 -> 加注跟注 -> 双花色同花 -> 篡改 -> 扫描封印 -> 实战', icon: 'rules' },
+  { id: 'menu-cmd', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
   { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
   { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
@@ -286,6 +310,7 @@ const FIXED_CRUSHED_DOCK_H = 28;
 type ActiveModal =
   | { type: 'none' }
   | { type: 'settings-menu' }
+  | { type: 'cmd' }
   | { type: 'p2p' }
   | { type: 'contracts' }
   | { type: 'llm' }
@@ -343,13 +368,29 @@ export function App() {
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
   const [campaign, setCampaign] = useState(() => loadCampaignState());
-  const [state, setState] = useState<GameState>(() =>
-    createInitialState({
-      config: DEFAULT_CONFIG,
-      opponentName: FALLBACK_CONTRACT_CHARACTER.name,
+  const [escapeProgress, setEscapeProgress] = useState<EscapeMapProgress>(() => loadEscapeProgress());
+  const [viewMode, setViewMode] = useState<'arena' | 'escape-map'>('arena');
+  const [activeEscapeNodeIndex, setActiveEscapeNodeIndex] = useState<number | null>(() => {
+    const initEsc = loadEscapeProgress();
+    return initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+  });
+  const escapeProgressRef = useRef(escapeProgress);
+  escapeProgressRef.current = escapeProgress;
+  const activeEscapeNodeRef = useRef(activeEscapeNodeIndex);
+  activeEscapeNodeRef.current = activeEscapeNodeIndex;
+  const escapeClearQueuedForMatchRef = useRef(false);
+
+  const [state, setState] = useState<GameState>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    return createInitialState({
+      config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
+      chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
+      opponentName: initNode.opponentName,
       playerAcquiredSkills: loadCampaignState().acquiredSkills,
-    })
-  );
+    });
+  });
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
@@ -427,6 +468,13 @@ export function App() {
   tutorialStageRef.current = tutorialStageIndex;
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
+  const [cmdLogs, setCmdLogs] = useState<DebugCmdLogEntry[]>([
+    {
+      id: 'cmd-init',
+      tone: 'info',
+      text: 'BLACK-DOMAIN DEBUG CONSOLE READY // 输入 help 查看作弊码，输入 win 直接过关（支持按 ~ 或 F9 唤起）',
+    },
+  ]);
 
   const dossier = useMemo(
     () => buildPursuerDossier(character, campaign.roundIndex),
@@ -441,6 +489,10 @@ export function App() {
   useEffect(() => {
     saveCampaignState(campaign);
   }, [campaign]);
+
+  useEffect(() => {
+    saveEscapeProgress(escapeProgress);
+  }, [escapeProgress]);
 
   const latestCampaignRef = useRef(campaign);
   latestCampaignRef.current = campaign;
@@ -993,13 +1045,15 @@ export function App() {
         const full = await loadContractCharacterByFile(preferred.fileName);
         if (cancelled) return;
         setCharacter(full);
-        setState((prev) => ({
-          ...prev,
-          players: {
-            ...prev.players,
-            ai: { ...prev.players.ai, name: full.name },
-          },
-        }));
+        if (activeEscapeNodeRef.current === null) {
+          setState((prev) => ({
+            ...prev,
+            players: {
+              ...prev.players,
+              ai: { ...prev.players.ai, name: full.name },
+            },
+          }));
+        }
       }
     })();
     return () => {
@@ -1598,8 +1652,28 @@ export function App() {
 
     enqueueTask({ kind: 'opponent', speaker: character.name, text: line });
 
-    // 整场算力归零：触发黑域协议虚拟实体夺取 / 诱饵逃脱 / 失败结局
+    // 整场算力归零：优先处理逃亡路线图节点循环，否则走原契约追捕流程
     if (state.players.ai.chips === 0) {
+      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+        const clearedIdx = activeEscapeNodeRef.current;
+        const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
+        if (!escapeClearQueuedForMatchRef.current) {
+          escapeClearQueuedForMatchRef.current = true;
+          pushToast(
+            'success',
+            `突破 ${clearedNode?.code ?? '节点'}：${clearedNode?.title ?? ''}`,
+            '正在切回逃亡路线图，执行围堵转向钻缝撤离...'
+          );
+          scheduleTimeout(() => {
+            const latest = latestStateRef.current;
+            if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+            setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
+            setViewMode('escape-map');
+          }, 1250);
+        }
+        return;
+      }
+
       const winnerCamp = latestCampaignRef.current;
       const currDossier = latestDossierRef.current;
       const currChar = latestCharRef.current;
@@ -1629,6 +1703,15 @@ export function App() {
         }
       });
     } else if (state.players.human.chips === 0) {
+      if (activeEscapeNodeRef.current !== null && !tutorialActiveRef.current) {
+        pushToast(
+          'error',
+          '算力归零 · 当前节点突围受阻',
+          '点击右侧「算力归零！重开」或返回逃亡路线图重新挑战'
+        );
+        return;
+      }
+
       const loserCamp = latestCampaignRef.current;
       const currDossier = latestDossierRef.current;
       const currChar = latestCharRef.current;
@@ -2034,6 +2117,8 @@ export function App() {
       lastSoundActionIdRef.current = null;
       setTutorialActive(true);
       setTutorialStageIndex(clamped);
+      setActiveEscapeNodeIndex(null);
+      setViewMode('arena');
       setWelcomeDismissed(true);
       const tState = createTutorialStageState(clamped);
       setState(tState);
@@ -2152,7 +2237,9 @@ export function App() {
   const performFullReset = (
     customConfig?: GameConfig,
     nextCharacter?: ContractCharacter,
-    overrideAcquiredSkills?: string[]
+    overrideAcquiredSkills?: string[],
+    overrideChips?: Record<PlayerId, number>,
+    overrideOpponentName?: string
   ) => {
     if (tutorialActiveRef.current && !customConfig && !nextCharacter) {
       if (
@@ -2171,7 +2258,19 @@ export function App() {
       pushToast('info', '已向房主申请重置牌桌');
       return latestStateRef.current;
     }
+    const activeEscNode =
+      activeEscapeNodeRef.current !== null && !overrideOpponentName && !nextCharacter
+        ? ESCAPE_ROUTE_NODES[activeEscapeNodeRef.current] ?? null
+        : null;
     const targetChar = nextCharacter ?? character;
+    const resolvedOpponentName = isP2pConnected
+      ? remotePeerRef.current?.name ?? '联机好友'
+      : overrideOpponentName ?? activeEscNode?.opponentName ?? targetChar.name;
+    const resolvedChips =
+      overrideChips ??
+      (activeEscNode
+        ? { human: state.config.startingChips, ai: activeEscNode.opponentChips }
+        : undefined);
     const cfg = customConfig ?? state.config;
     for (const id of timersRef.current) {
       window.clearTimeout(id);
@@ -2181,6 +2280,7 @@ export function App() {
     inFlightTaskRef.current = null;
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
+    escapeClearQueuedForMatchRef.current = false;
     setQueuedCount(0);
     setFloatingBubble(null);
     setCrushingActive(false);
@@ -2200,7 +2300,8 @@ export function App() {
     pendingBundledChatRef.current = null;
     const freshState = createInitialState({
       config: cfg,
-      opponentName: isP2pConnected ? remotePeerRef.current?.name ?? '联机好友' : targetChar.name,
+      chips: resolvedChips,
+      opponentName: resolvedOpponentName,
       playerAcquiredSkills: isP2pConnected
         ? []
         : overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
@@ -2218,12 +2319,279 @@ export function App() {
       {
         id: `reset-${Date.now()}`,
         sender: 'opponent',
-        speaker: targetChar.name,
-        text: '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
+        speaker: resolvedOpponentName,
+        text: activeEscNode
+          ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
+          : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
         crushed: false,
       },
     ]);
     return freshState;
+  };
+
+  const handleEnterEscapeNode = (nodeIndex: number) => {
+    const latestEsc = completeEscapeTransition(escapeProgressRef.current);
+    if (!canEnterEscapeNode(latestEsc, nodeIndex)) return;
+    const node = ESCAPE_ROUTE_NODES[nodeIndex];
+    if (!node || node.isExit) return;
+
+    if (isP2pSessionActive) {
+      disconnectP2p();
+    }
+    setTutorialActive(false);
+    setEscapeProgress(latestEsc);
+    setActiveEscapeNodeIndex(nodeIndex);
+    activeEscapeNodeRef.current = nodeIndex;
+    setViewMode('arena');
+    performFullReset(
+      { ...state.config, aiDifficulty: node.difficulty },
+      undefined,
+      undefined,
+      { human: state.config.startingChips, ai: node.opponentChips },
+      node.opponentName
+    );
+    pushToast('info', `进入 ${node.code} · ${node.title}`, `对手：${node.opponentName}（算力 ${node.opponentChips}）`);
+  };
+
+  const handleCompleteEscapeTransition = useCallback(() => {
+    setEscapeProgress((prev) => completeEscapeTransition(prev));
+  }, []);
+
+  const handleRevealEscapeWall = useCallback((nodeIndex: number) => {
+    setEscapeProgress((prev) => markEscapeWallRevealed(prev, nodeIndex));
+  }, []);
+
+  const handleResetEscapeRoute = () => {
+    const fresh = resetEscapeProgress();
+    const firstNode = ESCAPE_ROUTE_NODES[0];
+    setEscapeProgress(fresh);
+    setActiveEscapeNodeIndex(0);
+    activeEscapeNodeRef.current = 0;
+    performFullReset(
+      { ...state.config, aiDifficulty: firstNode.difficulty },
+      undefined,
+      undefined,
+      { human: state.config.startingChips, ai: firstNode.opponentChips },
+      firstNode.opponentName
+    );
+    pushToast('info', '已重置黑域逃亡路线', '重新从 SEC-00 公共暗区野桌开始突围');
+  };
+
+  const handleRetreatToEscapeMap = () => {
+    if (activeEscapeNodeRef.current !== null && state.players.ai.chips === 0) {
+      const idx = activeEscapeNodeRef.current;
+      setEscapeProgress((prev) => {
+        if (prev.clearedIndices.includes(idx)) return prev;
+        return markEscapeNodeCleared(prev, idx);
+      });
+    }
+    setViewMode('escape-map');
+  };
+
+  const appendCmdLog = useCallback((tone: DebugCmdLogEntry['tone'], text: string) => {
+    setCmdLogs((prev) =>
+      [...prev, { id: `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tone, text }].slice(
+        -80
+      )
+    );
+  }, []);
+
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F9' || (e.code === 'Backquote' && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        const isTypingElsewhere =
+          (tag === 'input' || tag === 'textarea' || target?.isContentEditable) &&
+          target?.id !== 'cmd-terminal-input';
+        if (isTypingElsewhere) return;
+        e.preventDefault();
+        setActiveModal((prev) => (prev.type === 'cmd' ? { type: 'none' } : { type: 'cmd' }));
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, []);
+
+  const handleExecuteDebugCmd = (rawCommand: string) => {
+    appendCmdLog('cmd', `> ${rawCommand}`);
+    const parsed = parseDebugCommand(rawCommand);
+    if (!parsed.ok) {
+      appendCmdLog('error', `[ERR] ${parsed.error}`);
+      return;
+    }
+
+    switch (parsed.cmd) {
+      case 'help': {
+        for (const item of DEBUG_CHEAT_COMMANDS) {
+          appendCmdLog('info', `  ${item.syntax.padEnd(32, ' ')} — ${item.desc}`);
+        }
+        return;
+      }
+      case 'clear': {
+        setCmdLogs([]);
+        return;
+      }
+      case 'win': {
+        if (tutorialActiveRef.current) {
+          appendCmdLog('success', '[OK] 教程关直接过关，推进下一教学阶段');
+          setActiveModal({ type: 'none' });
+          handleTutorialNextStage();
+          return;
+        }
+        if (viewMode === 'escape-map') {
+          const base = completeEscapeTransition(escapeProgressRef.current);
+          if (base.escapedReality || base.highestUnlockedIndex >= 5) {
+            appendCmdLog('info', '[INFO] 当前已通关全部节点并抵达现实出口');
+            return;
+          }
+          const idxToClear = Math.min(4, base.highestUnlockedIndex);
+          const nextEsc = markEscapeNodeCleared(base, idxToClear);
+          setEscapeProgress(nextEsc);
+          setActiveModal({ type: 'none' });
+          appendCmdLog('success', `[OK] 直接突破 ${ESCAPE_ROUTE_NODES[idxToClear]?.code}，播放钻缝动画`);
+          return;
+        }
+        const curr = latestStateRef.current;
+        if (curr.phase === 'showdown' && curr.players.ai.chips === 0) {
+          setActiveModal({ type: 'none' });
+          handleRetreatToEscapeMap();
+          appendCmdLog('success', '[OK] 已切回逃亡路线图');
+          return;
+        }
+        const wonState = applyDebugWinHand(curr);
+        lastHandledShowdownHandRef.current = 0;
+        setState(wonState);
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已执行 win：对手算力归零，触发过关结算');
+        return;
+      }
+      case 'lose': {
+        const lostState = applyDebugLoseHand(latestStateRef.current);
+        lastHandledShowdownHandRef.current = 0;
+        setState(lostState);
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已执行 lose：己方算力清 0');
+        return;
+      }
+      case 'next': {
+        const base = completeEscapeTransition(escapeProgressRef.current);
+        if (base.escapedReality) {
+          appendCmdLog('info', '[INFO] 已抵达现实出口，可执行 reset 重新开始');
+          return;
+        }
+        const idxToClear = Math.min(4, base.highestUnlockedIndex);
+        const cleared = markEscapeNodeCleared(base, idxToClear);
+        const completed = completeEscapeTransition(cleared);
+        setEscapeProgress(completed);
+        if (completed.escapedReality) {
+          setViewMode('escape-map');
+          setActiveModal({ type: 'none' });
+          appendCmdLog('success', '[OK] 已穿过零号闸门抵达现实出口');
+          return;
+        }
+        const nextIdx = Math.min(4, completed.currentNodeIndex);
+        setActiveEscapeNodeIndex(nextIdx);
+        activeEscapeNodeRef.current = nextIdx;
+        const node = ESCAPE_ROUTE_NODES[nextIdx];
+        setViewMode('arena');
+        setActiveModal({ type: 'none' });
+        performFullReset(
+          { ...state.config, aiDifficulty: node.difficulty },
+          undefined,
+          undefined,
+          { human: state.config.startingChips, ai: node.opponentChips },
+          node.opponentName
+        );
+        appendCmdLog('success', `[OK] 已推进并进入 ${node.code} · ${node.title}`);
+        return;
+      }
+      case 'goto': {
+        const idx = parsed.nodeIndex;
+        const node = ESCAPE_ROUTE_NODES[idx];
+        const base = completeEscapeTransition(escapeProgressRef.current);
+        const clearedRange = Array.from({ length: idx }, (_, i) => i);
+        const jumped: EscapeMapProgress = {
+          currentNodeIndex: idx,
+          highestUnlockedIndex: Math.max(base.highestUnlockedIndex, idx),
+          clearedIndices: Array.from(new Set([...base.clearedIndices, ...clearedRange])).sort(
+            (a, b) => a - b
+          ),
+          revealedWallIndices: base.revealedWallIndices,
+          pendingTransition: null,
+          escapedReality: false,
+        };
+        setEscapeProgress(jumped);
+        setActiveEscapeNodeIndex(idx);
+        activeEscapeNodeRef.current = idx;
+        setTutorialActive(false);
+        setViewMode('arena');
+        setActiveModal({ type: 'none' });
+        performFullReset(
+          { ...state.config, aiDifficulty: node.difficulty },
+          undefined,
+          undefined,
+          { human: state.config.startingChips, ai: node.opponentChips },
+          node.opponentName
+        );
+        appendCmdLog('success', `[OK] 已传送至 ${node.code} · ${node.title}`);
+        return;
+      }
+      case 'chips': {
+        setState((prev) => applyDebugChipsOverride(prev, parsed.target, parsed.amount));
+        appendCmdLog(
+          'success',
+          `[OK] 已将 ${parsed.target === 'human' ? '己方' : '对手'} 算力设为 ${parsed.amount}`
+        );
+        return;
+      }
+      case 'hand': {
+        setState((prev) => applyDebugPresetHand(prev, parsed.preset));
+        appendCmdLog('success', `[OK] 已发入调试牌型：${parsed.preset}`);
+        return;
+      }
+      case 'reveal': {
+        const nextVal = !latestStateRef.current.config.revealOpponentHidden;
+        setState((prev) => ({
+          ...prev,
+          config: { ...prev.config, revealOpponentHidden: nextVal },
+        }));
+        appendCmdLog('success', `[OK] 透视暗牌模式：${nextVal ? '开启' : '关闭'}`);
+        return;
+      }
+      case 'reset': {
+        handleResetEscapeRoute();
+        setActiveModal({ type: 'none' });
+        appendCmdLog('success', '[OK] 已重置逃亡路线、暗墙显形与牌桌状态');
+        return;
+      }
+      case 'resetprofile': {
+        const freshCamp = createInitialCampaign(campaign.playerCodename);
+        setCampaign(freshCamp);
+        saveCampaignState(freshCamp);
+        setTutorialCompleted(false);
+        setWelcomeDismissed(false);
+        saveTutorialCompleted(false);
+        setTutorialActive(false);
+        const freshEsc = resetEscapeProgress();
+        const firstNode = ESCAPE_ROUTE_NODES[0];
+        setEscapeProgress(freshEsc);
+        setActiveEscapeNodeIndex(0);
+        activeEscapeNodeRef.current = 0;
+        setViewMode('arena');
+        performFullReset(
+          { ...DEFAULT_CONFIG, aiDifficulty: firstNode.difficulty },
+          undefined,
+          [],
+          { human: DEFAULT_CONFIG.startingChips, ai: firstNode.opponentChips },
+          firstNode.opponentName
+        );
+        setActiveModal({ type: 'none' });
+        pushToast('success', '玩家档案已彻底重置', '已清空逃亡路线、暗墙记录、实体技能与教程进度');
+        appendCmdLog('success', '[OK] 已彻底重置玩家全部本地档案（回到初始 SEC-00）');
+        return;
+      }
+    }
   };
 
   const advanceToNextPursuerMatch = async (nextCamp: typeof campaign) => {
@@ -2267,6 +2635,8 @@ export function App() {
     try {
       const nextChar = await loadContractCharacterByFile(fileName);
       const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
+      setActiveEscapeNodeIndex(null);
+      setViewMode('arena');
       setCharacter(nextChar);
       setActiveExpression('smile');
       setState((prev) => ({
@@ -2542,8 +2912,11 @@ export function App() {
     };
   }, [tutorialActive, tutorialGuidance, showRaiseTiers, scanMode, selectedHandIndex, state.phase, state.currentTurn]);
 
+  const activeEscapeNode =
+    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+
   return (
-    <div className={`lc-shell ${tutorialActive ? 'has-tutorial-bar' : ''}`}>
+    <div className={`lc-shell ${tutorialActive ? 'has-tutorial-bar' : ''} ${viewMode === 'escape-map' ? 'is-escape-map-view' : ''}`}>
       <CyberBackdrop
         situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
         pot={state.pot}
@@ -2551,46 +2924,68 @@ export function App() {
         playerBankrupt={isHumanBankrupt}
       />
 
-      {tutorialActive && tutorialGuidance ? (
-        <TutorialOverlayBar
-          stageIndex={tutorialStageIndex}
-          guidance={tutorialGuidance}
-          onNextStage={handleTutorialNextStage}
-          onRetryStage={() => startTutorial(tutorialStageIndex)}
-          onExitTutorial={() => exitTutorial(false)}
-        />
+      {viewMode === 'escape-map' ? (
+        <Suspense fallback={null}>
+          <EscapeRouteMapView
+            progress={escapeProgress}
+            onEnterNode={handleEnterEscapeNode}
+            onCompleteTransition={handleCompleteEscapeTransition}
+            onRevealWall={handleRevealEscapeWall}
+            onReturnToArena={() => setViewMode('arena')}
+            onResetRoute={handleResetEscapeRoute}
+            onOpenCmd={() => setActiveModal({ type: 'cmd' })}
+          />
+        </Suspense>
       ) : (
-        !tutorialCompleted &&
-        !welcomeDismissed && (
-          <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程快速入口">
-            <span>初次进入黑域？2 分钟交互教程带你掌握换牌、双花色同花、篡改与扫描抓包</span>
-            <div style={{ display: 'inline-flex', gap: 6 }}>
-              <button
-                id="welcome-btn-start-tutorial"
-                type="button"
-                className="lc-tutorial-btn primary"
-                onClick={() => startTutorial(0)}
-              >
-                开始 6 关教程
-              </button>
-              <button
-                id="welcome-btn-dismiss"
-                type="button"
-                className="lc-tutorial-btn"
-                onClick={() => {
-                  setWelcomeDismissed(true);
-                  saveTutorialCompleted(true);
-                }}
-              >
-                跳过
-              </button>
-            </div>
-          </div>
-        )
-      )}
+        <>
+          {tutorialActive && tutorialGuidance ? (
+            <TutorialOverlayBar
+              stageIndex={tutorialStageIndex}
+              guidance={tutorialGuidance}
+              onNextStage={handleTutorialNextStage}
+              onRetryStage={() => startTutorial(tutorialStageIndex)}
+              onExitTutorial={() => exitTutorial(false)}
+            />
+          ) : (
+            !tutorialCompleted &&
+            !welcomeDismissed && (
+              <div className="lc-welcome-tutorial-strip" role="region" aria-label="新手教程与路线快速入口">
+                <span>初次进入《黑域协议：替壳者》？先打赢当前节点或用 2 分钟交互教程熟悉规则</span>
+                <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    id="welcome-btn-escape-map"
+                    type="button"
+                    className="lc-tutorial-btn"
+                    onClick={() => setViewMode('escape-map')}
+                  >
+                    查看逃亡路线图
+                  </button>
+                  <button
+                    id="welcome-btn-start-tutorial"
+                    type="button"
+                    className="lc-tutorial-btn primary"
+                    onClick={() => startTutorial(0)}
+                  >
+                    开始 6 关教程
+                  </button>
+                  <button
+                    id="welcome-btn-dismiss"
+                    type="button"
+                    className="lc-tutorial-btn"
+                    onClick={() => {
+                      setWelcomeDismissed(true);
+                      saveTutorialCompleted(true);
+                    }}
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            )
+          )}
 
-      {/* Centered & Aligned 3x3 Tactical Stage */}
-      <main className="lc-stage-grid" aria-label="牌桌主视区">
+          {/* Centered & Aligned 3x3 Tactical Stage */}
+          <main className="lc-stage-grid" aria-label="牌桌主视区">
         {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
         <aside className="lc-pool-slot" aria-label="算力池计量栏">
           <ComputePoolBar
@@ -2617,21 +3012,6 @@ export function App() {
           </button>
 
           <button
-            id="hud-btn-p2p-lobby"
-            type="button"
-            className="lc-stack-btn"
-            onClick={() => setActiveModal({ type: 'p2p' })}
-          >
-            <span className="lc-btn-inline">
-              <PixelBroadcastIcon size={14} />
-              {isP2pConnected ? '联机中' : '联机'}
-            </span>
-            <span className="lc-stack-sub">
-              {isP2pConnected ? `${p2pLatency ?? '--'}ms` : '好友对战'}
-            </span>
-          </button>
-
-          <button
             id="hud-btn-quick-restart"
             type="button"
             className="lc-stack-btn amber"
@@ -2642,6 +3022,24 @@ export function App() {
               快速重开
             </span>
             <span className="lc-stack-sub">重置牌桌</span>
+          </button>
+
+          <button
+            id="hud-btn-escape-map"
+            type="button"
+            className="lc-stack-btn"
+            onClick={() => setViewMode('escape-map')}
+            aria-label="切换至黑域逃亡路线关卡图"
+          >
+            <span className="lc-btn-inline">
+              <PixelNodesIcon size={15} />
+              路线图
+            </span>
+            <span className="lc-stack-sub">
+              {activeEscapeNode
+                ? `${activeEscapeNode.code} · ${escapeProgress.clearedIndices.length}/5`
+                : `进度 ${escapeProgress.clearedIndices.length}/5`}
+            </span>
           </button>
 
           <button
@@ -2671,7 +3069,7 @@ export function App() {
           className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
             isAiBankrupt ? 'is-bankrupt' : ''
           }`}
-          style={{ '--char-accent': accentColor } as CSSProperties}
+          style={{ '--char-accent': activeEscapeNode?.accentColor ?? accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
         >
           <header className="lc-opp-topbar">
@@ -2682,7 +3080,9 @@ export function App() {
                   ? state.players.ai.name
                   : isP2pConnected && remotePeer
                     ? `${remotePeer.name} · ${remotePeer.title}`
-                    : `${character.name} · ${dossier.identityTitle}`}
+                    : activeEscapeNode
+                      ? `${activeEscapeNode.code} · ${activeEscapeNode.title} · ${activeEscapeNode.opponentName}`
+                      : `${character.name} · ${dossier.identityTitle}`}
               </span>
             </div>
             <div className="lc-opp-topbar-right">
@@ -2693,7 +3093,9 @@ export function App() {
                   ? 'P2P 重连/握手中...'
                   : isP2pConnected
                     ? `P2P ${p2pRole === 'host' ? '房主' : '客机'} · ${p2pLatency ?? '--'}ms`
-                    : isAiThinking
+                    : activeEscapeNode
+                      ? `黑域协议：替壳者 · ${escapeProgress.clearedIndices.length}/5`
+                      : isAiThinking
                       ? 'THINKING...'
                       : `${EXPRESSION_META[activeExpression].label} · ${
                           effectiveAiDifficulty === 'master'
@@ -2705,6 +3107,16 @@ export function App() {
                           CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
                         }`}
               </span>
+              <button
+                id="hud-btn-open-cmd"
+                type="button"
+                className="lc-cmd-chip-btn"
+                onClick={() => setActiveModal({ type: 'cmd' })}
+                title="打开调试控制台 (快捷键 ~ 或 F9)"
+                aria-label="打开调试控制台 CMD"
+              >
+                &gt;_ CMD
+              </button>
               <button
                 id="hud-btn-mobile-chat"
                 type="button"
@@ -3542,6 +3954,19 @@ export function App() {
                       : `第 #${state.handNumber + 1} 局`}
                   </span>
                 </button>
+              ) : activeEscapeNode && human.chips > 0 ? (
+                <button
+                  id="action-btn-escape-retreat"
+                  type="button"
+                  className="lc-stack-btn"
+                  onClick={handleRetreatToEscapeMap}
+                >
+                  <span className="lc-btn-inline">
+                    <PixelNodesIcon size={15} />
+                    突围撤离
+                  </span>
+                  <span className="lc-stack-sub">切回逃亡路线图</span>
+                </button>
               ) : (
                 <button
                   id="action-btn-match-restart"
@@ -3789,6 +4214,8 @@ export function App() {
           )}
         </div>
       </main>
+        </>
+      )}
 
       {/* Dual-Card Smooth Swap Flight Layer (Player & Opponent!) */}
       {swapFlight && (
@@ -3933,6 +4360,7 @@ export function App() {
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
                     if (item.keyName === 'tutorial') startTutorial(0);
+                    else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
                     else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
                     else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
                     else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
@@ -4101,6 +4529,14 @@ export function App() {
 
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
+        {activeModal.type === 'cmd' && (
+          <DebugCmdModal
+            logs={cmdLogs}
+            onExecute={handleExecuteDebugCmd}
+            onClose={() => setActiveModal({ type: 'none' })}
+          />
+        )}
+
         {activeModal.type === 'p2p' && (
           <P2pLobbyModal
             status={p2pStatus}
@@ -4186,6 +4622,7 @@ export function App() {
         )}
 
         {!isP2pConnected &&
+          activeEscapeNodeIndex === null &&
           (campaign.status === 'loot-select' ||
             campaign.status === 'escaped' ||
             campaign.status === 'failed-ending' ||

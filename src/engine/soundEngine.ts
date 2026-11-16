@@ -19,7 +19,8 @@ export type SoundCue =
   | 'ai-bankrupt'
   | 'bubble'
   | 'ui-click'
-  | 'charge-tick';
+  | 'charge-tick'
+  | 'wall-hit';
 
 export interface SoundSettings {
   enabled: boolean;
@@ -422,6 +423,27 @@ export function playSound(cue: SoundCue, opts?: { progress?: number }): boolean 
       playTone(ctx, out, { duration: 0.036, freqStart: hz, type: 'triangle', gain: 0.14 });
       return true;
     }
+
+    case 'wall-hit':
+      playNoiseSnap(ctx, out, { duration: 0.075, centerHz: 1350, q: 1.6, gain: 0.24 });
+      playTone(ctx, out, {
+        duration: 0.15,
+        freqStart: 195,
+        freqEnd: 56,
+        type: 'sawtooth',
+        gain: 0.26,
+        filterHz: 780,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.025,
+        duration: 0.09,
+        freqStart: 980,
+        freqEnd: 410,
+        type: 'square',
+        gain: 0.14,
+        filterHz: 2400,
+      });
+      return true;
 
     default:
       return false;

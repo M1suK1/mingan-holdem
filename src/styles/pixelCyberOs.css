@@ -3671,8 +3671,621 @@ button:disabled {
   .lc-chat-msg,
   .lc-chat-msg.player-rising,
   .lc-chat-msg.enter-from-bottom,
-  .px-card-front.own-private-blink {
+  .px-card-front.own-private-blink,
+  .lc-escape-node-pulse,
+  .lc-escape-live-dot {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* =========================================================================
+   14. Escape Route Map View (ui-ux-pro-max Cyberpunk Tactical HUD)
+   ========================================================================= */
+
+.lc-shell.is-escape-map-view {
+  align-items: stretch;
+  justify-items: stretch;
+}
+
+.lc-escape-shell {
+  position: relative;
+  z-index: 2;
+  width: min(1320px, 100%);
+  height: 100%;
+  max-height: 820px;
+  margin: auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.lc-escape-topbar {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lc-escape-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lc-escape-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #e8f7ff;
+}
+
+.lc-escape-subtitle {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #7ccfe6;
+}
+
+.lc-escape-status-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lc-escape-stat-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  background: rgba(6, 15, 28, 0.85);
+}
+
+.lc-escape-stat-pill.danger {
+  border-color: rgba(255, 71, 87, 0.45);
+  background: rgba(34, 9, 18, 0.8);
+}
+
+.lc-escape-stat-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.lc-escape-stat-val {
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #00f0ff;
+}
+
+.lc-escape-stat-pill.danger .lc-escape-stat-val {
+  color: #ff6b81;
+}
+
+.lc-escape-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-escape-btn {
+  min-height: 44px;
+  padding: 8px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(11, 17, 30, 0.92);
+  color: #e2e8f0;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 120ms ease;
+}
+
+.lc-escape-btn:hover {
+  border-color: #00f0ff;
+  background: rgba(14, 29, 48, 0.96);
+}
+
+.lc-escape-btn:active {
+  transform: scale(0.97);
+}
+
+.lc-escape-btn:focus-visible,
+.lc-escape-node-pill:focus-visible,
+.lc-escape-cta:focus-visible,
+.lc-escape-svg-node:focus-visible {
+  outline: 2px solid #00f0ff;
+  outline-offset: 2px;
+}
+
+.lc-escape-btn.cyan {
+  border-color: rgba(0, 240, 255, 0.65);
+  color: #00f0ff;
+}
+
+.lc-escape-btn.amber {
+  border-color: rgba(255, 176, 32, 0.72);
+  color: #ffb020;
+}
+
+.lc-escape-map-card {
+  padding: 10px 14px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 0;
+}
+
+.lc-escape-map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lc-escape-map-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #d7f2ff;
+  font-weight: 600;
+}
+
+.lc-escape-live-dot {
+  width: 8px;
+  height: 8px;
+  background: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+  animation: lcEscapeDotPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes lcEscapeDotPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.lc-escape-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.lc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lc-legend-item::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+}
+
+.lc-legend-item.cleared::before {
+  background: #10f5a0;
+}
+
+.lc-legend-item.unlocked::before {
+  background: #00f0ff;
+}
+
+.lc-legend-item.blocked::before {
+  background: #ff4757;
+}
+
+.lc-escape-svg-wrap {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  background: #050811;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.lc-escape-svg {
+  width: 100%;
+  height: 100%;
+  max-height: 390px;
+  display: block;
+}
+
+.lc-escape-svg-node.is-clickable {
+  cursor: pointer;
+}
+
+.lc-escape-node-pulse {
+  transform-origin: center;
+  animation: lcEscapeNodePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes lcEscapeNodePulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+.lc-escape-node-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lc-escape-node-pill {
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid rgba(71, 85, 105, 0.55);
+  background: rgba(9, 14, 26, 0.92);
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.lc-escape-node-pill:hover:not(:disabled) {
+  border-color: var(--node-accent, #00f0ff);
+  background: rgba(14, 26, 44, 0.96);
+}
+
+.lc-escape-node-pill.is-selected {
+  border-color: #00f0ff;
+  background: rgba(8, 30, 48, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, 0.45);
+}
+
+.lc-escape-node-pill.is-cleared {
+  border-color: rgba(16, 245, 160, 0.52);
+}
+
+.lc-escape-node-pill:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+}
+
+.lc-escape-pill-code {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #7dd3fc;
+}
+
+.lc-escape-pill-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.lc-escape-pill-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.lc-escape-node-pill.is-cleared .lc-escape-pill-state {
+  color: #10f5a0;
+}
+
+.lc-escape-node-pill.is-selected .lc-escape-pill-state {
+  color: #00f0ff;
+}
+
+.lc-escape-brief-bar {
+  padding: 12px 16px;
+}
+
+.lc-escape-brief-inner,
+.lc-escape-victory-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.lc-escape-brief-meta {
+  min-width: 240px;
+  flex: 1;
+}
+
+.lc-escape-brief-tag {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #00f0ff;
+  margin-bottom: 3px;
+}
+
+.lc-escape-brief-tag.success {
+  color: #10f5a0;
+}
+
+.lc-escape-brief-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.lc-escape-brief-desc {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.lc-escape-brief-cta-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-escape-cta {
+  min-height: 46px;
+  padding: 10px 18px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(12, 19, 34, 0.94);
+  color: #e2e8f0;
+  font-size: 13.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 120ms ease;
+}
+
+.lc-escape-cta.primary {
+  border-color: #00f0ff;
+  background: rgba(0, 240, 255, 0.16);
+  color: #e6fbff;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.24);
+}
+
+.lc-escape-cta.primary:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.28);
+}
+
+.lc-escape-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.lc-escape-cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 960px) {
+  .lc-escape-shell {
+    max-height: none;
+    height: auto;
+  }
+
+  .lc-escape-node-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .lc-escape-topbar {
+    padding: 8px 10px;
+  }
+
+  .lc-escape-node-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lc-escape-cta {
+    width: 100%;
+  }
+}
+
+/* =========================================================================
+   15. Debug CMD Terminal Modal & Header Trigger
+   ========================================================================= */
+
+.lc-cmd-chip-btn {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid rgba(0, 240, 255, 0.55);
+  background: rgba(6, 17, 30, 0.92);
+  color: #00f0ff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.lc-cmd-chip-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: #67e8f9;
+}
+
+.lc-cmd-chip-btn:focus-visible {
+  outline: 2px solid #00f0ff;
+  outline-offset: 2px;
+}
+
+.lc-cmd-modal {
+  width: min(760px, 95vw);
+  max-height: min(640px, 88dvh);
+  padding: 14px;
+  background: rgba(4, 7, 14, 0.97);
+  display: grid;
+  grid-template-rows: auto auto minmax(180px, 1fr) auto;
+  gap: 10px;
+}
+
+.lc-cmd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lc-cmd-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lc-cmd-prompt-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #00f0ff;
+  background: rgba(0, 240, 255, 0.14);
+  color: #00f0ff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.lc-cmd-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #e8f7ff;
+}
+
+.lc-cmd-subtitle {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.lc-cmd-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.lc-cmd-quick-chip {
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid rgba(100, 116, 139, 0.55);
+  background: rgba(11, 18, 32, 0.92);
+  color: #cbd5e1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lc-cmd-quick-chip.is-primary {
+  border-color: #10f5a0;
+  color: #10f5a0;
+  background: rgba(16, 245, 160, 0.12);
+}
+
+.lc-cmd-quick-chip:hover {
+  border-color: #00f0ff;
+  color: #00f0ff;
+}
+
+.lc-cmd-log-box {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  background: #020409;
+  font-family: 'JetBrains Mono', 'Noto Sans SC', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lc-cmd-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lc-cmd-log-line.tone-cmd {
+  color: #7dd3fc;
+}
+
+.lc-cmd-log-line.tone-success {
+  color: #10f5a0;
+}
+
+.lc-cmd-log-line.tone-error {
+  color: #ff6b81;
+}
+
+.lc-cmd-log-line.tone-info {
+  color: #cbd5e1;
+}
+
+.lc-cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(0, 240, 255, 0.48);
+  background: #050a14;
+  padding: 4px 6px 4px 10px;
+}
+
+.lc-cmd-input-prefix {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: #10f5a0;
+  white-space: nowrap;
+}
+
+.lc-cmd-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  outline: none;
+}
+
+.lc-cmd-exec-btn {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid #00f0ff;
+  background: rgba(0, 240, 255, 0.16);
+  color: #e6fbff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lc-cmd-exec-btn:hover {
+  background: rgba(0, 240, 255, 0.28);
 }
