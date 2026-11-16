@@ -4,6 +4,8 @@ import type { BattleSituation } from '../engine/types.ts';
 interface CyberBackdropProps {
   situation?: BattleSituation;
   pot?: number;
+  playerLowCompute?: boolean;
+  playerBankrupt?: boolean;
 }
 
 export const SITUATION_META: Record<
@@ -47,11 +49,18 @@ const PIXEL_MOTES = [
 export const CyberBackdrop = memo(function CyberBackdrop({
   situation = 'recon',
   pot = 60,
+  playerLowCompute = false,
+  playerBankrupt = false,
 }: CyberBackdropProps) {
   const speedBoost = Math.min(4, Math.floor(pot / 80));
 
   return (
-    <div className={`lc-backdrop situation-${situation}`} aria-hidden="true">
+    <div
+      className={`lc-backdrop situation-${situation} ${
+        playerLowCompute ? 'is-player-low' : ''
+      } ${playerBankrupt ? 'is-player-bankrupt' : ''}`}
+      aria-hidden="true"
+    >
       {/* Deep dark monochrome silhouettes + stepped pixel circuit bus traces */}
       <svg
         viewBox="0 0 1280 720"

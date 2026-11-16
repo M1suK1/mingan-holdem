@@ -169,6 +169,18 @@ const SETTINGS_MENU_ITEMS: Array<{
   { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '筹码规模、换牌门票与AI风格', icon: 'tuning' },
 ];
 
+const FLOOD_DATA_STREAMS = Array.from({ length: 26 }, (_, i) => ({
+  left: `${(i * 3.85).toFixed(1)}%`,
+  dur: `${(1.8 + (i % 5) * 0.42).toFixed(2)}s`,
+  delay: `${(-((i * 0.37) % 2.2)).toFixed(2)}s`,
+  tokens:
+    i % 3 === 0
+      ? '0xERR  MEM::0000  SYS::CRASH  OVERFLOW  01011001  FATAL  0xFF  ERR_STACK'
+      : i % 3 === 1
+        ? 'BREACH!!  NULL_PTR  11100010  CORE_MELTDOWN  0xDEADBEEF  HALT  0x00'
+        : 'DROP_ALL  0x4F  PACKET_LOSS  10110110  LINK_SEVERED  TERMINATE  FAIL',
+}));
+
 const BACK_PORTRAIT_STREAMS = [
   { left: '6%', tokens: '01001101  0x7F  SYN::ACK  B_08', dur: '11s', delay: '-1s' },
   { left: '19%', tokens: 'HEX::2E88  110010  MEM::04  BIT', dur: '14s', delay: '-5s' },
@@ -280,7 +292,9 @@ export function App() {
   // VFX state & optional manual test override inside Settings
   const [roundLossFlicker, setRoundLossFlicker] = useState(false);
   const [aiRoundLossFlicker, setAiRoundLossFlicker] = useState(false);
-  const [vfxTestMode, setVfxTestMode] = useState<'auto' | 'low' | 'bankrupt'>('auto');
+  const [vfxTestMode, setVfxTestMode] = useState<
+    'auto' | 'human-low' | 'human-bankrupt' | 'ai-low' | 'ai-bankrupt'
+  >('auto');
   const [swapFlight, setSwapFlight] = useState<SwapFlightState | null>(null);
   const [scanVfx, setScanVfx] = useState<{
     id: string;
@@ -2165,17 +2179,19 @@ export function App() {
   const revealAllAi = isShowdown || state.config.revealOpponentHidden;
   const evt = state.lastAction;
 
-  // Damage & Defeat VFX State (Applies to BOTH Human and Opponent!)
-  const isBankrupt =
-    vfxTestMode === 'bankrupt' ||
-    (isShowdown && (human.chips === 0 || ai.chips === 0));
+  // Damage & Defeat VFX State (Strictly isolated between Opponent and Player!)
+  const isAiBankrupt =
+    vfxTestMode === 'ai-bankrupt' || (isShowdown && ai.chips === 0);
+  const isHumanBankrupt =
+    vfxTestMode === 'human-bankrupt' || (isShowdown && human.chips === 0);
   const isAiLowCompute =
-    !isBankrupt &&
-    (vfxTestMode === 'low' || (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
+    !isAiBankrupt &&
+    (vfxTestMode === 'ai-low' ||
+      (ai.chips > 0 && ai.chips <= state.config.startingChips * 0.3));
   const isHumanLowCompute =
-    !isBankrupt &&
-    (vfxTestMode === 'low' || (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
-  const isLowCompute = isAiLowCompute || isHumanLowCompute;
+    !isHumanBankrupt &&
+    (vfxTestMode === 'human-low' ||
+      (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
   // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（P2P 联机时展示好友立绘）
   const portraitSrc =
@@ -2220,7 +2236,12 @@ export function App() {
 
   return (
     <div className="lc-shell">
-      <CyberBackdrop situation={isBankrupt ? 'breach' : isLowCompute ? 'overclock' : 'recon'} pot={state.pot} />
+      <CyberBackdrop
+        situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
+        pot={state.pot}
+        playerLowCompute={isHumanLowCompute}
+        playerBankrupt={isHumanBankrupt}
+      />
 
       {/* Centered & Aligned 3x3 Tactical Stage */}
       <main className="lc-stage-grid" aria-label="牌桌主视区">
@@ -2301,8 +2322,8 @@ export function App() {
 
         {/* COL 2, ROW 1: Enlarged Opponent Window + Layered Vertical Data Streams + Docked 3 Cards */}
         <section
-          className={`lc-hud-box lc-opponent-zone ${isLowCompute ? 'is-low-compute' : ''} ${
-            isBankrupt ? 'is-bankrupt' : ''
+          className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
+            isAiBankrupt ? 'is-bankrupt' : ''
           }`}
           style={{ '--char-accent': accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
@@ -2402,8 +2423,8 @@ export function App() {
               </div>
             )}
 
-            {/* Damage Effect 3: Bankrupt (0 Compute) Mosaic Engulfment */}
-            {isBankrupt && (
+            {/* Damage Effect 3 (Opponent Only): Opponent Bankrupt (0 Compute) Mosaic Engulfment */}
+            {isAiBankrupt && (
               <>
                 <div className="lc-mosaic-flood-overlay" aria-hidden="true">
                   {MOSAIC_FLOOD_CELLS.map((tone, i) => (
@@ -2411,7 +2432,7 @@ export function App() {
                   ))}
                 </div>
                 <div className="lc-bankrupt-banner" aria-hidden="true">
-                  {human.chips === 0 ? 'COMPUTE DEPLETED // SYSTEM CRASH' : 'TARGET BROKEN // ROOT TAKEOVER'}
+                  TARGET BROKEN // ROOT TAKEOVER
                 </div>
               </>
             )}
@@ -3438,6 +3459,28 @@ export function App() {
         </div>
       )}
 
+      {/* Damage Effect 3 (Player Only): Massive Crimson Data-Stream Screen Flood */}
+      {isHumanBankrupt && (
+        <div className="lc-player-red-flood-overlay" aria-hidden="true">
+          <div className="lc-red-flood-streams">
+            {FLOOD_DATA_STREAMS.map((s, idx) => (
+              <div
+                key={idx}
+                className="lc-red-flood-col"
+                style={{ left: s.left, animationDuration: s.dur, animationDelay: s.delay }}
+              >
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
+              </div>
+            ))}
+          </div>
+          <div className="lc-player-flood-banner">
+            COMPUTE DEPLETED // 红色溢出数据流淹没
+          </div>
+        </div>
+      )}
+
       <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
 
       {/* Integrated Settings Menu Overlay */}
@@ -3493,9 +3536,9 @@ export function App() {
               </button>
             </div>
 
-            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides */}
+            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides independently */}
             <div className="lc-vfx-strip">
-              <span className="lc-menu-note">战损与危机特效即时预览（含对手受击）</span>
+              <span className="lc-menu-note">战损与危机特效即时预览（双方独立隔离）</span>
               <div className="lc-vfx-btn-row">
                 <button
                   id="vfx-test-round-loss"
@@ -3514,26 +3557,48 @@ export function App() {
                   单轮败北闪烁
                 </button>
                 <button
-                  id="vfx-test-low-compute"
+                  id="vfx-test-human-low"
                   type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'low' ? 'active' : ''}`}
+                  className={`lc-vfx-chip ${vfxTestMode === 'human-low' ? 'active' : ''}`}
                   onClick={() => {
-                    setVfxTestMode((m) => (m === 'low' ? 'auto' : 'low'));
+                    setVfxTestMode((m) => (m === 'human-low' ? 'auto' : 'human-low'));
                     setActiveModal({ type: 'none' });
                   }}
                 >
-                  {vfxTestMode === 'low' ? '关闭红流警报' : '低算力红流'}
+                  {vfxTestMode === 'human-low' ? '关闭己方红流' : '己方低算力外流'}
                 </button>
                 <button
-                  id="vfx-test-bankrupt"
+                  id="vfx-test-human-bankrupt"
                   type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'bankrupt' ? 'active' : ''}`}
+                  className={`lc-vfx-chip ${vfxTestMode === 'human-bankrupt' ? 'active' : ''}`}
                   onClick={() => {
-                    setVfxTestMode((m) => (m === 'bankrupt' ? 'auto' : 'bankrupt'));
+                    setVfxTestMode((m) => (m === 'human-bankrupt' ? 'auto' : 'human-bankrupt'));
                     setActiveModal({ type: 'none' });
                   }}
                 >
-                  {vfxTestMode === 'bankrupt' ? '恢复立绘' : '归零淹没扭曲'}
+                  {vfxTestMode === 'human-bankrupt' ? '关闭己方淹没' : '己方红流淹没'}
+                </button>
+                <button
+                  id="vfx-test-ai-low"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'ai-low' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'ai-low' ? 'auto' : 'ai-low'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'ai-low' ? '关闭对手红流' : '对手低算力红流'}
+                </button>
+                <button
+                  id="vfx-test-ai-bankrupt"
+                  type="button"
+                  className={`lc-vfx-chip ${vfxTestMode === 'ai-bankrupt' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVfxTestMode((m) => (m === 'ai-bankrupt' ? 'auto' : 'ai-bankrupt'));
+                    setActiveModal({ type: 'none' });
+                  }}
+                >
+                  {vfxTestMode === 'ai-bankrupt' ? '恢复对手立绘' : '对手归零扭曲'}
                 </button>
                 <button
                   id="vfx-test-reset"

@@ -181,6 +181,31 @@ button:disabled {
   color: rgba(152, 164, 189, 0.11);
 }
 
+/* Player Low Compute / Bankrupt: Outer Background Data Streams Turn Crimson Red */
+.lc-backdrop.is-player-low .lc-rain-col,
+.lc-backdrop.is-player-bankrupt .lc-rain-col {
+  color: rgba(255, 36, 56, 0.74);
+  text-shadow: 0 0 10px rgba(255, 36, 56, 0.78);
+  animation:
+    lcDataStreamFall 7.5s linear infinite,
+    lcRedStreamFlash 0.72s steps(2, end) infinite;
+}
+
+.lc-backdrop.is-player-low .lc-bus-pulse,
+.lc-backdrop.is-player-bankrupt .lc-bus-pulse {
+  stroke: #ff2438;
+  opacity: 0.85;
+}
+
+.lc-backdrop.is-player-low .lc-mote,
+.lc-backdrop.is-player-bankrupt .lc-mote {
+  background: rgba(255, 42, 68, 0.82);
+}
+
+.lc-backdrop.is-player-low {
+  box-shadow: inset 0 0 85px rgba(255, 24, 48, 0.24);
+}
+
 @keyframes lcDataStreamFall {
   from {
     transform: translateY(-25%);
@@ -2299,6 +2324,82 @@ button:disabled {
   pointer-events: none;
 }
 
+/* Damage Effect 3 (Player Only): Massive Crimson Data-Stream Screen Flood */
+.lc-player-red-flood-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(90, 4, 14, 0.24) 0%,
+    rgba(28, 2, 6, 0.72) 100%
+  );
+  box-shadow: inset 0 0 110px rgba(255, 24, 48, 0.45);
+  animation: lcRedFloodSurge 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.lc-red-flood-streams {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.lc-red-flood-col {
+  position: absolute;
+  top: -55%;
+  writing-mode: vertical-rl;
+  font-family: var(--font-pixel);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  white-space: nowrap;
+  display: flex;
+  gap: 28px;
+  color: rgba(255, 36, 56, 0.88);
+  text-shadow: 0 0 12px rgba(255, 28, 48, 0.9);
+  animation: lcDataStreamFall 2.2s linear infinite;
+}
+
+.lc-red-flood-col:nth-child(2n) {
+  color: rgba(255, 92, 110, 0.72);
+  font-size: 11px;
+}
+
+.lc-red-flood-col:nth-child(3n) {
+  color: rgba(215, 16, 40, 0.92);
+}
+
+@keyframes lcRedFloodSurge {
+  0% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+.lc-player-flood-banner {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 36;
+  padding: 6px 16px;
+  background: rgba(16, 2, 6, 0.94);
+  border: 2px solid #ff2438;
+  box-shadow: 0 0 22px rgba(255, 36, 56, 0.55);
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #ff6070;
+  text-shadow: 0 0 10px rgba(255, 36, 56, 0.85);
+  white-space: nowrap;
+}
+
 /* =========================================================================
    8C. Sleek Last-Command Modals & Internal Toasts (For Lazy-Loaded Modals)
    ========================================================================= */
@@ -3242,6 +3343,8 @@ button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .lc-mote,
   .lc-rain-col,
+  .lc-red-flood-col,
+  .lc-player-red-flood-overlay,
   .lc-bus-pulse,
   .lc-speech-bubble,
   .lc-chat-msg,
