@@ -1977,6 +1977,36 @@ button:disabled {
   text-align: center;
 }
 
+.lc-sound-strip {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px dashed var(--px-border-bright);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lc-sound-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-sound-label {
+  font-family: var(--font-pixel);
+  font-size: 10.5px;
+  color: var(--neon-cyan-soft);
+  min-width: 66px;
+}
+
+.lc-sound-slider {
+  flex: 1 1 90px;
+  accent-color: var(--neon-cyan);
+  cursor: pointer;
+}
+
 .lc-vfx-strip {
   width: 100%;
   padding-top: 10px;

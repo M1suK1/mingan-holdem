@@ -123,6 +123,7 @@ export interface PlayerState {
   allIn: boolean;
   sealedSkills: HackSkillId[];
   ghostShield?: boolean;
+  hiddenHackEscrow?: number;
 }
 
 export type GameAction =

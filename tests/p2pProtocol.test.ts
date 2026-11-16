@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DEFAULT_CONFIG, type Card } from '../src/engine/types.ts';
-import { applyAction, createInitialState, isActionLegal } from '../src/engine/gameEngine.ts';
+import { applyAction, createInitialState, getVisiblePlayerChips, isActionLegal } from '../src/engine/gameEngine.ts';
 import {
   mirrorStateForGuestView,
   sanitizeStateForGuest,
@@ -50,6 +50,12 @@ describe('P2P Protocol: strict anti-sniff sanitization & guest perspective mirro
     // Deck & hackEscrowPot must never cross the wire
     assert.equal(sanitized.deck.length, 0);
     assert.equal(sanitized.hackEscrowPot, 0);
+
+    // Host's visible chips & totalCommitted must NOT drop by secret hack escrow (40) before showdown
+    assert.equal(sanitized.players.human.chips, 970); // 1000 - 20(ante) - 10(swapFee) = 970 (40 hack hidden!)
+    assert.equal(sanitized.players.human.hiddenHackEscrow ?? 0, 0);
+    assert.equal(getVisiblePlayerChips(hostState, 'human', 'ai'), 970);
+    assert.equal(getVisiblePlayerChips(hostState, 'human', 'human'), 930);
 
     // Board slot 0 was swapped-in by Host so it is open with Host's discarded 8B; unopened slots (2, 3) are masked
     assert.equal(sanitized.board[0].isOpen, true);

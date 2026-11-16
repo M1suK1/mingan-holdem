@@ -170,6 +170,38 @@ export function getVisibleHandCard(
   return hc.originalCard ?? hc.card;
 }
 
+export function getVisiblePlayerChips(
+  state: GameState,
+  targetId: PlayerId,
+  viewerId: PlayerId
+): number {
+  const player = state.players[targetId];
+  if (
+    targetId === viewerId ||
+    state.phase === 'showdown' ||
+    state.config.revealOpponentHidden
+  ) {
+    return player.chips;
+  }
+  return player.chips + (player.hiddenHackEscrow ?? 0);
+}
+
+export function getVisiblePlayerCommitted(
+  state: GameState,
+  targetId: PlayerId,
+  viewerId: PlayerId
+): number {
+  const player = state.players[targetId];
+  if (
+    targetId === viewerId ||
+    state.phase === 'showdown' ||
+    state.config.revealOpponentHidden
+  ) {
+    return player.totalCommitted;
+  }
+  return Math.max(0, player.totalCommitted - (player.hiddenHackEscrow ?? 0));
+}
+
 export function getVisibleBoardCard(
   slot: BoardSlot,
   viewerId: PlayerId,
@@ -308,6 +340,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     folded: false,
     allIn: humanStarting - humanAnte === 0,
     sealedSkills: [...(options.sealedSkills?.human ?? [])],
+    hiddenHackEscrow: 0,
   };
 
   const ai: PlayerState = {
@@ -325,6 +358,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     folded: false,
     allIn: aiStarting - aiAnte === 0,
     sealedSkills: [...(options.sealedSkills?.ai ?? [])],
+    hiddenHackEscrow: 0,
   };
 
   const anteDiff = humanAnte - aiAnte;
@@ -670,6 +704,8 @@ function resolveShowdown(state: GameState): GameState {
     next.pot += next.hackEscrowPot;
     next.hackEscrowPot = 0;
   }
+  next.players.human.hiddenHackEscrow = 0;
+  next.players.ai.hiddenHackEscrow = 0;
   // At Showdown (when not caught by Scan), any hacked card that entered the public board
   // takes real effect on the table for both hands.
   const boardCards = next.board.map((b) => b.card);
@@ -938,6 +974,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
 
     actor.chips -= cost;
     actor.totalCommitted += cost;
+    actor.hiddenHackEscrow = (actor.hiddenHackEscrow ?? 0) + cost;
     next.hackEscrowPot += cost;
     next.usedHackThisTurn = true;
 
@@ -1053,6 +1090,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         next.pot += next.hackEscrowPot;
         next.hackEscrowPot = 0;
       }
+      next.players.human.hiddenHackEscrow = 0;
+      next.players.ai.hiddenHackEscrow = 0;
       actor.chips += next.pot;
       next.phase = 'showdown';
       next.justCalledThisTurn = false;
@@ -1122,6 +1161,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       const cost = 40;
       actor.chips -= cost;
       actor.totalCommitted += cost;
+      actor.hiddenHackEscrow = (actor.hiddenHackEscrow ?? 0) + cost;
       next.hackEscrowPot += cost;
       actor.ghostShield = true;
       summary = `${actorLabel} 激活「幽灵封包」（预支 ${cost}）：已部署一次性的底层反扫描护盾`;
@@ -1129,6 +1169,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       const cost = 55;
       actor.chips -= cost;
       actor.totalCommitted += cost;
+      actor.hiddenHackEscrow = (actor.hiddenHackEscrow ?? 0) + cost;
       next.hackEscrowPot += cost;
       const hc = actor.hand[idx];
       if (!hc.originalCard) hc.originalCard = { ...hc.card };
@@ -1200,6 +1241,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       next.pot += next.hackEscrowPot;
       next.hackEscrowPot = 0;
     }
+    next.players.human.hiddenHackEscrow = 0;
+    next.players.ai.hiddenHackEscrow = 0;
     next.players[actorId].folded = true;
     next.players[oppId].chips += next.pot;
     next.phase = 'showdown';

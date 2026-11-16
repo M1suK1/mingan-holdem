@@ -18,6 +18,8 @@ import {
   getNextSwapFee,
   getVisibleBoardCard,
   getVisibleHandCard,
+  getVisiblePlayerChips,
+  getVisiblePlayerCommitted,
   isActionLegal,
 } from './gameEngine.ts';
 import {
@@ -233,10 +235,13 @@ export function serializeStateForLlm(state: GameState): string {
     .map((k) => k.replace(/^ai:/, ''))
     .join(', ');
 
+  const visibleHumanChips = getVisiblePlayerChips(state, 'human', 'ai');
+  const visibleHumanCommitted = getVisiblePlayerCommitted(state, 'human', 'ai');
+
   return [
     `[当前局:#${state.handNumber} | 阶段:${state.phase} | 奖池:${state.pot}]`,
     `追捕者(${ai.name})剩余算力:${ai.chips} | 本段已下注:${ai.roundBet} | 本局累计投入:${ai.totalCommitted}`,
-    `通缉黑客(玩家)剩余算力:${human.chips} | 本段已下注:${human.roundBet} | 本局累计投入:${human.totalCommitted}`,
+    `通缉黑客(玩家)剩余算力:${visibleHumanChips} | 本段已下注:${human.roundBet} | 本局累计投入:${visibleHumanCommitted}`,
     `追捕者手牌: ${aiHand}`,
     `玩家可见手牌: ${humanHand}`,
     `中央节点池(4张): ${boardSummary}`,
