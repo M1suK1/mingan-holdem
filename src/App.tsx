@@ -165,9 +165,12 @@ import {
   pickSec00AiAction,
 } from './engine/sec00Tutorial.ts';
 import {
+  formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
+  isMuteGarbledCharacter,
   resolveEcho0Sprite,
   resolveSec01Sprite,
+  resolveSec02Sprite,
 } from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
@@ -444,6 +447,8 @@ export function App() {
   const [showRaiseTiers, setShowRaiseTiers] = useState(false);
   const [scanMode, setScanMode] = useState(false);
   const [pendingSkillTargetId, setPendingSkillTargetId] = useState<string | null>(null);
+  const [slashBurstKey, setSlashBurstKey] = useState<string | null>(null);
+  const lastSlashedHandRef = useRef<string | null>(null);
   const [holdProgress, setHoldProgress] = useState(0);
   const [activeModal, setActiveModal] = useState<ActiveModal>({ type: 'none' });
   const [activeMenuId, setActiveMenuId] = useState('menu-contracts');
@@ -1008,6 +1013,27 @@ export function App() {
       return [];
     }
     const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    const initStory = getStoryCharacterByEscapeNode(initNodeIdx);
+    if (initStory && isMuteGarbledCharacter(initStory.id)) {
+      return [
+        {
+          id: 'init-msg-1',
+          sender: 'opponent',
+          speaker: initNode.opponentName,
+          text: formatMuteGarbledText(`已接入 ${initNode.code} · ${initNode.title}`),
+          msgKind: 'speech',
+          crushed: false,
+        },
+        {
+          id: 'init-msg-2',
+          sender: 'opponent',
+          speaker: initNode.opponentName,
+          text: initStory.quote,
+          msgKind: 'thought',
+          crushed: false,
+        },
+      ];
+    }
     return [
       {
         id: 'init-msg-1',
@@ -1271,10 +1297,18 @@ export function App() {
 
   const enqueueTask = useCallback(
     (task: QueuedChatTask) => {
-      if (task.kind === 'opponent' && !mobileChatOpenRef.current) {
+      let finalTask = task;
+      if (
+        task.kind === 'opponent' &&
+        task.msgKind !== 'thought' &&
+        isMuteGarbledCharacter(latestCharRef.current.id)
+      ) {
+        finalTask = { ...task, text: formatMuteGarbledText(task.text) };
+      }
+      if (finalTask.kind === 'opponent' && !mobileChatOpenRef.current) {
         setUnreadMobileChat((c) => Math.min(99, c + 1));
       }
-      queueRef.current.push(task);
+      queueRef.current.push(finalTask);
       setQueuedCount(queueRef.current.length);
       processNextTask();
     },
@@ -1571,6 +1605,22 @@ export function App() {
               speaker: snapshot.players.ai.name,
               text: decision.dialogue.text,
             });
+            if (isMuteGarbledCharacter(char.id)) {
+              const innerThought =
+                decision.action.type === 'raise'
+                  ? '（……声音还是传不出去。没关系，只要把筹码推上去逼退对面就行了。）'
+                  : decision.action.type === 'scan'
+                    ? '（不对劲……你的链路里有异常痕迹。让我用双刃把伪装切开看看。）'
+                    : decision.action.type === 'swap'
+                      ? '（换入暗区……黑河教过我，永远不要让对手看清底牌的真实轮廓。）'
+                      : '（……要冷静。只要赢下这一手，黑河就不会再把我丢回雨夜里了。）';
+              enqueueTask({
+                kind: 'opponent',
+                speaker: snapshot.players.ai.name,
+                msgKind: 'thought',
+                text: innerThought,
+              });
+            }
           }
         }
       } finally {
@@ -1618,6 +1668,26 @@ export function App() {
       playSound(cue);
     }
   }, [state.lastAction]);
+
+  // Blade-Slash VFX when "富兰克林之死" severs one of player's cheat skills
+  useEffect(() => {
+    const locked = state.lockedHumanHackSkill;
+    if (!locked || state.phase === 'showdown') return;
+    const key = `${state.handNumber}:${locked}`;
+    if (lastSlashedHandRef.current === key) return;
+    lastSlashedHandRef.current = key;
+    setSlashBurstKey(key);
+    const skName = getSkillById(locked)?.name ?? locked;
+    pushToast(
+      'warn',
+      '富兰克林之死 · 挥刃断链',
+      `${state.players.ai.name}已切割你的「${skName}」作弊链路，本手无法使用`
+    );
+    const timer = window.setTimeout(() => {
+      setSlashBurstKey((curr) => (curr === key ? null : curr));
+    }, 950);
+    return () => window.clearTimeout(timer);
+  }, [state.handNumber, state.lockedHumanHackSkill, state.phase, state.players.ai.name, pushToast]);
 
   // Scan action laser sweep VFX + toast feedback (Triggers for BOTH Player & Opponent!)
   useEffect(() => {
@@ -2024,6 +2094,8 @@ export function App() {
         pushToast('warn', `算力不足（需预支 ${cost}）`);
       } else if (!hc || hc.visibility !== 'open') {
         pushToast('warn', '仅可对己方公开明牌使用篡改技能');
+      } else if (hc.card.isBlank) {
+        pushToast('warn', '该牌已被抹除为废牌，无法再次篡改');
       } else {
         pushToast(
           'warn',
@@ -2395,19 +2467,40 @@ export function App() {
       });
     }
     const activeStoryChar = activeEscNode ? getStoryCharacterByEscapeNode(activeEscNode.index) : null;
-    setMessages([
-      {
-        id: `reset-${Date.now()}`,
-        sender: 'opponent',
-        speaker: resolvedOpponentName,
-        text: activeEscNode
-          ? activeStoryChar?.quote
-            ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。${activeStoryChar.quote}`
-            : `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
-          : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
-        crushed: false,
-      },
-    ]);
+    if (activeEscNode && activeStoryChar && isMuteGarbledCharacter(activeStoryChar.id)) {
+      setMessages([
+        {
+          id: `reset-${Date.now()}-1`,
+          sender: 'opponent',
+          speaker: resolvedOpponentName,
+          text: formatMuteGarbledText(`已接入 ${activeEscNode.code}，准备猎杀。`),
+          msgKind: 'speech',
+          crushed: false,
+        },
+        {
+          id: `reset-${Date.now()}-2`,
+          sender: 'opponent',
+          speaker: resolvedOpponentName,
+          text: activeStoryChar.quote,
+          msgKind: 'thought',
+          crushed: false,
+        },
+      ]);
+    } else {
+      setMessages([
+        {
+          id: `reset-${Date.now()}`,
+          sender: 'opponent',
+          speaker: resolvedOpponentName,
+          text: activeEscNode
+            ? activeStoryChar?.quote
+              ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。${activeStoryChar.quote}`
+              : `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
+            : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
+          crushed: false,
+        },
+      ]);
+    }
     return freshState;
   };
 
@@ -2931,6 +3024,11 @@ export function App() {
       effectiveCharacter.voice?.samples?.[0] ??
       effectiveCharacter.quote ??
       '数据流正常，准备下一手博弈。';
+    if (isMuteGarbledCharacter(effectiveCharacter.id)) {
+      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, msgKind: 'speech', text: sample });
+      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, msgKind: 'thought', text: sample });
+      return;
+    }
     enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: sample });
   };
 
@@ -3031,8 +3129,9 @@ export function App() {
 
   const isSec00Echo0 = activeEscapeNode?.index === 0 && !isP2pConnected;
   const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
+  const isSec02Boss = activeEscapeNode?.index === 2 && !isP2pConnected;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡）
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
@@ -3040,7 +3139,9 @@ export function App() {
         ? resolveEcho0Sprite(activeExpression)
         : isSec01Boss
           ? resolveSec01Sprite(activeExpression)
-          : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
+          : isSec02Boss
+            ? resolveSec02Sprite(activeExpression)
+            : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
@@ -3048,9 +3149,11 @@ export function App() {
         ? '#00F0FF'
         : isSec01Boss
           ? '#FFB020'
-          : llmConfig.overloadPersona
-            ? '#FF4757'
-            : effectiveCharacter.color || '#FF2E88';
+          : isSec02Boss
+            ? '#38BDF8'
+            : llmConfig.overloadPersona
+              ? '#FF4757'
+              : effectiveCharacter.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -3375,7 +3478,7 @@ export function App() {
                 isSec00Echo0 && !isShowdown ? 'is-echo0-disguised' : ''
               } ${isSec00Echo0 ? 'is-echo0-framing' : ''} ${
                 isSec01Boss ? 'is-sec01-framing' : ''
-              }`}
+              } ${isSec02Boss ? 'is-sec02-framing' : ''}`}
               width={550}
               height={420}
             />
@@ -3388,7 +3491,9 @@ export function App() {
                   aria-hidden="true"
                   className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls} ${
                     isSec00Echo0 ? 'is-echo0-framing' : ''
-                  } ${isSec01Boss ? 'is-sec01-framing' : ''}`}
+                  } ${isSec01Boss ? 'is-sec01-framing' : ''} ${
+                    isSec02Boss ? 'is-sec02-framing' : ''
+                  }`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -3830,7 +3935,9 @@ export function App() {
                         ? { id: 'hack-btn-minus-one', label: '-1', icon: <PixelMinusOneIcon size={12} /> }
                         : skill === 'crown-ace'
                           ? { id: 'hack-btn-crown-ace', label: '钦定A', icon: <PixelPlusOneIcon size={12} /> }
-                          : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
+                          : skill === 'null-erase'
+                            ? { id: 'hack-btn-null-erase', label: '抹除', icon: <PixelSeverIcon size={12} /> }
+                            : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
                   const cost = getEffectiveHackCost(state, 'human', skill);
                   const isSealed = human.sealedSkills.includes(skill);
                   const isColdLocked = state.lockedHumanHackSkill === skill;
@@ -3848,7 +3955,9 @@ export function App() {
                       key={skill}
                       id={meta.id}
                       type="button"
-                      className={`lc-hack-btn ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
+                      className={`lc-hack-btn ${isSealed || isColdLocked ? 'is-sealed' : ''} ${
+                        isColdLocked ? 'is-cold-cut' : ''
+                      } ${isColdLocked && slashBurstKey ? 'is-slash-burst' : ''}`}
                       disabled={disabled}
                       onClick={() => handleExecuteHack(skill)}
                       title={
@@ -3859,12 +3968,13 @@ export function App() {
                             : isSealed
                               ? '此作弊技能已被扫描抓获封印'
                               : isColdLocked
-                                ? '本手已被对手「冷频封锁」冻结'
+                                ? '本手已被「富兰克林之死」挥刃切断'
                                 : usedThisTurn
                                   ? '作弊技能每回合限用 1 次（下回合刷新）'
                                   : `作弊技能：先选中己方明牌再点击（预支 ${cost}，每回合限 1 次）`
                       }
                     >
+                      {isColdLocked && <span className="lc-skill-slash-fx" aria-hidden="true" />}
                       {meta.icon}
                       <span>
                         {lockedByTutorial
@@ -3872,7 +3982,7 @@ export function App() {
                           : isSealed
                             ? '封印'
                             : isColdLocked
-                              ? '冷封'
+                              ? '已斩断'
                               : usedThisTurn
                                 ? '已用'
                                 : meta.label}
@@ -3928,10 +4038,11 @@ export function App() {
                   {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
-                    if (sid === 'crown-ace') {
-                      const isSealed = human.sealedSkills.includes('crown-ace');
-                      const isColdLocked = state.lockedHumanHackSkill === 'crown-ace';
-                      const cost = getEffectiveHackCost(state, 'human', 'crown-ace');
+                    if (sid === 'crown-ace' || sid === 'null-erase') {
+                      const hackId = sid as HackSkillId;
+                      const isSealed = human.sealedSkills.includes(hackId);
+                      const isColdLocked = state.lockedHumanHackSkill === hackId;
+                      const cost = getEffectiveHackCost(state, 'human', hackId);
                       const disabled =
                         !tutorialCaps.allowHack ||
                         !isHumanTurn ||
@@ -3945,16 +4056,19 @@ export function App() {
                           key={sid}
                           id={`acquired-skill-btn-${sIdx}`}
                           type="button"
-                          className={`lc-acquired-skill-chip ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
+                          className={`lc-acquired-skill-chip ${isSealed || isColdLocked ? 'is-sealed' : ''} ${
+                            isColdLocked ? 'is-cold-cut' : ''
+                          }`}
                           disabled={disabled}
-                          onClick={() => handleExecuteHack('crown-ace')}
+                          onClick={() => handleExecuteHack(hackId)}
                           title={sk.summary}
                         >
+                          {isColdLocked && <span className="lc-skill-slash-fx" aria-hidden="true" />}
                           <span>
                             {isSealed
                               ? '封印'
                               : isColdLocked
-                                ? '冷封'
+                                ? '已斩断'
                                 : state.usedHackThisTurn
                                   ? '已用'
                                   : sk.name}

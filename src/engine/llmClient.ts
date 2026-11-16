@@ -1001,7 +1001,9 @@ export function enumerateLegalActionHints(state: GameState): string[] {
     const candidateSkills: HackSkillId[] =
       state.aiSpecialCheatSkill === 'crown-ace'
         ? ['plus-one', 'minus-one', 'flip-suit', 'crown-ace']
-        : ['plus-one', 'minus-one', 'flip-suit'];
+        : state.aiSpecialCheatSkill === 'null-erase'
+          ? ['plus-one', 'minus-one', 'flip-suit', 'null-erase']
+          : ['plus-one', 'minus-one', 'flip-suit'];
     const availableSkills = candidateSkills.filter((s) => !ai.sealedSkills.includes(s));
     if (openHandIdx.length > 0 && availableSkills.length > 0 && ai.chips >= 40) {
       hints.push(

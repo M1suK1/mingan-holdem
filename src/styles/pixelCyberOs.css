@@ -4804,3 +4804,122 @@ button:disabled {
   color: #ffe09e;
   box-shadow: 0 0 12px rgba(255, 176, 32, 0.35);
 }
+
+/* =========================================================================
+   19. SEC-02 Framing, Blade-Slash Cut VFX (富兰克林之死) & Blank Card (废牌)
+   ========================================================================= */
+.lc-opp-portrait-img.is-sec02-framing {
+  object-fit: cover;
+  object-position: 49% 6%;
+}
+
+.lc-hack-btn.is-cold-cut,
+.lc-acquired-skill-chip.is-cold-cut {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(56, 189, 248, 0.8) !important;
+  background: linear-gradient(
+    135deg,
+    rgba(12, 22, 38, 0.94) 0%,
+    rgba(35, 10, 22, 0.92) 49%,
+    rgba(10, 16, 28, 0.94) 51%,
+    rgba(6, 12, 24, 0.95) 100%
+  ) !important;
+  color: #bae6fd !important;
+}
+
+.lc-hack-btn.is-cold-cut.is-slash-burst {
+  animation: lcSlashShake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+.lc-skill-slash-fx {
+  position: absolute;
+  inset: -4px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lc-skill-slash-fx::before {
+  content: '';
+  position: absolute;
+  left: -18%;
+  top: 50%;
+  width: 136%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #38bdf8 20%,
+    #ffffff 50%,
+    #ff4757 82%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 8px #38bdf8,
+    0 0 12px rgba(255, 71, 87, 0.72);
+  transform: translateY(-50%) rotate(-18deg);
+}
+
+.lc-hack-btn.is-cold-cut.is-slash-burst .lc-skill-slash-fx::after {
+  content: '';
+  position: absolute;
+  left: -30%;
+  top: 50%;
+  width: 60%;
+  height: 6px;
+  background: linear-gradient(90deg, transparent, #ffffff, #38bdf8, transparent);
+  filter: blur(1px);
+  transform: translateY(-50%) rotate(-18deg);
+  animation: lcBladeSlashSweep 0.62s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes lcBladeSlashSweep {
+  0% {
+    left: -55%;
+    opacity: 0.95;
+  }
+  55% {
+    left: 40%;
+    opacity: 1;
+  }
+  100% {
+    left: 125%;
+    opacity: 0;
+  }
+}
+
+@keyframes lcSlashShake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-3px, 1px);
+  }
+  45% {
+    transform: translate(3px, -1px);
+  }
+  70% {
+    transform: translate(-2px, 0);
+  }
+}
+
+.px-card-front.is-blank-card {
+  background: repeating-linear-gradient(
+    -45deg,
+    #07090f 0px,
+    #07090f 5px,
+    #0d111b 5px,
+    #0d111b 10px
+  );
+  border-color: rgba(148, 163, 184, 0.58) !important;
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.85);
+}
+
+.px-card-hero-rank.rank-blank {
+  color: #94a3b8;
+  text-shadow:
+    -1px 0 rgba(56, 189, 248, 0.45),
+    1px 0 rgba(255, 71, 87, 0.45);
+  letter-spacing: 0.04em;
+}

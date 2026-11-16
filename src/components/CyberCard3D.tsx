@@ -59,10 +59,15 @@ export function CyberCard3D({
   onDragLeave,
   onDrop,
 }: CyberCard3DProps) {
-  const isPink = card?.suit === 'P';
-  const rankTxt = card ? formatRank(card.rank) : '';
-  const hexCode = card ? `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}` : '';
-  const suitName = card ? formatSuitLabel(card.suit) : '';
+  const isBlank = Boolean(card?.isBlank);
+  const isPink = !isBlank && card?.suit === 'P';
+  const rankTxt = isBlank ? '废牌' : card ? formatRank(card.rank) : '';
+  const hexCode = isBlank
+    ? '0x00'
+    : card
+      ? `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}`
+      : '';
+  const suitName = isBlank ? '废牌' : card ? formatSuitLabel(card.suit) : '';
   const interactive = Boolean(onClick);
 
   const bodyClasses = [
@@ -84,7 +89,7 @@ export function CyberCard3D({
   const frontClasses = [
     'px-card-face',
     'px-card-front',
-    isPink ? 'suit-P' : 'suit-B',
+    isBlank ? 'is-blank-card' : isPink ? 'suit-P' : 'suit-B',
     isOwnPrivate ? 'own-private-blink' : '',
     justActed ? 'acted-flash' : '',
     isWinner ? 'winner-glow' : '',
@@ -94,9 +99,11 @@ export function CyberCard3D({
 
   const ariaLabel = faceDown
     ? `加密卡牌 ${backCode}${actionHint ? `（${actionHint}）` : ''}`
-    : `${suitName}色 ${rankTxt}${isOwnPrivate ? '（己方私有暗牌）' : ''}${
-        actionHint ? `（${actionHint}）` : ''
-      }`;
+    : isBlank
+      ? `已抹除废牌（不参与牌型计算）${actionHint ? `（${actionHint}）` : ''}`
+      : `${suitName}色 ${rankTxt}${isOwnPrivate ? '（己方私有暗牌）' : ''}${
+          actionHint ? `（${actionHint}）` : ''
+        }`;
 
   return (
     <div className={`px-card-scene sz-${size}`}>
@@ -145,9 +152,9 @@ export function CyberCard3D({
           {/* Enlarged Center Rank Display (Color = Suit, No Traditional Suit Symbols) */}
           <div className="px-card-hero-stage">
             <span
-              className={`px-card-hero-rank ${isPink ? 'rank-pink' : 'rank-cyan'} ${
-                rankTxt === '10' ? 'is-ten' : ''
-              }`}
+              className={`px-card-hero-rank ${
+                isBlank ? 'rank-blank' : isPink ? 'rank-pink' : 'rank-cyan'
+              } ${rankTxt === '10' || isBlank ? 'is-ten' : ''}`}
             >
               {rankTxt}
             </span>

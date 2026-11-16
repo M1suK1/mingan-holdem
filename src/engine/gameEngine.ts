@@ -45,6 +45,7 @@ export function formatSuitLabel(suit: Suit): string {
 }
 
 export function formatCardShort(card: Card): string {
+  if (card.isBlank) return '废牌(NULL)';
   return `${formatSuitLabel(card.suit)}${formatRank(card.rank)}`;
 }
 
@@ -146,6 +147,8 @@ export function getHackSkillCost(state: Pick<GameState, 'config'>, skill: HackSk
       return state.config.hackFlipSuitCost;
     case 'crown-ace':
       return 60;
+    case 'null-erase':
+      return 50;
   }
 }
 
@@ -307,7 +310,7 @@ export interface CreateStateOptions {
   playerCheatSkills?: string[];
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
@@ -318,11 +321,15 @@ export interface CreateStateOptions {
 
 function pickRandomHackToLock(
   sealed: HackSkillId[],
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  equippedPool?: string[]
 ): HackSkillId | undefined {
-  const candidates = (['plus-one', 'minus-one', 'flip-suit'] as HackSkillId[]).filter(
-    (s) => !sealed.includes(s)
+  const basePool = (
+    equippedPool && equippedPool.length > 0
+      ? equippedPool.filter((s): s is HackSkillId => s !== 'parity-spoof')
+      : (['plus-one', 'minus-one', 'flip-suit'] as HackSkillId[])
   );
+  const candidates = basePool.filter((s) => !sealed.includes(s));
   if (candidates.length === 0) return undefined;
   return candidates[Math.floor(rng() * candidates.length) % candidates.length];
 }
@@ -413,7 +420,9 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
   const rngFn = options.rng ?? Math.random;
   const sigSkill = options.opponentSignatureSkill;
   const lockedHumanHackSkill =
-    sigSkill === 'cold-freq-lock' ? pickRandomHackToLock(human.sealedSkills, rngFn) : undefined;
+    sigSkill === 'cold-freq-lock'
+      ? pickRandomHackToLock(human.sealedSkills, rngFn, options.playerCheatSkills)
+      : undefined;
   const trappedBoardIndices =
     options.trappedBoardIndices !== undefined
       ? [...options.trappedBoardIndices]
@@ -613,15 +622,17 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
         const equippedCheat = state.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS;
         const allowed =
           equippedCheat.includes(action.skill) ||
-          (action.skill === 'crown-ace' && Boolean(state.playerAcquiredSkills?.includes('crown-ace')));
+          ((action.skill === 'crown-ace' || action.skill === 'null-erase') &&
+            Boolean(state.playerAcquiredSkills?.includes(action.skill)));
         if (!allowed) return false;
-      } else if (action.skill === 'crown-ace' && state.aiSpecialCheatSkill !== 'crown-ace') {
-        return false;
+      } else {
+        if (action.skill === 'crown-ace' && state.aiSpecialCheatSkill !== 'crown-ace') return false;
+        if (action.skill === 'null-erase' && state.aiSpecialCheatSkill !== 'null-erase') return false;
       }
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
       const hCard = actor.hand[action.handIndex];
-      if (!hCard || hCard.visibility !== 'open') return false;
+      if (!hCard || hCard.visibility !== 'open' || hCard.card.isBlank) return false;
       if ((action.skill === 'plus-one' || action.skill === 'crown-ace') && hCard.card.rank >= 14) {
         return false;
       }
@@ -1134,6 +1145,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       nextCard.rank = (nextCard.rank - 1) as Rank;
     } else if (action.skill === 'crown-ace') {
       nextCard.rank = 14 as Rank;
+    } else if (action.skill === 'null-erase') {
+      nextCard.isBlank = true;
     } else {
       nextCard.suit = nextCard.suit === 'B' ? 'P' : 'B';
     }
@@ -1147,7 +1160,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
           ? '点数-1'
           : action.skill === 'crown-ace'
             ? '钦定王牌(A)'
-            : '反转花色';
+            : action.skill === 'null-erase'
+              ? '信息抹除(废牌)'
+              : '反转花色';
     const summary = `${actorLabel} 预支 ${cost} 算力注入黑客协议（${skillName} · 仅己方可见）`;
 
     next.lastAction = {
@@ -1190,7 +1205,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         targetHc.tamperedBy &&
         targetHc.tamperedBy.length > 0 &&
         (targetHc.card.rank !== targetHc.originalCard.rank ||
-          targetHc.card.suit !== targetHc.originalCard.suit)
+          targetHc.card.suit !== targetHc.originalCard.suit ||
+          Boolean(targetHc.card.isBlank) !== Boolean(targetHc.originalCard.isBlank))
       ) {
         tampered = true;
         tamperedSkills = [...targetHc.tamperedBy];
@@ -1202,7 +1218,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         slot.tamperedBy &&
         slot.tamperedBy.length > 0 &&
         (slot.card.rank !== slot.originalCard.rank ||
-          slot.card.suit !== slot.originalCard.suit)
+          slot.card.suit !== slot.originalCard.suit ||
+          Boolean(slot.card.isBlank) !== Boolean(slot.originalCard.isBlank))
       ) {
         tampered = true;
         tamperedSkills = [...slot.tamperedBy];
@@ -1374,10 +1391,18 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         next.lockedAiHackSkill = locked;
       }
       const lockedLabel =
-        locked === 'plus-one' ? '+1' : locked === 'minus-one' ? '-1' : '反色';
+        locked === 'plus-one'
+          ? '+1'
+          : locked === 'minus-one'
+            ? '-1'
+            : locked === 'crown-ace'
+              ? '钦定A'
+              : locked === 'null-erase'
+                ? '抹除'
+                : '反色';
       summary = locked
-        ? `${actorLabel} 激活「冷频封锁」（投入 ${cost}）：已冻结对端本手 [${lockedLabel}] 改牌权`
-        : `${actorLabel} 激活「冷频封锁」（投入 ${cost}）：对端基础改牌权已全被封印`;
+        ? `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：已挥刃切断对端本手 [${lockedLabel}] 作弊链路`
+        : `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：对端作弊链路已全被封锁`;
     }
 
     next.lastAction = {
