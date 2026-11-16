@@ -142,7 +142,8 @@ export function getSkillGroup(skillId: string): SkillGroup {
     skillId === 'flip-suit' ||
     skillId === 'crown-ace' ||
     skillId === 'parity-spoof' ||
-    skillId === 'null-erase'
+    skillId === 'null-erase' ||
+    skillId === 'pink-double'
   ) {
     return 'cheat';
   }
@@ -210,6 +211,17 @@ export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
     targetMode: 'human-open-hand',
     implemented: true,
     tags: ['作弊技能', '信息抹除·废牌'],
+  },
+  {
+    id: 'pink-double',
+    name: '双粉映象',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '与 +1 / -1 / 反色同级作弊技（一轮可跨回合多次使用，每回合限 1 次）：预支 55 算力对己方 1 张粉色明牌施放，使其在终局同花结算时算作两张粉色牌（仅己方可见，可被扫描抓获）。',
+    costHint: 55,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '双粉同花'],
   },
   {
     id: 'siphon-cache',

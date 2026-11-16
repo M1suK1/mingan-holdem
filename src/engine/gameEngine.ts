@@ -54,8 +54,29 @@ export function isCardTamperedFromOriginal(card: Card, originalCard?: Card): boo
   return (
     card.rank !== originalCard.rank ||
     card.suit !== originalCard.suit ||
-    Boolean(card.isBlank) !== Boolean(originalCard.isBlank)
+    Boolean(card.isBlank) !== Boolean(originalCard.isBlank) ||
+    Boolean(card.isDoublePink) !== Boolean(originalCard.isDoublePink)
   );
+}
+
+export function getDisplayCardForTable(
+  card: Card,
+  opts: {
+    isOpen: boolean;
+    signatureSkill?: OpponentSignatureSkillId;
+    revealAll?: boolean;
+  }
+): Card {
+  if (
+    opts.signatureSkill === 'pink-mirage' &&
+    !opts.revealAll &&
+    opts.isOpen &&
+    !card.isBlank &&
+    card.suit !== 'P'
+  ) {
+    return { ...card, suit: 'P' };
+  }
+  return card;
 }
 
 export function formatTamperLabel(card: Card, originalCard?: Card): string | undefined {
@@ -163,6 +184,8 @@ export function getHackSkillCost(state: Pick<GameState, 'config'>, skill: HackSk
       return 60;
     case 'null-erase':
       return 50;
+    case 'pink-double':
+      return 55;
   }
 }
 
@@ -245,22 +268,43 @@ export function getRemainingSuitStats(state: GameState, viewerId: PlayerId = 'hu
   };
 
   const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
-  // Viewer sees all 3 of their own cards
+  // Viewer sees all 3 of their own cards (open cards may be pink-mirage disguised before showdown)
   for (const h of state.players[viewerId].hand) {
-    countCard(getVisibleHandCard(h, viewerId, viewerId, revealAll));
+    const base = getVisibleHandCard(h, viewerId, viewerId, revealAll);
+    countCard(
+      getDisplayCardForTable(base, {
+        isOpen: h.visibility === 'open',
+        signatureSkill: state.opponentSignatureSkill,
+        revealAll,
+      })
+    );
   }
   // Viewer sees opponent's open cards (unmodified view unless revealed)
   const oppId = otherPlayer(viewerId);
   const opp = state.players[oppId];
   for (const h of opp.hand) {
     if (revealAll || h.visibility === 'open') {
-      countCard(getVisibleHandCard(h, viewerId, oppId, revealAll));
+      const base = getVisibleHandCard(h, viewerId, oppId, revealAll);
+      countCard(
+        getDisplayCardForTable(base, {
+          isOpen: h.visibility === 'open',
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      );
     }
   }
   // Viewer sees open board cards
   for (const slot of state.board) {
     if (revealAll || slot.isOpen) {
-      countCard(getVisibleBoardCard(slot, viewerId, revealAll));
+      const base = getVisibleBoardCard(slot, viewerId, revealAll);
+      countCard(
+        getDisplayCardForTable(base, {
+          isOpen: slot.isOpen,
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      );
     }
   }
 
@@ -325,7 +369,7 @@ export interface CreateStateOptions {
   playerCheatSkills?: string[];
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
@@ -637,12 +681,15 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
         const equippedCheat = state.playerCheatSkills ?? DEFAULT_CHEAT_SKILLS;
         const allowed =
           equippedCheat.includes(action.skill) ||
-          ((action.skill === 'crown-ace' || action.skill === 'null-erase') &&
+          ((action.skill === 'crown-ace' ||
+            action.skill === 'null-erase' ||
+            action.skill === 'pink-double') &&
             Boolean(state.playerAcquiredSkills?.includes(action.skill)));
         if (!allowed) return false;
       } else {
         if (action.skill === 'crown-ace' && state.aiSpecialCheatSkill !== 'crown-ace') return false;
         if (action.skill === 'null-erase' && state.aiSpecialCheatSkill !== 'null-erase') return false;
+        if (action.skill === 'pink-double' && state.aiSpecialCheatSkill !== 'pink-double') return false;
       }
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
@@ -652,6 +699,9 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
         return false;
       }
       if (action.skill === 'minus-one' && hCard.card.rank <= 2) return false;
+      if (action.skill === 'pink-double' && (hCard.card.suit !== 'P' || hCard.card.isDoublePink)) {
+        return false;
+      }
       return true;
     }
 
@@ -1162,6 +1212,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       nextCard.rank = 14 as Rank;
     } else if (action.skill === 'null-erase') {
       nextCard.isBlank = true;
+    } else if (action.skill === 'pink-double') {
+      nextCard.isDoublePink = true;
     } else {
       nextCard.suit = nextCard.suit === 'B' ? 'P' : 'B';
     }
@@ -1177,7 +1229,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
             ? '钦定王牌(A)'
             : action.skill === 'null-erase'
               ? '信息抹除(废牌)'
-              : '反转花色';
+              : action.skill === 'pink-double'
+                ? '双粉映象(x2粉)'
+                : '反转花色';
     const summary = `${actorLabel} 预支 ${cost} 算力注入黑客协议（${skillName} · 仅己方可见）`;
 
     next.lastAction = {
@@ -1219,9 +1273,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         targetHc?.originalCard &&
         targetHc.tamperedBy &&
         targetHc.tamperedBy.length > 0 &&
-        (targetHc.card.rank !== targetHc.originalCard.rank ||
-          targetHc.card.suit !== targetHc.originalCard.suit ||
-          Boolean(targetHc.card.isBlank) !== Boolean(targetHc.originalCard.isBlank))
+        isCardTamperedFromOriginal(targetHc.card, targetHc.originalCard)
       ) {
         tampered = true;
         tamperedSkills = [...targetHc.tamperedBy];
@@ -1232,9 +1284,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         slot?.originalCard &&
         slot.tamperedBy &&
         slot.tamperedBy.length > 0 &&
-        (slot.card.rank !== slot.originalCard.rank ||
-          slot.card.suit !== slot.originalCard.suit ||
-          Boolean(slot.card.isBlank) !== Boolean(slot.originalCard.isBlank))
+        isCardTamperedFromOriginal(slot.card, slot.originalCard)
       ) {
         tampered = true;
         tamperedSkills = [...slot.tamperedBy];
@@ -1414,7 +1464,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
               ? '钦定A'
               : locked === 'null-erase'
                 ? '抹除'
-                : '反色';
+                : locked === 'pink-double'
+                  ? '双粉'
+                  : '反色';
       summary = locked
         ? `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：已挥刃切断对端本手 [${lockedLabel}] 作弊链路`
         : `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：对端作弊链路已全被封锁`;

@@ -34,6 +34,17 @@ export const SEC02_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   shy: `${SEC02_ASSET_BASE}/shy.webp`,
 };
 
+export const SEC03_ASSET_BASE = './assets/story/sec03';
+
+export const SEC03_EXPRESSION_PATHS: Record<ContractExpression, string> = {
+  calm: `${SEC03_ASSET_BASE}/calm.webp`,
+  smile: `${SEC03_ASSET_BASE}/smile.webp`,
+  surprise: `${SEC03_ASSET_BASE}/surprise.webp`,
+  sad: `${SEC03_ASSET_BASE}/sad.webp`,
+  angry: `${SEC03_ASSET_BASE}/angry.webp`,
+  shy: `${SEC03_ASSET_BASE}/shy.webp`,
+};
+
 function buildDualVariants(paths: Record<ContractExpression, string>): Record<string, string> {
   const variants: Record<string, string> = { ...paths };
   for (const [expr, url] of Object.entries(paths)) {
@@ -286,10 +297,91 @@ export const SEC02_CHARACTER_DOSSIER: ContractCharacter = {
   hasVoice: false,
 };
 
+export const SEC03_CHARACTER_DOSSIER: ContractCharacter = {
+  id: 'sec03-neon-dragon',
+  fileName: 'story-sec03-dossier.json',
+  name: '霓影·绯夜',
+  codename: '粉红软软龙',
+  title: '「霓虹心」心理评估同事 · 脸盲粉龙假小子',
+  element: '绯霓幻影系',
+  archetype: '强袭',
+  color: '#FF2E88',
+  quote: '哟新人，牌桌上一眼看过去全都是粉色的对吧？别拘束嘛——来，凑近点让姐姐看看你的眼神稳不稳！',
+  goal: '在下班后以「粉红软软龙」的马甲在黑域频谱暗道里找乐子赚外快；完全没认出对面这个被通缉的新手就是自己亲手拉进黑域的「霓虹心」同事。',
+  appearance:
+    '粉青双色挑染长双马尾龙娘，头顶一对浅褐小龙角与尖耳，拖着粉红鳞片配青蓝腹甲的大号龙尾；身穿白色吊带露脐背心与敞开黑粉棒球皮夹克、挂着「霓虹心」工牌的黑色百褶短裙、白过膝袜与粉黑厚底运动鞋，单手拎着公司评估平板。',
+  personality:
+    '玩家所在心理评估公司「霓虹心」的同事，也是亲手推荐玩家加入黑域协议网的始作俑者。患有严重脸盲，在虚拟空间对局时根本认不出玩家是谁。性格大大咧咧像个毫不客气的假小子，说话自来熟又爱乱勾肩搭背，动辄凑极近蹭尾巴、捏脸颊或直接贴上来搞出让人无所适从的过分身体接触。',
+  witchPersonality:
+    '牌局一热起来就更没有距离感：一边笑嘻嘻把整张牌桌的视觉都糊成霓虹粉，一边隔着全息屏几乎贴到玩家脸前起哄——“喂，这都不敢跟？软乎乎的龙尾巴借你捏一下要不要嘛！”',
+  outfitDescription:
+    '白色吊带短上衣、黑粉撞色棒球夹克、悬挂「霓虹心」工牌的黑色皮带百褶短裙、白色过膝长袜、粉黑爱心气垫运动鞋，手持心理评估平板。',
+  stats: {
+    magic: 82,
+    insight: 68,
+    agility: 86,
+    empathy: 74,
+  },
+  traits: [
+    {
+      id: 'sec03-prosopagnosia-colleague',
+      name: '霓虹心脸盲症 // WHO ARE YOU?',
+      polarity: 'negative',
+      tags: ['霓虹心同事', '严重脸盲'],
+      description:
+        '在心理评估公司「霓虹心」与玩家朝夕相处，也是她推荐玩家来玩黑域协议网；但因为重度脸盲，换个替壳马甲坐到对面后根本认不出玩家，只觉得“这新人手感怎么莫名熟”。',
+    },
+    {
+      id: 'sec03-boundary-zero',
+      name: '零距离假小子 // TOUCHY DRAGON',
+      polarity: 'neutral',
+      tags: ['假小子', '过分身体接触'],
+      description:
+        '大大咧咧毫无男女/上下级边界感，心情好或起哄时经常直接勾脖子、贴脸比对微表情、用软乎乎的龙尾卷住手腕甚至整个人靠过来，让玩家瞬间大脑宕机无所适从。',
+    },
+    {
+      id: 'sec03-pink-mirage',
+      name: '粉曜迷彩 // ALL-PINK MIRAGE',
+      polarity: 'positive',
+      tags: ['SEC-03 被动', '全明牌染粉'],
+      description:
+        '被动干扰：摊牌前场上所有明牌的花色都会显示为粉色，令双方的同花读牌与黑粉计数陷入粉色迷雾（仅私有暗牌与终局摊牌会显露真花色）。',
+    },
+    {
+      id: 'sec03-pink-double',
+      name: '双粉映象 // DOUBLE PINK',
+      polarity: 'positive',
+      tags: ['作弊技能', '粉色牌双计'],
+      description:
+        '与 +1 / -1 / 反色同级的作弊技能：对己方手中 1 张真实粉色明牌施放，使其在终局结算时算作两张粉色牌（可凑齐粉色同花，仅己方可见且可被扫描抓获）。',
+    },
+  ],
+  voice: {
+    tone: '爽朗跳脱的假小子腔调，尾音爱拖长带笑，话多自来熟，一兴奋就会靠得太近搞肢体接触，被反撩或输掉时反而会突然红脸僵住。',
+    habits: [
+      '开口闭口像在公司茶水间拍人肩膀，“嘿兄弟/新人”叫个不停却死活记不住脸',
+      '分析对手微表情时会毫无防备地直接把脸凑到十厘米内，甚至拿龙尾拍打玩家大腿',
+      '明明自己就是推荐玩家入网的人，遇到同样打法的玩家还感叹“我有个同事也超适合这游戏”',
+    ],
+    samples: [
+      '哟！对面这身替壳挺顺眼嘛——等等，我们是不是在哪见过？算了不管了，反正我这人重度脸盲，先打一局再说！',
+      '别老盯着牌面嘛，来来来往这边靠一点，让我做个「霓虹心」标准心理微表情复核——哎你耳朵怎么红了？',
+      '哈哈，满桌粉嘟嘟的是不是超可爱？你可别眨眼啊，姐姐我稍微贴近点看看你有没有在憋同花哦——哇，你体温好高啊！',
+      '呜哇……等等等一下，输了就是输了，别拿这种眼神看着我啊！龙、龙尾巴才不许你乱摸回去……！',
+    ],
+  },
+  portrait: SEC03_EXPRESSION_PATHS.calm,
+  witchPortrait: SEC03_EXPRESSION_PATHS.smile,
+  variants: buildDualVariants(SEC03_EXPRESSION_PATHS),
+  expressionCount: 6,
+  hasVoice: false,
+};
+
 export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
   ECHO0_CHARACTER_DOSSIER,
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
+  SEC03_CHARACTER_DOSSIER,
 ];
 
 export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
@@ -304,8 +396,53 @@ export function resolveSec02Sprite(expression: ContractExpression = 'calm'): str
   return SEC02_EXPRESSION_PATHS[expression] ?? SEC02_EXPRESSION_PATHS.calm;
 }
 
+export function resolveSec03Sprite(expression: ContractExpression = 'calm'): string {
+  return SEC03_EXPRESSION_PATHS[expression] ?? SEC03_EXPRESSION_PATHS.calm;
+}
+
 export function isMuteGarbledCharacter(characterId?: string): boolean {
   return characterId === SEC02_CHARACTER_DOSSIER.id;
+}
+
+export function isNeonDragonCharacter(characterId?: string): boolean {
+  return characterId === SEC03_CHARACTER_DOSSIER.id;
+}
+
+const NEON_DRAGON_ACTION_LINES: Record<string, readonly string[]> = {
+  raise: [
+    '哇哦，这波挺硬气嘛！来来来，凑近点让我搭着你肩膀算算这池子——哎呀别躲嘛，都是打牌的！',
+    '加注咯！看你眼神飘得……嘻嘻，是不是被我粉红软软龙的压迫感吓到了？我尾巴借你扶一下啦！',
+    '哈哈，跟不跟呀新人？你耳根怎么突然这么红，难道我刚才靠太近了？',
+  ],
+  swap: [
+    '我换一张！嘿咻——诶你坐过来点嘛，桌太宽了我够不着看你微表情啦！',
+    '改写节点！顺便用「霓虹心」专业眼光捏下你脸颊测测紧张度——嗯，弹性不错，一点没慌嘛！',
+  ],
+  flip: [
+    '翻开看看！满桌都是粉嘟嘟的颜色超好看对吧？等等……我总觉得你在哪见过，可脸盲根本记不住啦！',
+    '开牌开牌！哎你这手姿势好眼熟啊，我在「霓虹心」有个同事打起字来也这样——该不会是你吧？哈哈不可能！',
+  ],
+  call: [
+    '跟啦跟啦！别急着收手嘛，让我把尾巴搭你手腕上感受下脉搏，再决定怎么收拾你！',
+    '这点算力洒洒水啦，先跟平！过来击个掌先——哎你手怎么凉冰冰的？',
+  ],
+  scan: [
+    '喂喂，这手动作鬼鬼祟祟的——靠过来让我凑近十厘米盯一下！别乱动，扫描呢！',
+    '直觉告诉我你在偷改什么哦！让我用「霓虹心」测谎眼神近距离贴脸审你一遍！',
+  ],
+  fold: [
+    '切，这手牌臭得像周一早会！算了算了让给你，不过下把输了要乖乖让我揉乱头发赔罪哦！',
+  ],
+};
+
+export function pickNeonDragonActionLine(
+  actionType: string,
+  rng: () => number = Math.random
+): string | null {
+  const pool = NEON_DRAGON_ACTION_LINES[actionType];
+  if (!pool || pool.length === 0) return null;
+  const idx = Math.floor(rng() * pool.length) % pool.length;
+  return pool[Math.max(0, idx)];
 }
 
 export const MUTE_DECOY_THOUGHT_POOL: readonly string[] = [
@@ -354,5 +491,6 @@ export function getStoryCharacterByEscapeNode(nodeIndex: number | null): Contrac
   if (nodeIndex === 0) return ECHO0_CHARACTER_DOSSIER;
   if (nodeIndex === 1) return SEC01_CHARACTER_DOSSIER;
   if (nodeIndex === 2) return SEC02_CHARACTER_DOSSIER;
+  if (nodeIndex === 3) return SEC03_CHARACTER_DOSSIER;
   return null;
 }

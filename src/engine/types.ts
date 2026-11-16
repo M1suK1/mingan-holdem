@@ -15,16 +15,25 @@ export interface Card {
   copy?: 0 | 1;
   /** True when erased by null-erase cheat skill into a dead/blank card excluded from evaluation */
   isBlank?: boolean;
+  /** True when enhanced by pink-double cheat skill so this Pink card counts as 2 Pink cards for Flush evaluation */
+  isDoublePink?: boolean;
 }
 
 export type PlayerId = 'human' | 'ai';
 
-export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit' | 'crown-ace' | 'null-erase';
+export type HackSkillId =
+  | 'plus-one'
+  | 'minus-one'
+  | 'flip-suit'
+  | 'crown-ace'
+  | 'null-erase'
+  | 'pink-double';
 
 export type OpponentSignatureSkillId =
   | 'siphon-cache'
   | 'cold-freq-lock'
   | 'phantom-shroud'
+  | 'pink-mirage'
   | 'gate-minefield';
 
 export interface HandCard {
@@ -274,7 +283,7 @@ export interface GameState {
   peekedBoardIndices: number[];
   frozenBoardIndices: number[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double';
   lockedHumanHackSkill?: HackSkillId;
   lockedAiHackSkill?: HackSkillId;
   siphonUsedThisHand?: { human: boolean; ai: boolean };

@@ -167,6 +167,9 @@ export function CyberCard3D({
                 {swapSource === 'human' ? '己换' : '敌换'}
               </span>
             )}
+            {!isBlank && card?.isDoublePink && (
+              <span className="px-card-double-pink-badge">x2粉</span>
+            )}
             <span className="px-card-suit-bar" />
             <span className="px-card-pips">
               <i />

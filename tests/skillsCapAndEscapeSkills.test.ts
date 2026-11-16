@@ -63,7 +63,7 @@ describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能'
 
     assert.equal(ESCAPE_ROUTE_NODES[1].signatureSkillId, 'siphon-cache');
     assert.equal(ESCAPE_ROUTE_NODES[2].signatureSkillId, 'cold-freq-lock');
-    assert.equal(ESCAPE_ROUTE_NODES[3].signatureSkillId, 'phantom-shroud');
+    assert.equal(ESCAPE_ROUTE_NODES[3].signatureSkillId, 'pink-mirage');
     assert.equal(ESCAPE_ROUTE_NODES[4].signatureSkillId, 'gate-minefield');
   });
 

@@ -34,7 +34,7 @@ export interface EscapeRouteNode {
   signatureSkillId?: OpponentSignatureSkillId;
   signatureSkillName?: string;
   signatureSkillDesc?: string;
-  specialCheatSkillId?: 'crown-ace' | 'null-erase';
+  specialCheatSkillId?: 'crown-ace' | 'null-erase' | 'pink-double';
   specialCheatSkillName?: string;
   specialCheatSkillDesc?: string;
   rewardSkillChoices?: string[];
@@ -167,14 +167,17 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     title: '黑市频谱暗道',
     sector: '深层暗巷 // 多线交火带',
     opponentName: '霓影·绯夜',
-    opponentSubtitle: '黑市频谱掮客 · 擅长换牌心理战',
+    opponentSubtitle: '霓虹心前同事「粉红软软龙」 · 粉曜迷彩 + 双粉映象',
     opponentChips: 900,
     difficulty: 'standard',
     accentColor: '#ff2e88',
-    signatureSkillId: 'phantom-shroud',
-    signatureSkillName: '伪影迷雾',
-    signatureSkillDesc: '每手首次换牌或翻牌时隐藏动作槽位与花色日志细节。',
-    rewardSkillChoices: ['zero-day-peek', 'phantom-swap'],
+    signatureSkillId: 'pink-mirage',
+    signatureSkillName: '粉曜迷彩',
+    signatureSkillDesc: '被动干扰：摊牌前场上所有明牌的花色都会显示为粉色。',
+    specialCheatSkillId: 'pink-double',
+    specialCheatSkillName: '双粉映象',
+    specialCheatSkillDesc: '与 +1/-1/反色同级的作弊技：对手中 1 张粉色明牌使用，使其在结算时算作两张粉色牌。',
+    rewardSkillChoices: ['pink-double', 'zero-day-peek', 'phantom-swap'],
     pos: { x: 576, y: 142 },
     escapePath: [
       { x: 576, y: 142 },

@@ -5,8 +5,10 @@ import {
   MUTE_DECOY_THOUGHT_POOL,
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
+  SEC03_CHARACTER_DOSSIER,
   SEC01_EXPRESSION_PATHS,
   SEC02_EXPRESSION_PATHS,
+  SEC03_EXPRESSION_PATHS,
   STORY_CHARACTER_DOSSIERS,
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
@@ -14,6 +16,7 @@ import {
   pickMuteActionThought,
   resolveSec01Sprite,
   resolveSec02Sprite,
+  resolveSec03Sprite,
 } from '../src/engine/storyCharacters.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
@@ -27,6 +30,8 @@ import {
   createDeck,
   createInitialState,
   formatTamperLabel,
+  getDisplayCardForTable,
+  getRemainingSuitStats,
   getVisibleBoardCard,
   getVisibleHandCard,
   getVisiblePlayerChips,
@@ -284,5 +289,180 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(afterScan.result?.reason, 'scan-caught');
     assert.equal(afterScan.result?.winner, 'human');
     assert.ok(afterScan.players.ai.sealedSkills.includes('null-erase'));
+  });
+
+  it('replaces SEC-03 with 「霓影·绯夜 // 粉红软软龙」, Neon Heart colleague lore, and 6 expressions', () => {
+    assert.equal(SEC03_CHARACTER_DOSSIER.name, '霓影·绯夜');
+    assert.equal(SEC03_CHARACTER_DOSSIER.codename, '粉红软软龙');
+    assert.equal(SEC03_CHARACTER_DOSSIER.expressionCount, 6);
+    assert.ok(SEC03_CHARACTER_DOSSIER.personality.includes('霓虹心'));
+    assert.ok(SEC03_CHARACTER_DOSSIER.personality.includes('脸盲'));
+    assert.ok(
+      SEC03_CHARACTER_DOSSIER.personality.includes('假小子') ||
+        SEC03_CHARACTER_DOSSIER.personality.includes('大大咧咧')
+    );
+    assert.ok(
+      SEC03_CHARACTER_DOSSIER.personality.includes('身体接触') ||
+        SEC03_CHARACTER_DOSSIER.traits.some((t) => t.description.includes('身体接触'))
+    );
+    assert.ok((SEC03_CHARACTER_DOSSIER.voice?.samples.length ?? 0) >= 4);
+
+    for (const expr of CONTRACT_EXPRESSIONS) {
+      assert.equal(resolveSec03Sprite(expr), `./assets/story/sec03/${expr}.webp`);
+      assert.equal(
+        SEC03_CHARACTER_DOSSIER.variants[`witchform:${expr}`],
+        SEC03_EXPRESSION_PATHS[expr]
+      );
+      assert.equal(
+        SEC03_CHARACTER_DOSSIER.variants[`custom:${expr}`],
+        SEC03_EXPRESSION_PATHS[expr]
+      );
+    }
+
+    assert.equal(getStoryCharacterByEscapeNode(3)?.id, SEC03_CHARACTER_DOSSIER.id);
+    const sec03 = ESCAPE_ROUTE_NODES[3];
+    assert.equal(sec03.opponentName, '霓影·绯夜');
+    assert.equal(sec03.signatureSkillId, 'pink-mirage');
+    assert.equal(sec03.specialCheatSkillId, 'pink-double');
+
+    const wbRes = worldbookContext('霓虹心 粉红软软龙 霓影·绯夜', builtinWorldbook(), 4000);
+    assert.ok(wbRes.text.includes('霓虹心'));
+  });
+
+  it('applies pink-mirage (Option 1) to display all open cards as Pink before showdown without leaking Black suits', () => {
+    const full = createDeck();
+    const pick = (rank: number, suit: 'B' | 'P', copy: 0 | 1 = 0) =>
+      full.find((c) => c.rank === rank && c.suit === suit && (c.copy ?? 0) === copy)!;
+
+    const blackCard = pick(9, 'B', 0);
+    const blankCard = { ...pick(4, 'B', 0), isBlank: true };
+
+    // Open card in play -> visually Pink; private card or showdown -> keeps real Black; blank stays blank
+    const maskedOpen = getDisplayCardForTable(blackCard, {
+      isOpen: true,
+      signatureSkill: 'pink-mirage',
+      revealAll: false,
+    });
+    assert.equal(maskedOpen.suit, 'P');
+
+    const privateCard = getDisplayCardForTable(blackCard, {
+      isOpen: false,
+      signatureSkill: 'pink-mirage',
+      revealAll: false,
+    });
+    assert.equal(privateCard.suit, 'B');
+
+    const showdownCard = getDisplayCardForTable(blackCard, {
+      isOpen: true,
+      signatureSkill: 'pink-mirage',
+      revealAll: true,
+    });
+    assert.equal(showdownCard.suit, 'B');
+
+    const maskedBlank = getDisplayCardForTable(blankCard, {
+      isOpen: true,
+      signatureSkill: 'pink-mirage',
+      revealAll: false,
+    });
+    assert.equal(maskedBlank.isBlank, true);
+
+    // Remaining suit tracker under pink-mirage treats all 6 initial open cards as Pink (seenBlack = 0)
+    const state = createInitialState({
+      opponentName: '霓影·绯夜',
+      opponentSignatureSkill: 'pink-mirage',
+      deckOverride: [
+        pick(10, 'B', 0), pick(8, 'B', 0), pick(4, 'B', 0),
+        pick(3, 'B', 0), pick(12, 'B', 0), pick(5, 'B', 0),
+        pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
+      ],
+    });
+    const stats = getRemainingSuitStats(state, 'human');
+    assert.equal(stats.blackLeft, 26);
+    assert.equal(stats.pinkLeft, 20);
+  });
+
+  it('executes pink-double (Option A) on Pink open card only, counts as 2 Pink cards for Flush without creating a pair, and seals on scan', () => {
+    const sk = getSkillById('pink-double');
+    assert.ok(sk);
+    assert.equal(getSkillGroup('pink-double'), 'cheat');
+
+    const full = createDeck();
+    const pick = (rank: number, suit: 'B' | 'P', copy: 0 | 1 = 0) =>
+      full.find((c) => c.rank === rank && c.suit === suit && (c.copy ?? 0) === copy)!;
+
+    // Option A Flush test: 4 real Pink cards (1 doubled) + 1 Black card = 5 Pink count -> Flush!
+    const flushWithDouble = evaluateSevenCards([
+      { ...pick(14, 'P', 0), isDoublePink: true },
+      pick(11, 'P', 0),
+      pick(8, 'P', 0),
+      pick(4, 'P', 0),
+      pick(13, 'B', 0),
+      pick(6, 'B', 0),
+      pick(2, 'B', 0),
+    ]);
+    assert.equal(flushWithDouble.categoryKey, 'flush');
+
+    // Option A non-duplication check: pink-double on Ace of Pink does NOT invent a Pair of Aces
+    const noPhantomPair = evaluateSevenCards([
+      { ...pick(14, 'P', 0), isDoublePink: true },
+      pick(11, 'P', 0),
+      pick(7, 'P', 0),
+      pick(8, 'B', 0),
+      pick(5, 'B', 0),
+      pick(2, 'B', 0),
+      pick(4, 'B', 1),
+    ]);
+    assert.equal(noPhantomPair.categoryKey, 'high-card');
+
+    let state = createInitialState({
+      opponentName: '霓影·绯夜',
+      chips: { human: 900, ai: 900 },
+      opponentSignatureSkill: 'pink-mirage',
+      aiSpecialCheatSkill: 'pink-double',
+      playerCheatSkills: ['plus-one', 'minus-one', 'pink-double'],
+      deckOverride: [
+        pick(10, 'B', 0), pick(9, 'P', 0), pick(4, 'B', 0),
+        pick(3, 'P', 0), pick(12, 'B', 0), pick(5, 'B', 0),
+        pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
+      ],
+    });
+    // Human cannot use pink-double on index 0 (real Black card, even though pink-mirage shows it Pink)
+    state = { ...state, currentTurn: 'human' };
+    assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'pink-double' }), false);
+    // Human CAN use pink-double on index 1 (real Pink 9P)
+    const humanDoubleAct = { type: 'hack' as const, handIndex: 1, skill: 'pink-double' as const };
+    assert.equal(isActionLegal(state, humanDoubleAct), true);
+
+    const afterHumanDouble = applyAction(state, humanDoubleAct);
+    assert.equal(afterHumanDouble.players.human.hand[1].card.isDoublePink, true);
+    assert.equal(afterHumanDouble.players.human.hand[1].originalCard?.suit, 'P');
+    assert.deepEqual(afterHumanDouble.players.human.hand[1].tamperedBy, ['pink-double']);
+    assert.equal(
+      isCardTamperedFromOriginal(
+        afterHumanDouble.players.human.hand[1].card,
+        afterHumanDouble.players.human.hand[1].originalCard
+      ),
+      true
+    );
+    assert.equal(
+      formatTamperLabel(
+        afterHumanDouble.players.human.hand[1].card,
+        afterHumanDouble.players.human.hand[1].originalCard
+      ),
+      '原:粉9'
+    );
+    assert.equal(afterHumanDouble.usedHackThisTurn, true);
+    assert.equal(afterHumanDouble.usedProtocolSkillThisHand, false);
+    assert.equal(getVisibleHandCard(afterHumanDouble.players.human.hand[1], 'ai', 'human', false).isDoublePink, undefined);
+    assert.equal(getVisiblePlayerChips(afterHumanDouble, 'human', 'ai'), 890);
+
+    // Hand off turn to AI and scan human hand[1] -> catches pink-double and seals it
+    const aiTurnState = applyAction(afterHumanDouble, { type: 'flip', boardIndex: 0 });
+    assert.equal(aiTurnState.currentTurn, 'ai');
+    const afterAiScan = applyAction(aiTurnState, { type: 'scan', targetKind: 'hand', targetIndex: 1 });
+    assert.equal(afterAiScan.phase, 'showdown');
+    assert.equal(afterAiScan.result?.reason, 'scan-caught');
+    assert.equal(afterAiScan.result?.winner, 'ai');
+    assert.ok(afterAiScan.players.human.sealedSkills.includes('pink-double'));
   });
 });

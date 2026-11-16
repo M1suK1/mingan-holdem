@@ -1836,6 +1836,18 @@ button:disabled {
   border: 1px solid var(--neon-pink);
 }
 
+.px-card-double-pink-badge {
+  padding: 1px 3px;
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  line-height: 1;
+  background: rgba(255, 46, 136, 0.28);
+  color: #ff99cc;
+  border: 1px solid rgba(255, 46, 136, 0.85);
+  text-shadow: none;
+  flex-shrink: 0;
+}
+
 .px-card-3d.is-scan-target {
   cursor: crosshair !important;
   animation: lcScanTargetPulse 0.85s ease-in-out infinite;
@@ -4811,6 +4823,11 @@ button:disabled {
 .lc-opp-portrait-img.is-sec02-framing {
   object-fit: cover;
   object-position: 49% 6%;
+}
+
+.lc-opp-portrait-img.is-sec03-framing {
+  object-fit: cover;
+  object-position: 45% 7%;
 }
 
 .lc-hack-btn.is-cold-cut,
