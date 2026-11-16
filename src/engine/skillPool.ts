@@ -58,10 +58,63 @@ export function resolvePursuerStrategyProfile(
   return { playStyle, cheatProfile };
 }
 
+export const MAX_EXTRA_SKILLS = 3;
+
+export function needsSkillReplacement(currentSkills: string[], newSkillId: string): boolean {
+  if (!newSkillId) return false;
+  if (currentSkills.includes(newSkillId)) return false;
+  return currentSkills.length >= MAX_EXTRA_SKILLS;
+}
+
+export function equipExtraSkill(
+  currentSkills: string[],
+  newSkillId: string,
+  replaceSlotIndex?: number
+): string[] {
+  const cleanCurrent = currentSkills.slice(0, MAX_EXTRA_SKILLS);
+  if (!newSkillId || cleanCurrent.includes(newSkillId)) {
+    return cleanCurrent;
+  }
+  if (cleanCurrent.length < MAX_EXTRA_SKILLS) {
+    return [...cleanCurrent, newSkillId];
+  }
+  if (
+    typeof replaceSlotIndex === 'number' &&
+    Number.isInteger(replaceSlotIndex) &&
+    replaceSlotIndex >= 0 &&
+    replaceSlotIndex < MAX_EXTRA_SKILLS
+  ) {
+    const next = [...cleanCurrent];
+    next[replaceSlotIndex] = newSkillId;
+    return next;
+  }
+  return cleanCurrent;
+}
+
 /**
- * 黑域协议技能池（已实装 9 项可掠夺协议技能：6 项主动每局限1次 + 3 项永久被动，后续仍可继续扩展）。
+ * 黑域协议技能池（已实装 11 项可掠夺协议技能，最多同时装备 3 项，超限需替换）。
  */
 export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
+  {
+    id: 'siphon-cache',
+    name: '算力虹吸',
+    category: 'passive',
+    summary: '触发被动：每手己方首次主动加注成功时，额外从对手吸取 20 点算力转移至己方终端。',
+    costHint: 0,
+    targetMode: 'passive',
+    implemented: true,
+    tags: ['触发被动', '算力掠夺'],
+  },
+  {
+    id: 'cold-freq-lock',
+    name: '冷频封锁',
+    category: 'protocol',
+    summary: '预支 45 算力对对端终端执行频率冻结，随机禁用对手本手 1 项基础黑客改牌技能。',
+    costHint: 45,
+    targetMode: 'instant',
+    implemented: true,
+    tags: ['主动·每局限1次', '封锁改牌'],
+  },
   {
     id: 'ghost-packet',
     name: '幽灵封包',

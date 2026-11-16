@@ -1,4 +1,5 @@
-import type { AiDifficulty } from './types.ts';
+import { MAX_EXTRA_SKILLS, equipExtraSkill } from './skillPool.ts';
+import type { AiDifficulty, OpponentSignatureSkillId } from './types.ts';
 
 export interface EscapePoint {
   x: number;
@@ -24,6 +25,10 @@ export interface EscapeRouteNode {
   opponentChips: number;
   difficulty: Exclude<AiDifficulty, 'auto'>;
   accentColor: string;
+  signatureSkillId?: OpponentSignatureSkillId;
+  signatureSkillName?: string;
+  signatureSkillDesc?: string;
+  rewardSkillChoices?: string[];
   pos: EscapePoint;
   escapePath: EscapePoint[];
   barricadeWalls: EscapeWallSegment[];
@@ -40,6 +45,7 @@ export interface EscapeMapProgress {
   highestUnlockedIndex: number;
   clearedIndices: number[];
   revealedWallIndices: number[];
+  equippedSkills: string[];
   pendingTransition: EscapeTransition | null;
   escapedReality: boolean;
 }
@@ -59,6 +65,7 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     opponentChips: 400,
     difficulty: 'rookie',
     accentColor: '#00f0ff',
+    rewardSkillChoices: ['ghost-packet', 'trace-scramble'],
     pos: { x: 88, y: 230 },
     escapePath: [
       { x: 88, y: 230 },
@@ -86,6 +93,10 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     opponentChips: 600,
     difficulty: 'rookie',
     accentColor: '#ffb020',
+    signatureSkillId: 'siphon-cache',
+    signatureSkillName: '算力虹吸',
+    signatureSkillDesc: '每手首次主动加注成功时，额外从玩家吸取 25 算力。',
+    rewardSkillChoices: ['siphon-cache', 'overclock-bluff'],
     pos: { x: 254, y: 132 },
     escapePath: [
       { x: 254, y: 132 },
@@ -113,6 +124,10 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     opponentChips: 750,
     difficulty: 'standard',
     accentColor: '#38bdf8',
+    signatureSkillId: 'cold-freq-lock',
+    signatureSkillName: '冷频封锁',
+    signatureSkillDesc: '每手开局随机冻结玩家 1 项基础改牌技（+1 / -1 / 反色）。',
+    rewardSkillChoices: ['cold-freq-lock', 'ice-firewall'],
     pos: { x: 416, y: 286 },
     escapePath: [
       { x: 416, y: 286 },
@@ -140,6 +155,10 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     opponentChips: 900,
     difficulty: 'standard',
     accentColor: '#ff2e88',
+    signatureSkillId: 'phantom-shroud',
+    signatureSkillName: '伪影迷雾',
+    signatureSkillDesc: '每手首次换牌或翻牌时隐藏动作槽位与花色日志细节。',
+    rewardSkillChoices: ['zero-day-peek', 'phantom-swap'],
     pos: { x: 576, y: 142 },
     escapePath: [
       { x: 576, y: 142 },
@@ -167,6 +186,10 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     opponentChips: 1000,
     difficulty: 'master',
     accentColor: '#ff4757',
+    signatureSkillId: 'gate-minefield',
+    signatureSkillName: '闸门雷区',
+    signatureSkillDesc: '公共暗牌中潜藏 3 处算力清零陷阱，翻开或换入踩雷将立刻触发熔断。',
+    rewardSkillChoices: ['parity-spoof', 'mirror-checksum'],
     pos: { x: 736, y: 272 },
     escapePath: [
       { x: 736, y: 272 },
@@ -208,8 +231,20 @@ export function createInitialEscapeProgress(): EscapeMapProgress {
     highestUnlockedIndex: 0,
     clearedIndices: [],
     revealedWallIndices: [],
+    equippedSkills: [],
     pendingTransition: null,
     escapedReality: false,
+  };
+}
+
+export function claimEscapeNodeSkill(
+  progress: EscapeMapProgress,
+  skillId: string,
+  replaceSlotIndex?: number
+): EscapeMapProgress {
+  return {
+    ...progress,
+    equippedSkills: equipExtraSkill(progress.equippedSkills, skillId, replaceSlotIndex),
   };
 }
 
@@ -307,6 +342,12 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
       ).sort((a, b) => a - b)
     : [];
 
+  const equippedSkills = Array.isArray(obj.equippedSkills)
+    ? Array.from(
+        new Set(obj.equippedSkills.filter((s): s is string => typeof s === 'string' && s.length > 0))
+      ).slice(0, MAX_EXTRA_SKILLS)
+    : [];
+
   const maxClearedNext = clearedIndices.length > 0 ? Math.max(...clearedIndices) + 1 : 0;
   const rawHighest =
     typeof obj.highestUnlockedIndex === 'number' && Number.isInteger(obj.highestUnlockedIndex)
@@ -342,6 +383,7 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
     highestUnlockedIndex,
     clearedIndices,
     revealedWallIndices,
+    equippedSkills,
     pendingTransition,
     escapedReality: Boolean(obj.escapedReality) && highestUnlockedIndex >= MAX_NODE_INDEX,
   };

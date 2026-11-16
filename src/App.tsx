@@ -67,10 +67,14 @@ import {
   claimVictoryLoot,
 } from './engine/campaign.ts';
 import {
+  MAX_EXTRA_SKILLS,
   PLAY_STYLE_META,
   CHEAT_PROFILE_META,
+  SKILL_POOL_REGISTRY,
   buildPursuerDossier,
+  equipExtraSkill,
   getSkillById,
+  needsSkillReplacement,
   resolvePursuerStrategyProfile,
 } from './engine/skillPool.ts';
 import {
@@ -140,6 +144,7 @@ import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
 import {
   ESCAPE_ROUTE_NODES,
   canEnterEscapeNode,
+  claimEscapeNodeSkill,
   completeEscapeTransition,
   loadEscapeProgress,
   markEscapeNodeCleared,
@@ -195,6 +200,7 @@ const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.ts
 const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
 const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.tsx'));
 const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
+const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
@@ -388,9 +394,16 @@ export function App() {
       config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
       chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
       opponentName: initNode.opponentName,
-      playerAcquiredSkills: loadCampaignState().acquiredSkills,
+      opponentSignatureSkill: initNode.signatureSkillId,
+      playerAcquiredSkills: initEsc.equippedSkills,
     });
   });
+  const [pendingSkillClaim, setPendingSkillClaim] = useState<{
+    title: string;
+    subtitle: string;
+    choices: string[];
+    clearedNodeIndex?: number;
+  } | null>(null);
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
@@ -1659,17 +1672,29 @@ export function App() {
         const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
         if (!escapeClearQueuedForMatchRef.current) {
           escapeClearQueuedForMatchRef.current = true;
+          const hasSkillLoot = Boolean(clearedNode?.rewardSkillChoices?.length);
           pushToast(
             'success',
             `突破 ${clearedNode?.code ?? '节点'}：${clearedNode?.title ?? ''}`,
-            '正在切回逃亡路线图，执行围堵转向钻缝撤离...'
+            hasSkillLoot
+              ? '正在提取敌方协议技能，选择后即切回逃亡路线图...'
+              : '正在切回逃亡路线图，执行围堵转向钻缝撤离...'
           );
           scheduleTimeout(() => {
             const latest = latestStateRef.current;
             if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
-            setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
-            setViewMode('escape-map');
-          }, 1250);
+            if (hasSkillLoot && clearedNode?.rewardSkillChoices) {
+              setPendingSkillClaim({
+                title: `击溃 ${clearedNode.opponentName} · 协议技能拆解`,
+                subtitle: `${clearedNode.code} ${clearedNode.title} 已突破！挑选 1 项额外技能（最多装备 ${MAX_EXTRA_SKILLS} 项，满额可替换）`,
+                choices: clearedNode.rewardSkillChoices,
+                clearedNodeIndex: clearedIdx,
+              });
+            } else {
+              setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
+              setViewMode('escape-map');
+            }
+          }, 1150);
         }
         return;
       }
@@ -1852,6 +1877,10 @@ export function App() {
     }
     if (state.players.human.sealedSkills.includes(skill)) {
       pushToast('error', '该黑客技能已被封印', '本局对抗中无法再次使用该篡改协议');
+      return;
+    }
+    if (state.lockedHumanHackSkill === skill) {
+      pushToast('error', '已被「冷频封锁」冻结', '对端审计协议在本手冻结了该基础改牌技能');
       return;
     }
     if (selectedHandIndex === null) {
@@ -2302,9 +2331,13 @@ export function App() {
       config: cfg,
       chips: resolvedChips,
       opponentName: resolvedOpponentName,
+      opponentSignatureSkill: activeEscNode?.signatureSkillId,
       playerAcquiredSkills: isP2pConnected
         ? []
-        : overrideAcquiredSkills ?? latestCampaignRef.current.acquiredSkills,
+        : overrideAcquiredSkills ??
+          (activeEscNode
+            ? escapeProgressRef.current.equippedSkills
+            : latestCampaignRef.current.acquiredSkills),
     });
     setState(freshState);
     if (isP2pHost) {
@@ -2340,6 +2373,7 @@ export function App() {
     }
     setTutorialActive(false);
     setEscapeProgress(latestEsc);
+    escapeProgressRef.current = latestEsc;
     setActiveEscapeNodeIndex(nodeIndex);
     activeEscapeNodeRef.current = nodeIndex;
     setViewMode('arena');
@@ -2365,6 +2399,7 @@ export function App() {
     const fresh = resetEscapeProgress();
     const firstNode = ESCAPE_ROUTE_NODES[0];
     setEscapeProgress(fresh);
+    escapeProgressRef.current = fresh;
     setActiveEscapeNodeIndex(0);
     activeEscapeNodeRef.current = 0;
     performFullReset(
@@ -2484,6 +2519,7 @@ export function App() {
         const cleared = markEscapeNodeCleared(base, idxToClear);
         const completed = completeEscapeTransition(cleared);
         setEscapeProgress(completed);
+        escapeProgressRef.current = completed;
         if (completed.escapedReality) {
           setViewMode('escape-map');
           setActiveModal({ type: 'none' });
@@ -2518,10 +2554,12 @@ export function App() {
             (a, b) => a - b
           ),
           revealedWallIndices: base.revealedWallIndices,
+          equippedSkills: base.equippedSkills,
           pendingTransition: null,
           escapedReality: false,
         };
         setEscapeProgress(jumped);
+        escapeProgressRef.current = jumped;
         setActiveEscapeNodeIndex(idx);
         activeEscapeNodeRef.current = idx;
         setTutorialActive(false);
@@ -2559,6 +2597,48 @@ export function App() {
         appendCmdLog('success', `[OK] 透视暗牌模式：${nextVal ? '开启' : '关闭'}`);
         return;
       }
+      case 'skill': {
+        const sk = getSkillById(parsed.skillId);
+        if (!sk) {
+          const validIds = SKILL_POOL_REGISTRY.map((s) => s.id).join(', ');
+          appendCmdLog('error', `[ERR] 未找到技能 "${parsed.skillId}"。可用 ID: ${validIds}`);
+          return;
+        }
+        const currEquipped =
+          activeEscapeNodeRef.current !== null
+            ? escapeProgressRef.current.equippedSkills
+            : latestCampaignRef.current.acquiredSkills;
+        if (currEquipped.includes(sk.id)) {
+          appendCmdLog('info', `[INFO] 已装备技能「${sk.name}」(${sk.id})`);
+          return;
+        }
+        if (needsSkillReplacement(currEquipped, sk.id)) {
+          setActiveModal({ type: 'none' });
+          setPendingSkillClaim({
+            title: `调试装配「${sk.name}」`,
+            subtitle: `当前额外技能已达 ${MAX_EXTRA_SKILLS}/${MAX_EXTRA_SKILLS} 上限，请选择被替换的旧槽位`,
+            choices: [sk.id],
+          });
+          appendCmdLog('info', `[OK] 槽位已满 3/3，已弹出「${sk.name}」替换选择窗`);
+          return;
+        }
+        const nextEquipped = equipExtraSkill(currEquipped, sk.id);
+        if (activeEscapeNodeRef.current !== null) {
+          setEscapeProgress((prev) => claimEscapeNodeSkill(prev, sk.id));
+        } else {
+          setCampaign((prev) => ({ ...prev, acquiredSkills: nextEquipped }));
+        }
+        setState((prev) => ({ ...prev, playerAcquiredSkills: nextEquipped }));
+        appendCmdLog('success', `[OK] 已装备额外技能「${sk.name}」（当前 ${nextEquipped.length}/3）`);
+        return;
+      }
+      case 'clearskills': {
+        setEscapeProgress((prev) => ({ ...prev, equippedSkills: [] }));
+        setCampaign((prev) => ({ ...prev, acquiredSkills: [] }));
+        setState((prev) => ({ ...prev, playerAcquiredSkills: [] }));
+        appendCmdLog('success', '[OK] 已清空当前全部额外协议技能槽 (0/3)');
+        return;
+      }
       case 'reset': {
         handleResetEscapeRoute();
         setActiveModal({ type: 'none' });
@@ -2576,6 +2656,7 @@ export function App() {
         const freshEsc = resetEscapeProgress();
         const firstNode = ESCAPE_ROUTE_NODES[0];
         setEscapeProgress(freshEsc);
+        escapeProgressRef.current = freshEsc;
         setActiveEscapeNodeIndex(0);
         activeEscapeNodeRef.current = 0;
         setViewMode('arena');
@@ -3357,11 +3438,14 @@ export function App() {
 
               const isPeeked = isHidden && state.peekedBoardIndices.includes(slot.index);
               const isFrozen = isHidden && state.frozenBoardIndices.includes(slot.index);
-              const nodeBackCode = isPeeked
-                ? `窥:${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
-                : isFrozen
-                  ? '锁槽'
-                  : `节点0${slot.index + 1}`;
+              const isConfirmedTrap = isHidden && state.confirmedTrapIndices?.includes(slot.index);
+              const nodeBackCode = isConfirmedTrap
+                ? 'TRAP!'
+                : isPeeked
+                  ? `窥:${formatSuitLabel(slot.card.suit)}${formatRank(slot.card.rank)}`
+                  : isFrozen
+                    ? '锁槽'
+                    : `节点0${slot.index + 1}`;
               const hint = canScanBoard
                 ? `点击扫描对端换出的节点 #${slot.index + 1}（预支 ${getEffectiveScanCost(state, 'human')}）`
                 : pendingSkillTargetId && isHidden
@@ -3594,6 +3678,7 @@ export function App() {
                   ] as const
                 ).map((btn) => {
                   const isSealed = human.sealedSkills.includes(btn.skill);
+                  const isColdLocked = state.lockedHumanHackSkill === btn.skill;
                   const usedThisTurn = state.usedHackThisTurn;
                   const lockedByTutorial = !tutorialCaps.allowHack;
                   const disabled =
@@ -3601,6 +3686,7 @@ export function App() {
                     !isHumanTurn ||
                     diff > 0 ||
                     isSealed ||
+                    isColdLocked ||
                     usedThisTurn ||
                     human.chips < btn.cost;
                   return (
@@ -3608,7 +3694,7 @@ export function App() {
                       key={btn.skill}
                       id={btn.id}
                       type="button"
-                      className={`lc-hack-btn ${isSealed ? 'is-sealed' : ''}`}
+                      className={`lc-hack-btn ${isSealed || isColdLocked ? 'is-sealed' : ''}`}
                       disabled={disabled}
                       onClick={() => handleExecuteHack(btn.skill)}
                       title={
@@ -3618,9 +3704,11 @@ export function App() {
                             ? '遭遇加注，请先在右侧跟注后再使用技能'
                             : isSealed
                               ? '此技能已被扫描抓获封印'
-                              : usedThisTurn
-                                ? '黑客技能每回合限用 1 次'
-                                : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
+                              : isColdLocked
+                                ? '本手已被对手「冷频封锁」冻结'
+                                : usedThisTurn
+                                  ? '黑客技能每回合限用 1 次'
+                                  : `先选中己方明牌再点此技能（预支 ${btn.cost}，每回合限 1 次）`
                       }
                     >
                       {btn.icon}
@@ -3629,11 +3717,13 @@ export function App() {
                           ? `${btn.label}`
                           : isSealed
                             ? '封印'
-                            : usedThisTurn
-                              ? '已用'
-                              : btn.label}
+                            : isColdLocked
+                              ? '冷封'
+                              : usedThisTurn
+                                ? '已用'
+                                : btn.label}
                       </span>
-                      {!lockedByTutorial && !isSealed && !usedThisTurn && (
+                      {!lockedByTutorial && !isSealed && !isColdLocked && !usedThisTurn && (
                         <span className="lc-hack-cost">{btn.cost}</span>
                       )}
                     </button>
@@ -3676,9 +3766,12 @@ export function App() {
                 </button>
               </div>
 
-              {campaign.acquiredSkills.length > 0 && (
-                <div className="lc-acquired-skill-bar" role="group" aria-label="已掠夺协议技能槽">
-                  {campaign.acquiredSkills.map((sid, sIdx) => {
+              {state.playerAcquiredSkills.length > 0 && (
+                <div className="lc-acquired-skill-bar" role="group" aria-label="已装备额外协议技能槽">
+                  <span className="lc-micro-tag cyan">
+                    额外槽 {state.playerAcquiredSkills.length}/{MAX_EXTRA_SKILLS}
+                  </span>
+                  {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
                     const isPassive = sk.targetMode === 'passive';
@@ -4529,6 +4622,68 @@ export function App() {
 
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
+        {pendingSkillClaim && (
+          <SkillLootReplaceModal
+            title={pendingSkillClaim.title}
+            subtitle={pendingSkillClaim.subtitle}
+            choices={pendingSkillClaim.choices}
+            equippedSkills={
+              activeEscapeNodeRef.current !== null
+                ? escapeProgress.equippedSkills
+                : campaign.acquiredSkills
+            }
+            onConfirm={(chosenSkillId, replaceSlotIndex) => {
+              const sk = getSkillById(chosenSkillId);
+              if (activeEscapeNodeRef.current !== null) {
+                const updatedEsc = claimEscapeNodeSkill(
+                  escapeProgressRef.current,
+                  chosenSkillId,
+                  replaceSlotIndex
+                );
+                const nextEsc =
+                  pendingSkillClaim.clearedNodeIndex !== undefined
+                    ? markEscapeNodeCleared(updatedEsc, pendingSkillClaim.clearedNodeIndex)
+                    : updatedEsc;
+                setEscapeProgress(nextEsc);
+                setState((prev) => ({
+                  ...prev,
+                  playerAcquiredSkills: nextEsc.equippedSkills,
+                }));
+                if (pendingSkillClaim.clearedNodeIndex !== undefined) {
+                  setViewMode('escape-map');
+                }
+              } else {
+                const nextSkills = equipExtraSkill(
+                  campaign.acquiredSkills,
+                  chosenSkillId,
+                  replaceSlotIndex
+                );
+                setCampaign((prev) => ({ ...prev, acquiredSkills: nextSkills }));
+                setState((prev) => ({ ...prev, playerAcquiredSkills: nextSkills }));
+              }
+              pushToast(
+                'success',
+                `已装备额外技能「${sk?.name ?? chosenSkillId}」`,
+                replaceSlotIndex !== undefined
+                  ? `已替换原槽位 #${replaceSlotIndex + 1}`
+                  : undefined
+              );
+              setPendingSkillClaim(null);
+            }}
+            onSkip={() => {
+              if (
+                activeEscapeNodeRef.current !== null &&
+                pendingSkillClaim.clearedNodeIndex !== undefined
+              ) {
+                const clearedIdx = pendingSkillClaim.clearedNodeIndex;
+                setEscapeProgress((prev) => markEscapeNodeCleared(prev, clearedIdx));
+                setViewMode('escape-map');
+              }
+              setPendingSkillClaim(null);
+            }}
+          />
+        )}
+
         {activeModal.type === 'cmd' && (
           <DebugCmdModal
             logs={cmdLogs}
@@ -4641,8 +4796,8 @@ export function App() {
                 chosen.isCore ? '警告：以本体迎战败北将触发失败结局' : '安全：当前实体可作为诱饵抵消一次失败'
               );
             }}
-            onClaimLootSkill={(skillId) => {
-              const nextCamp = claimVictoryLoot(campaign, skillId);
+            onClaimLootSkill={(skillId, replaceSlotIndex) => {
+              const nextCamp = claimVictoryLoot(campaign, skillId, replaceSlotIndex);
               setCampaign(nextCamp);
               void advanceToNextPursuerMatch(nextCamp);
             }}

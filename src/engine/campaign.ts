@@ -3,7 +3,7 @@ import {
   resolveVirtualEntityPortrait,
   type ContractCharacter,
 } from './contractCards.ts';
-import { pickLootSkillChoices } from './skillPool.ts';
+import { MAX_EXTRA_SKILLS, equipExtraSkill, pickLootSkillChoices } from './skillPool.ts';
 import type { CampaignState, PursuerDossier, VirtualEntity } from './types.ts';
 
 export const CAMPAIGN_STORAGE_KEY = 'mingan-cyber-holdem:campaign:v1';
@@ -96,7 +96,8 @@ export function resolveMatchVictory(
 
 export function claimVictoryLoot(
   campaign: CampaignState,
-  chosenSkillId?: string
+  chosenSkillId?: string,
+  replaceSlotIndex?: number
 ): CampaignState {
   const loot = campaign.pendingLoot;
   if (!loot) return campaign;
@@ -106,10 +107,9 @@ export function claimVictoryLoot(
     ...campaign.capturedEntities.filter((e) => e.id !== loot.seizedEntity.id),
   ];
 
-  const nextSkills =
-    chosenSkillId && !campaign.acquiredSkills.includes(chosenSkillId)
-      ? [...campaign.acquiredSkills, chosenSkillId]
-      : [...campaign.acquiredSkills];
+  const nextSkills = chosenSkillId
+    ? equipExtraSkill(campaign.acquiredSkills, chosenSkillId, replaceSlotIndex)
+    : campaign.acquiredSkills.slice(0, MAX_EXTRA_SKILLS);
 
   return {
     ...campaign,

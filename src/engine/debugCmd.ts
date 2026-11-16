@@ -12,6 +12,8 @@ export type ParsedDebugCommand =
   | { ok: true; cmd: 'chips'; target: PlayerId; amount: number }
   | { ok: true; cmd: 'hand'; preset: DebugHandPreset }
   | { ok: true; cmd: 'reveal' }
+  | { ok: true; cmd: 'skill'; skillId: string }
+  | { ok: true; cmd: 'clearskills' }
   | { ok: true; cmd: 'reset' }
   | { ok: true; cmd: 'resetprofile' }
   | { ok: true; cmd: 'clear' }
@@ -29,6 +31,8 @@ export const DEBUG_CHEAT_COMMANDS: DebugCommandMeta[] = [
   { syntax: 'goto <0-4>', quickCmd: 'goto 4', desc: '直接传送至指定逃亡节点牌局 (0..4)' },
   { syntax: 'chips <player|ai> <数值>', quickCmd: 'chips ai 10', desc: '直接修改己方或对手剩余算力' },
   { syntax: 'hand <quads|fullhouse|flush>', quickCmd: 'hand quads', desc: '把当前牌面改写为四条A / 葫芦 / 同花便于测试摊牌' },
+  { syntax: 'skill <技能ID>', quickCmd: 'skill siphon-cache', desc: '直接获取指定额外技能（满 3 槽自动触发替换弹窗）' },
+  { syntax: 'clearskills', quickCmd: 'clearskills', desc: '清空当前已装备的额外协议技能槽' },
   { syntax: 'reveal', quickCmd: 'reveal', desc: '开关透视模式（查看对手暗牌与未翻公共牌）' },
   { syntax: 'lose', quickCmd: 'lose', desc: '将己方算力清 0（用于测试战败与重试状态）' },
   { syntax: 'reset', quickCmd: 'reset', desc: '重置逃亡路线进度与已显形暗墙' },
@@ -59,6 +63,18 @@ export function parseDebugCommand(rawInput: string): ParsedDebugCommand {
       return { ok: true, cmd: 'next' };
     case 'reveal':
       return { ok: true, cmd: 'reveal' };
+    case 'clearskills':
+      return { ok: true, cmd: 'clearskills' };
+    case 'skill': {
+      const skillId = (parts[1] ?? '').trim().toLowerCase();
+      if (!skillId) {
+        return {
+          ok: false,
+          error: '用法: skill <技能ID>，如 skill siphon-cache / skill cold-freq-lock / skill ghost-packet',
+        };
+      }
+      return { ok: true, cmd: 'skill', skillId };
+    }
     case 'reset':
       return { ok: true, cmd: 'reset' };
     case 'resetprofile':

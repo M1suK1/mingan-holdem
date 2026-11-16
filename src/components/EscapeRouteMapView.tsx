@@ -7,6 +7,7 @@ import {
   type EscapeRouteNode,
 } from '../engine/escapeMap.ts';
 import { playSound } from '../engine/soundEngine.ts';
+import { MAX_EXTRA_SKILLS, getSkillById } from '../engine/skillPool.ts';
 import { NetrunnerBrandLogo, PixelCheckIcon, PixelLockIcon, PixelSurgeIcon } from './CyberIcons.tsx';
 
 interface EscapeRouteMapViewProps {
@@ -190,6 +191,12 @@ export default function EscapeRouteMapView({
           <div className="lc-escape-stat-pill">
             <span className="lc-escape-stat-label">突围进度</span>
             <strong className="lc-escape-stat-val">{clearedCount} / 5</strong>
+          </div>
+          <div className="lc-escape-stat-pill">
+            <span className="lc-escape-stat-label">额外技能</span>
+            <strong className="lc-escape-stat-val">
+              {progress.equippedSkills.length} / {MAX_EXTRA_SKILLS}
+            </strong>
           </div>
           <div className="lc-escape-stat-pill danger">
             <span className="lc-escape-stat-label">追兵压迫</span>
@@ -687,7 +694,16 @@ export default function EscapeRouteMapView({
                   : selectedNode.difficulty === 'standard'
                     ? '中层标准'
                     : '外围新兵'}
+                {selectedNode.signatureSkillName
+                  ? ` ｜ 敌方特技「${selectedNode.signatureSkillName}」：${selectedNode.signatureSkillDesc}`
+                  : ''}
               </p>
+              {progress.equippedSkills.length > 0 && (
+                <p className="lc-escape-brief-desc" style={{ color: '#7dd3fc' }}>
+                  当前已装备额外技能（{progress.equippedSkills.length}/{MAX_EXTRA_SKILLS}）：
+                  {progress.equippedSkills.map((id) => getSkillById(id)?.name ?? id).join(' / ')}
+                </p>
+              )}
             </div>
 
             <div className="lc-escape-brief-cta-group">

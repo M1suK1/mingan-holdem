@@ -19,6 +19,12 @@ export type PlayerId = 'human' | 'ai';
 
 export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit';
 
+export type OpponentSignatureSkillId =
+  | 'siphon-cache'
+  | 'cold-freq-lock'
+  | 'phantom-shroud'
+  | 'gate-minefield';
+
 export interface HandCard {
   card: Card;
   /** 'open' = visible to both players; 'private' = swapped-in hidden card, visible only to owner */
@@ -264,6 +270,14 @@ export interface GameState {
   usedProtocolSkillThisHand: boolean;
   peekedBoardIndices: number[];
   frozenBoardIndices: number[];
+  opponentSignatureSkill?: OpponentSignatureSkillId;
+  lockedHumanHackSkill?: HackSkillId;
+  lockedAiHackSkill?: HackSkillId;
+  siphonUsedThisHand?: { human: boolean; ai: boolean };
+  shroudUsedThisHand?: boolean;
+  trappedBoardIndices?: number[];
+  confirmedTrapIndices?: number[];
+  triggeredTrapIndex?: number;
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
   pastHands: HandRoundSummary[];
