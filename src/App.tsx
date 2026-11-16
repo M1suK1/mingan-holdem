@@ -171,9 +171,11 @@ import {
   pickSec00AiAction,
 } from './engine/sec00Tutorial.ts';
 import { resolveEcho0Sprite } from './engine/storyCharacters.ts';
+import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import TutorialOverlayBar from './components/TutorialOverlayBar.tsx';
 import Sec00TutorialOverlay from './components/Sec00TutorialOverlay.tsx';
+import { TutorialSpotlightOverlay } from './components/TutorialSpotlightOverlay.tsx';
 import { ComputePoolBar } from './components/ComputePoolBar.tsx';
 import { CyberCard3D } from './components/CyberCard3D.tsx';
 import {
@@ -406,6 +408,8 @@ export function App() {
     const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
     return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0) ? 0 : null;
   });
+  const [thoughtSpotlightActive, setThoughtSpotlightActive] = useState(false);
+  const thoughtSpotlightTimerRef = useRef<number | null>(null);
   const sec00GuideActiveRef = useRef(sec00GuideActive);
   sec00GuideActiveRef.current = sec00GuideActive;
   const sec00IntroIndexRef = useRef(sec00IntroIndex);
@@ -1185,6 +1189,16 @@ export function App() {
           contactDy,
           dropDy,
         });
+        if (next.msgKind === 'thought' && sec00GuideActiveRef.current) {
+          if (thoughtSpotlightTimerRef.current !== null) {
+            window.clearTimeout(thoughtSpotlightTimerRef.current);
+          }
+          setThoughtSpotlightActive(true);
+          thoughtSpotlightTimerRef.current = window.setTimeout(() => {
+            thoughtSpotlightTimerRef.current = null;
+            setThoughtSpotlightActive(false);
+          }, 2200);
+        }
         playSound('bubble');
 
         if (willCrush) {
@@ -1308,6 +1322,10 @@ export function App() {
 
     return () => {
       window.clearTimeout(boot);
+      if (thoughtSpotlightTimerRef.current !== null) {
+        window.clearTimeout(thoughtSpotlightTimerRef.current);
+        thoughtSpotlightTimerRef.current = null;
+      }
       for (const id of timersRef.current) {
         window.clearTimeout(id);
       }
@@ -1968,6 +1986,11 @@ export function App() {
         return;
       }
     }
+    if (thoughtSpotlightTimerRef.current !== null) {
+      window.clearTimeout(thoughtSpotlightTimerRef.current);
+      thoughtSpotlightTimerRef.current = null;
+    }
+    setThoughtSpotlightActive(false);
     cancelHoldHalfRaise();
     setSelectedHandIndex(null);
     setDraggedHandIndex(null);
@@ -2569,6 +2592,11 @@ export function App() {
     sec00GuideActiveRef.current = true;
     setSec00IntroIndex(showIntro ? 0 : null);
     sec00IntroIndexRef.current = showIntro ? 0 : null;
+    if (thoughtSpotlightTimerRef.current !== null) {
+      window.clearTimeout(thoughtSpotlightTimerRef.current);
+      thoughtSpotlightTimerRef.current = null;
+    }
+    setThoughtSpotlightActive(false);
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
     setViewMode('arena');
@@ -3244,6 +3272,38 @@ export function App() {
 
   const hasTopGuideBar = tutorialActive || sec00GuideActive;
 
+  const spotlightPlan = useMemo(
+    () =>
+      resolveTutorialSpotlightPlan({
+        viewMode,
+        hasModalOpen: activeModal.type !== 'none',
+        hasPendingSkillClaim: pendingSkillClaim !== null,
+        sec00GuideActive,
+        sec00IntroIndex,
+        sec00Guidance,
+        tutorialActive,
+        tutorialGuidance,
+        selectedHandIndex,
+        scanMode,
+        showRaiseTiers,
+        thoughtSpotlightActive,
+      }),
+    [
+      viewMode,
+      activeModal.type,
+      pendingSkillClaim,
+      sec00GuideActive,
+      sec00IntroIndex,
+      sec00Guidance,
+      tutorialActive,
+      tutorialGuidance,
+      selectedHandIndex,
+      scanMode,
+      showRaiseTiers,
+      thoughtSpotlightActive,
+    ]
+  );
+
   return (
     <div
       className={`lc-shell ${hasTopGuideBar ? 'has-tutorial-bar' : ''} ${
@@ -3337,7 +3397,7 @@ export function App() {
           {/* Centered & Aligned 3x3 Tactical Stage */}
           <main className="lc-stage-grid" aria-label="牌桌主视区">
         {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
-        <aside className="lc-pool-slot" aria-label="算力池计量栏">
+        <aside id="lc-pool-slot" className="lc-pool-slot" aria-label="算力池计量栏">
           <ComputePoolBar
             pot={state.pot}
             startingChips={state.config.startingChips}
@@ -3416,6 +3476,7 @@ export function App() {
 
         {/* COL 2, ROW 1: Enlarged Opponent Window + Layered Vertical Data Streams + Docked 3 Cards */}
         <section
+          id="lc-opponent-zone"
           className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
             isAiBankrupt ? 'is-bankrupt' : ''
           }`}
@@ -3670,7 +3731,7 @@ export function App() {
         </section>
 
         {/* COL 2, ROW 2: 4 Community Cards (Direct Flip + Click-Swap + Drag-Drop Target) */}
-        <section className="lc-hud-box lc-board-zone" aria-label="公共加密节点区">
+        <section id="lc-board-zone" className="lc-hud-box lc-board-zone" aria-label="公共加密节点区">
           <div className="lc-board-header">
             <span className="lc-board-title">
               <PixelNodesIcon size={13} />
@@ -3817,6 +3878,7 @@ export function App() {
 
         {/* COL 2, ROW 3: Player Half-Body Background Portrait + 3 Cards + Hacker & Scan Skill Bar */}
         <section
+          id="lc-player-hand-zone"
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
           style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
           aria-label="己方手牌序列区"
@@ -4103,6 +4165,7 @@ export function App() {
           aria-label="右侧通讯栏"
         >
           <section
+            id="lc-chat-panel"
             ref={chatPanelRef}
             className="lc-hud-box lc-chat-panel"
             aria-label="聊天堆积栏"
@@ -4142,6 +4205,7 @@ export function App() {
 
             {floatingBubble && (
               <div
+                id="lc-speech-bubble-active"
                 key={floatingBubble.id}
                 className={`lc-speech-bubble ${
                   floatingBubble.msgKind === 'thought' ? 'is-thought' : ''
@@ -4244,6 +4308,7 @@ export function App() {
 
                 {sec00GuideActive && sec00IntroIndex !== null && (
                   <article
+                    id="sec00-monologue-card"
                     className="lc-chat-msg human is-monologue"
                     aria-label="玩家开局自言自语"
                   >
@@ -4371,7 +4436,7 @@ export function App() {
         </aside>
 
         {/* COL 3, ROW 3: Right-Side 3 Vertically Stacked Tactical Action Boxes */}
-        <div className="lc-action-stack" role="group" aria-label="右侧战术指令栏">
+        <div id="lc-right-actions" className="lc-action-stack" role="group" aria-label="右侧战术指令栏">
           {isShowdown && state.result ? (
             <>
               {human.chips > 0 && ai.chips > 0 ? (
@@ -4773,6 +4838,8 @@ export function App() {
           </div>
         </div>
       )}
+
+      <TutorialSpotlightOverlay plan={spotlightPlan} mobileChatOpen={mobileChatOpen} />
 
       <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
 

@@ -24,7 +24,11 @@ export default function Sec00TutorialOverlay({
   if (introStepIndex !== null) {
     const step = SEC00_MONOLOGUE_STEPS[introStepIndex] ?? SEC00_MONOLOGUE_STEPS[0];
     return (
-      <section className="lc-tutorial-bar" aria-label="SEC-00 开局自言自语引导栏">
+      <section
+        id="lc-tutorial-guide-bar"
+        className="lc-tutorial-bar"
+        aria-label="SEC-00 开局自言自语引导栏"
+      >
         <div className="lc-tutorial-head">
           <div className="lc-tutorial-title-wrap">
             <span className="lc-tutorial-badge">{step.tag}</span>
@@ -57,6 +61,7 @@ export default function Sec00TutorialOverlay({
 
   return (
     <section
+      id="lc-tutorial-guide-bar"
       className={`lc-tutorial-bar ${guidance.completed ? 'is-passed' : ''}`}
       aria-label="SEC-00 教学实操引导栏"
     >
