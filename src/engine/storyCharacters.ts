@@ -12,6 +12,26 @@ export const ECHO0_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   shy: `${ECHO0_ASSET_BASE}/shy.webp`,
 };
 
+export const SEC01_ASSET_BASE = './assets/story/sec01';
+
+export const SEC01_EXPRESSION_PATHS: Record<ContractExpression, string> = {
+  calm: `${SEC01_ASSET_BASE}/calm.webp`,
+  smile: `${SEC01_ASSET_BASE}/smile.webp`,
+  surprise: `${SEC01_ASSET_BASE}/surprise.webp`,
+  sad: `${SEC01_ASSET_BASE}/sad.webp`,
+  angry: `${SEC01_ASSET_BASE}/angry.webp`,
+  shy: `${SEC01_ASSET_BASE}/shy.webp`,
+};
+
+function buildDualVariants(paths: Record<ContractExpression, string>): Record<string, string> {
+  const variants: Record<string, string> = { ...paths };
+  for (const [expr, url] of Object.entries(paths)) {
+    variants[`witchform:${expr}`] = url;
+    variants[`custom:${expr}`] = url;
+  }
+  return variants;
+}
+
 /**
  * 第一章 / Demo 女主「零回响 // ECHO-0」正式角色档案
  * 贴合全白机能 + 冰青荧光回路 + 半透明数据蝶翼 + 耳机拟态电子人形立绘。
@@ -85,11 +105,104 @@ export const ECHO0_CHARACTER_DOSSIER: ContractCharacter = {
   },
   portrait: ECHO0_EXPRESSION_PATHS.calm,
   witchPortrait: ECHO0_EXPRESSION_PATHS.calm,
-  variants: { ...ECHO0_EXPRESSION_PATHS },
+  variants: buildDualVariants(ECHO0_EXPRESSION_PATHS),
   expressionCount: 6,
   hasVoice: false,
 };
 
+/**
+ * SEC-01 底层排水巷道追捕者：「凌翡 // JADE-01」嚣张跋扈的千金大小姐档案
+ * 保留 SEC-01 专属技能「算力虹吸」(siphon-cache) 与掉落技能池不变。
+ */
+export const SEC01_CHARACTER_DOSSIER: ContractCharacter = {
+  id: 'sec01-jade-heiress',
+  fileName: 'story-sec01-dossier.json',
+  name: '凌翡',
+  codename: 'JADE-01',
+  title: '黑市财阀千金 · 金扇收割者',
+  element: '黑金翡霓系',
+  archetype: '强袭',
+  color: '#FFB020',
+  quote:
+    '连本小姐的扇风都接不住的穷鬼黑客，也敢在暗区亮底牌？算力不够就乖乖把壳层交出来吧！',
+  goal:
+    '把外围暗区当作自家游乐场猎奇搜刮稀有虚拟实体，顺便用绝对的算力落差向黑市证明自己比家族那群老顽固更懂收割规矩。',
+  appearance:
+    '身着黑金暗纹露背高开衩旗袍的财阀千金大小姐。墨黑长发中挑染高饱和翡青发丝，盘起双丸子头并以金丝缎带束起，头顶架着圆框茶色墨镜，肩挂雪白狐裘披肩，配黑蕾丝长手套、透肤黑丝与红底细高跟，手持金骨折扇回眸斜睨，神态居高临下。',
+  personality:
+    '极度嚣张跋扈、嘴硬又爱面子的财阀千金。把算力当零花钱挥霍，动辄用「算力虹吸」强抽穷鬼玩家的筹码当茶水费；一旦牌局被翻盘或遭扫描当场抓包，就会立刻炸毛恼羞甚至委屈泛泪，嘴上却死不认输。',
+  witchPersonality:
+    '当千金大小姐的自尊被底层黑客当面踩碎时，折扇猛然收拢、墨镜滑落鼻梁——不再顾及优雅仪态，不惜超频烧光算力也要把对面拆个精光。',
+  outfitDescription:
+    '黑金刺绣露背高开衩长旗袍、雪白狐裘臂挽披肩、黑蕾丝长手套、透肤黑丝、红底细高跟鞋、茶色圆框墨镜与金骨折扇。',
+  stats: {
+    magic: 78,
+    insight: 70,
+    agility: 82,
+    empathy: 32,
+  },
+  traits: [
+    {
+      id: 'sec01-siphon-tax',
+      name: '算力虹吸 // SIPHON TAX',
+      polarity: 'positive',
+      tags: ['SEC-01 专属', '加注抽税'],
+      description:
+        '秉承“和本小姐同桌就得交入场税”的霸道逻辑：每手首次主动加注成功时，额外从玩家吸取 25 算力充入自己的底池防线。',
+    },
+    {
+      id: 'sec01-heiress-arrogance',
+      name: '千金排场 // GOLDEN FAN',
+      polarity: 'positive',
+      tags: ['压迫施压', '激进试探'],
+      description:
+        '极其偏爱高调加注与炫耀式换牌，习惯用算力优势在前期逼退对手；面对弱牌试探绝不肯低头弃牌。',
+    },
+    {
+      id: 'sec01-fragile-pride',
+      name: '玻璃自尊 // PRIDE CRACK',
+      polarity: 'negative',
+      tags: ['情绪破防', '嘴硬心慌'],
+      description:
+        '从小顺风顺水、吃不得半点暗亏；一旦改牌被扫获或遭大牌反杀，表情瞬间从得意洋洋切到恼羞炸毛甚至泛泪。',
+    },
+  ],
+  voice: {
+    tone: '语调清脆骄纵带着拖长的鼻音与嗤笑，得意时像拿折扇敲着桌面发号施令，吃瘪时音调骤高、咬牙切齿。',
+    habits: [
+      '开口闭口自称“本小姐”，习惯把对手叫做“穷鬼黑客”或“乡巴佬”',
+      '每次主动加注吸到算力都会轻掩折扇发笑',
+      '一旦算力落于下风会立刻把责任推给“这破巷道信号太脏”',
+    ],
+    samples: [
+      '啧，这破排水巷道的信号味真冲……喂，对面的穷鬼，你的壳层值几个钱？本小姐勉为其难收了！',
+      '加注都跟得这么磨磨蹭蹭？按规矩先交 25 算力茶水费过来，别耽误本小姐喝下午茶。',
+      '什、什么？！你这穷酸黑客怎么可能凑出这种牌型……一定是这台终端延迟太高了，不算！',
+      '呜……算力居然被你一个底层黑客清零了？！你给我记住！本小姐早晚十倍连本带利讨回来！',
+    ],
+  },
+  portrait: SEC01_EXPRESSION_PATHS.calm,
+  witchPortrait: SEC01_EXPRESSION_PATHS.smile,
+  variants: buildDualVariants(SEC01_EXPRESSION_PATHS),
+  expressionCount: 6,
+  hasVoice: false,
+};
+
+export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
+  ECHO0_CHARACTER_DOSSIER,
+  SEC01_CHARACTER_DOSSIER,
+];
+
 export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
   return ECHO0_EXPRESSION_PATHS[expression] ?? ECHO0_EXPRESSION_PATHS.calm;
+}
+
+export function resolveSec01Sprite(expression: ContractExpression = 'calm'): string {
+  return SEC01_EXPRESSION_PATHS[expression] ?? SEC01_EXPRESSION_PATHS.calm;
+}
+
+export function getStoryCharacterByEscapeNode(nodeIndex: number | null): ContractCharacter | null {
+  if (nodeIndex === 0) return ECHO0_CHARACTER_DOSSIER;
+  if (nodeIndex === 1) return SEC01_CHARACTER_DOSSIER;
+  return null;
 }

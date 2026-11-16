@@ -161,7 +161,11 @@ import {
   isSec00ActionAllowed,
   pickSec00AiAction,
 } from './engine/sec00Tutorial.ts';
-import { resolveEcho0Sprite } from './engine/storyCharacters.ts';
+import {
+  getStoryCharacterByEscapeNode,
+  resolveEcho0Sprite,
+  resolveSec01Sprite,
+} from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
 import Sec00TutorialOverlay from './components/Sec00TutorialOverlay.tsx';
@@ -503,9 +507,17 @@ export function App() {
     },
   ]);
 
+  const activeEscapeNode =
+    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+  const activeStoryCharacter =
+    activeEscapeNode && !isP2pConnected
+      ? getStoryCharacterByEscapeNode(activeEscapeNode.index)
+      : null;
+  const effectiveCharacter = activeStoryCharacter ?? character;
+
   const dossier = useMemo(
-    () => buildPursuerDossier(character, campaign.roundIndex),
-    [character, campaign.roundIndex]
+    () => buildPursuerDossier(effectiveCharacter, campaign.roundIndex),
+    [effectiveCharacter, campaign.roundIndex]
   );
   const activePreset = useMemo(
     () => presets.find((p) => p.id === activePresetId) ?? presets[0],
@@ -1034,12 +1046,12 @@ export function App() {
   latestStateRef.current = state;
   const latestLlmRef = useRef(llmConfig);
   latestLlmRef.current = llmConfig;
-  const latestCharRef = useRef(character);
-  latestCharRef.current = character;
+  const latestCharRef = useRef(effectiveCharacter);
+  latestCharRef.current = effectiveCharacter;
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  const charNameRef = useRef(character.name);
-  charNameRef.current = character.name;
+  const charNameRef = useRef(effectiveCharacter.name);
+  charNameRef.current = effectiveCharacter.name;
 
   const effectiveAiDifficulty = useMemo(
     () => resolveEffectiveAiDifficulty(state.config.aiDifficulty, dossier.threatLevel),
@@ -1050,18 +1062,18 @@ export function App() {
       resolvePursuerStrategyProfile(
         state.config.aiPlayStyle,
         state.config.aiCheatProfile,
-        character,
+        effectiveCharacter,
         dossier
       ),
-    [state.config.aiPlayStyle, state.config.aiCheatProfile, character, dossier]
+    [state.config.aiPlayStyle, state.config.aiCheatProfile, effectiveCharacter, dossier]
   );
 
   useEffect(() => {
     agentRef.current.setStyle(state.config.aiStyle);
     agentRef.current.setDifficulty(effectiveAiDifficulty);
     agentRef.current.setStrategy(effectiveStrategy.playStyle, effectiveStrategy.cheatProfile);
-    agentRef.current.setCharacter(character);
-  }, [state.config.aiStyle, effectiveAiDifficulty, effectiveStrategy, character]);
+    agentRef.current.setCharacter(effectiveCharacter);
+  }, [state.config.aiStyle, effectiveAiDifficulty, effectiveStrategy, effectiveCharacter]);
 
   // Load Night-Sugar-Office Contract Catalog & Default Character
   useEffect(() => {
@@ -2368,13 +2380,16 @@ export function App() {
         guestReady: false,
       });
     }
+    const activeStoryChar = activeEscNode ? getStoryCharacterByEscapeNode(activeEscNode.index) : null;
     setMessages([
       {
         id: `reset-${Date.now()}`,
         sender: 'opponent',
         speaker: resolvedOpponentName,
         text: activeEscNode
-          ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
+          ? activeStoryChar?.quote
+            ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。${activeStoryChar.quote}`
+            : `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
           : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
         crushed: false,
       },
@@ -2848,7 +2863,7 @@ export function App() {
     }
 
     const res = await requestOpponentChatReply({
-      character,
+      character: effectiveCharacter,
       state: latestStateRef.current,
       llmConfig,
       chatHistory: historySnapshot,
@@ -2867,8 +2882,8 @@ export function App() {
 
   const handleReplayBubble = () => {
     const sample =
-      character.voice?.samples?.[0] ??
-      character.quote ??
+      effectiveCharacter.voice?.samples?.[0] ??
+      effectiveCharacter.quote ??
       '数据流正常，准备下一手博弈。';
     enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: sample });
   };
@@ -2968,25 +2983,28 @@ export function App() {
     (vfxTestMode === 'human-low' ||
       (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
-  const activeEscapeNode =
-    activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
   const isSec00Echo0 = activeEscapeNode?.index === 0 && !isP2pConnected;
+  const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用女主 ECHO-0 匿名伪装立绘）
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
       : isSec00Echo0
         ? resolveEcho0Sprite(activeExpression)
-        : resolveVirtualEntityPortrait(character, activeExpression);
+        : isSec01Boss
+          ? resolveSec01Sprite(activeExpression)
+          : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
       : isSec00Echo0
         ? '#00F0FF'
-        : llmConfig.overloadPersona
-          ? '#FF4757'
-          : character.color || '#FF2E88';
+        : isSec01Boss
+          ? '#FFB020'
+          : llmConfig.overloadPersona
+            ? '#FF4757'
+            : effectiveCharacter.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -3306,10 +3324,12 @@ export function App() {
             {/* Layer 2 (z:2): Character Portrait Cutout + V-Sync-Off Horizontal Tear Slices */}
             <img
               src={portraitSrc}
-              alt={`${isSec00Echo0 ? '匿名终端 [UNKNOWN_0x00]' : character.name}半身立绘`}
+              alt={`${isSec00Echo0 ? '匿名终端 [UNKNOWN_0x00]' : effectiveCharacter.name}半身立绘`}
               className={`lc-opp-portrait-img ${
                 isSec00Echo0 && !isShowdown ? 'is-echo0-disguised' : ''
-              } ${isSec00Echo0 ? 'is-echo0-framing' : ''}`}
+              } ${isSec00Echo0 ? 'is-echo0-framing' : ''} ${
+                isSec01Boss ? 'is-sec01-framing' : ''
+              }`}
               width={550}
               height={420}
             />
@@ -3322,7 +3342,7 @@ export function App() {
                   aria-hidden="true"
                   className={`lc-opp-portrait-img lc-opp-tear-slice ${s.cls} ${
                     isSec00Echo0 ? 'is-echo0-framing' : ''
-                  }`}
+                  } ${isSec01Boss ? 'is-sec01-framing' : ''}`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -4878,7 +4898,7 @@ export function App() {
           <ContractArchiveModal
             catalog={catalog}
             catalogSource={catalogSource}
-            activeCharacter={character}
+            activeCharacter={effectiveCharacter}
             isLoadingCard={isLoadingCard}
             onSelectCardFile={handleSwitchContractFile}
             onImportJsonText={handleImportJsonCard}
@@ -4889,7 +4909,7 @@ export function App() {
         {activeModal.type === 'llm' && (
           <LlmTerminalModal
             config={llmConfig}
-            character={character}
+            character={effectiveCharacter}
             dossier={dossier}
             campaign={campaign}
             state={state}

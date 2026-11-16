@@ -4,6 +4,13 @@ import {
   type ContractCardSummary,
   type ContractCharacter,
 } from './contractCards.ts';
+import { STORY_CHARACTER_DOSSIERS } from './storyCharacters.ts';
+
+function mergeStoryCards(cards: ContractCardSummary[]): ContractCardSummary[] {
+  const seen = new Set(cards.map((c) => c.fileName));
+  const extras = STORY_CHARACTER_DOSSIERS.filter((d) => !seen.has(d.fileName));
+  return [...cards, ...extras];
+}
 
 const characterCache = new Map<string, ContractCharacter>();
 let cachedCatalog: ContractCardSummary[] | null = null;
@@ -23,7 +30,7 @@ export async function fetchContractCatalog(): Promise<{
     if (res.ok) {
       const payload = (await res.json()) as { ok?: boolean; cards?: ContractCardSummary[] };
       if (payload.ok && Array.isArray(payload.cards) && payload.cards.length > 0) {
-        cachedCatalog = payload.cards;
+        cachedCatalog = mergeStoryCards(payload.cards);
         catalogSourceMode = 'api';
         return { cards: cachedCatalog, source: 'api' };
       }
@@ -38,7 +45,7 @@ export async function fetchContractCatalog(): Promise<{
     if (res.ok) {
       const payload = (await res.json()) as { ok?: boolean; cards?: ContractCardSummary[] };
       if (payload.ok && Array.isArray(payload.cards) && payload.cards.length > 0) {
-        cachedCatalog = payload.cards;
+        cachedCatalog = mergeStoryCards(payload.cards);
         catalogSourceMode = 'static';
         return { cards: cachedCatalog, source: 'static' };
       }
@@ -47,12 +54,15 @@ export async function fetchContractCatalog(): Promise<{
     // Fall through to embedded fallback
   }
 
-  cachedCatalog = [FALLBACK_CONTRACT_CHARACTER];
+  cachedCatalog = mergeStoryCards([FALLBACK_CONTRACT_CHARACTER]);
   catalogSourceMode = 'fallback';
   return { cards: cachedCatalog, source: 'fallback' };
 }
 
 export async function loadContractCharacterByFile(fileName: string): Promise<ContractCharacter> {
+  const storyMatch = STORY_CHARACTER_DOSSIERS.find((d) => d.fileName === fileName);
+  if (storyMatch) return storyMatch;
+
   const hit = characterCache.get(fileName);
   if (hit) return hit;
 
