@@ -291,9 +291,9 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.ok(afterScan.players.ai.sealedSkills.includes('null-erase'));
   });
 
-  it('replaces SEC-03 with 「霓影·绯夜 // 粉红软软龙」, Neon Heart colleague lore, and 6 expressions', () => {
-    assert.equal(SEC03_CHARACTER_DOSSIER.name, '霓影·绯夜');
-    assert.equal(SEC03_CHARACTER_DOSSIER.codename, '粉红软软龙');
+  it('replaces SEC-03 with 「粉红软软龙 // NEON-03」, Neon Heart colleague lore, and 6 expressions', () => {
+    assert.equal(SEC03_CHARACTER_DOSSIER.name, '粉红软软龙');
+    assert.equal(SEC03_CHARACTER_DOSSIER.codename, 'NEON-03');
     assert.equal(SEC03_CHARACTER_DOSSIER.expressionCount, 6);
     assert.ok(SEC03_CHARACTER_DOSSIER.personality.includes('霓虹心'));
     assert.ok(SEC03_CHARACTER_DOSSIER.personality.includes('脸盲'));
@@ -321,11 +321,11 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
 
     assert.equal(getStoryCharacterByEscapeNode(3)?.id, SEC03_CHARACTER_DOSSIER.id);
     const sec03 = ESCAPE_ROUTE_NODES[3];
-    assert.equal(sec03.opponentName, '霓影·绯夜');
+    assert.equal(sec03.opponentName, '粉红软软龙');
     assert.equal(sec03.signatureSkillId, 'pink-mirage');
     assert.equal(sec03.specialCheatSkillId, 'pink-double');
 
-    const wbRes = worldbookContext('霓虹心 粉红软软龙 霓影·绯夜', builtinWorldbook(), 4000);
+    const wbRes = worldbookContext('霓虹心 粉红软软龙', builtinWorldbook(), 4000);
     assert.ok(wbRes.text.includes('霓虹心'));
   });
 
@@ -368,7 +368,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
 
     // Remaining suit tracker under pink-mirage treats all 6 initial open cards as Pink (seenBlack = 0)
     const state = createInitialState({
-      opponentName: '霓影·绯夜',
+      opponentName: '粉红软软龙',
       opponentSignatureSkill: 'pink-mirage',
       deckOverride: [
         pick(10, 'B', 0), pick(8, 'B', 0), pick(4, 'B', 0),
@@ -415,7 +415,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(noPhantomPair.categoryKey, 'high-card');
 
     let state = createInitialState({
-      opponentName: '霓影·绯夜',
+      opponentName: '粉红软软龙',
       chips: { human: 900, ai: 900 },
       opponentSignatureSkill: 'pink-mirage',
       aiSpecialCheatSkill: 'pink-double',

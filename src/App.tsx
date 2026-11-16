@@ -1424,7 +1424,14 @@ export function App() {
     const boardSlot = state.board[evt.boardIndex];
     const handHc = state.players[evt.actor].hand[evt.handIndex];
     const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
-    const boardCard = boardSlot ? getVisibleBoardCard(boardSlot, 'human', revealAll) : undefined;
+    const rawBoardCard = boardSlot ? getVisibleBoardCard(boardSlot, 'human', revealAll) : undefined;
+    const boardCard = rawBoardCard
+      ? getDisplayCardForTable(rawBoardCard, {
+          isOpen: true,
+          signatureSkill: state.opponentSignatureSkill,
+          revealAll,
+        })
+      : undefined;
     const hideHandFace = evt.actor === 'ai' && !revealAll;
     const handCard = handHc
       ? getVisibleHandCard(handHc, 'human', evt.actor, revealAll)
@@ -1461,7 +1468,14 @@ export function App() {
         isOwnPrivate: evt.actor === 'human',
       },
     });
-  }, [state.lastAction, state.board, state.players, state.phase, state.config.revealOpponentHidden]);
+  }, [
+    state.lastAction,
+    state.board,
+    state.players,
+    state.phase,
+    state.config.revealOpponentHidden,
+    state.opponentSignatureSkill,
+  ]);
 
   useEffect(() => {
     if (!swapFlight) return;
@@ -3188,8 +3202,9 @@ export function App() {
   const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
   const isSec02Boss = activeEscapeNode?.index === 2 && !isP2pConnected;
   const isSec03Boss = activeEscapeNode?.index === 3 && !isP2pConnected;
+  const isPinkMirageActive = state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰，SEC-03 使用霓影·绯夜）
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰，SEC-03 使用粉红软软龙）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
@@ -3453,10 +3468,11 @@ export function App() {
           id="lc-opponent-zone"
           className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
             isAiBankrupt ? 'is-bankrupt' : ''
-          }`}
+          } ${isPinkMirageActive ? 'is-pink-mirage' : ''}`}
           style={{ '--char-accent': activeEscapeNode?.accentColor ?? accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
         >
+          {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
           <header className="lc-opp-topbar">
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
@@ -3711,13 +3727,18 @@ export function App() {
         </section>
 
         {/* COL 2, ROW 2: 4 Community Cards (Direct Flip + Click-Swap + Drag-Drop Target) */}
-        <section id="lc-board-zone" className="lc-hud-box lc-board-zone" aria-label="公共加密节点区">
+        <section
+          id="lc-board-zone"
+          className={`lc-hud-box lc-board-zone ${isPinkMirageActive ? 'is-pink-mirage' : ''}`}
+          aria-label="公共加密节点区"
+        >
+          {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
           <div className="lc-board-header">
             <span className="lc-board-title">
               <PixelNodesIcon size={13} />
               BOARD // 公共加密节点
             </span>
-            {state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi && (
+            {isPinkMirageActive && (
               <span className="lc-micro-tag pink">粉曜迷彩 · 明牌全粉</span>
             )}
             <span className="lc-micro-tag cyan">
@@ -3866,10 +3887,13 @@ export function App() {
         {/* COL 2, ROW 3: Player Half-Body Background Portrait + 3 Cards + Hacker & Scan Skill Bar */}
         <section
           id="lc-player-hand-zone"
-          className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''}`}
+          className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''} ${
+            isPinkMirageActive ? 'is-pink-mirage' : ''
+          }`}
           style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
           aria-label="己方手牌序列区"
         >
+          {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
           <div className="lc-player-portrait-layer" aria-hidden="true">
             <div className="lc-player-portrait-frame">
               <img
@@ -5370,14 +5394,17 @@ function FlightCardShell({
       </div>
     );
   }
-  const isPink = card.suit === 'P';
-  const rankTxt = formatRank(card.rank);
-  const hexCode = `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}`;
+  const isBlank = Boolean(card.isBlank);
+  const isPink = !isBlank && card.suit === 'P';
+  const rankTxt = isBlank ? 'NULL' : formatRank(card.rank);
+  const hexCode = isBlank
+    ? '0x00'
+    : `0x${card.rank.toString(16).toUpperCase().padStart(2, '0')}`;
   return (
     <div
-      className={`px-card-face px-card-front ${isPink ? 'suit-P' : 'suit-B'} ${
-        isOwnPrivate ? 'own-private-blink' : ''
-      }`}
+      className={`px-card-face px-card-front ${
+        isBlank ? 'is-blank-card' : isPink ? 'suit-P' : 'suit-B'
+      } ${isOwnPrivate ? 'own-private-blink' : ''}`}
     >
       <div className="px-card-hud-top">
         <span className="px-card-hex">{hexCode}</span>
@@ -5389,9 +5416,9 @@ function FlightCardShell({
       </div>
       <div className="px-card-hero-stage">
         <span
-          className={`px-card-hero-rank ${isPink ? 'rank-pink' : 'rank-cyan'} ${
-            rankTxt === '10' ? 'is-ten' : ''
-          }`}
+          className={`px-card-hero-rank ${
+            isBlank ? 'rank-blank' : isPink ? 'rank-pink' : 'rank-cyan'
+          } ${rankTxt === '10' ? 'is-ten' : ''}`}
         >
           {rankTxt}
         </span>

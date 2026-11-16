@@ -300,14 +300,14 @@ export const SEC02_CHARACTER_DOSSIER: ContractCharacter = {
 export const SEC03_CHARACTER_DOSSIER: ContractCharacter = {
   id: 'sec03-neon-dragon',
   fileName: 'story-sec03-dossier.json',
-  name: '霓影·绯夜',
-  codename: '粉红软软龙',
+  name: '粉红软软龙',
+  codename: 'NEON-03',
   title: '「霓虹心」心理评估同事 · 脸盲粉龙假小子',
   element: '绯霓幻影系',
   archetype: '强袭',
   color: '#FF2E88',
   quote: '哟新人，牌桌上一眼看过去全都是粉色的对吧？别拘束嘛——来，凑近点让姐姐看看你的眼神稳不稳！',
-  goal: '在下班后以「粉红软软龙」的马甲在黑域频谱暗道里找乐子赚外快；完全没认出对面这个被通缉的新手就是自己亲手拉进黑域的「霓虹心」同事。',
+  goal: '在下班后以「粉红软软龙」的代号在黑域频谱暗道里找乐子赚外快；完全没认出对面这个被通缉的新手就是自己亲手拉进黑域的「霓虹心」同事。',
   appearance:
     '粉青双色挑染长双马尾龙娘，头顶一对浅褐小龙角与尖耳，拖着粉红鳞片配青蓝腹甲的大号龙尾；身穿白色吊带露脐背心与敞开黑粉棒球皮夹克、挂着「霓虹心」工牌的黑色百褶短裙、白过膝袜与粉黑厚底运动鞋，单手拎着公司评估平板。',
   personality:
