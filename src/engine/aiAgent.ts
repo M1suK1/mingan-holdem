@@ -308,6 +308,52 @@ function pickSpecialCrownAceAction(
   return bestGain >= 60 ? bestAct : null;
 }
 
+function pickSpecialNullEraseAction(
+  state: GameState,
+  actorId: PlayerId
+): GameAction | null {
+  if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'null-erase') return null;
+  if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
+
+  const actor = state.players[actorId];
+  if (actor.chips < 170) return null;
+
+  const openBoard = state.board
+    .filter((b) => b.isOpen)
+    .map((b) => getVisibleBoardCard(b, actorId, false));
+  const handCards = actor.hand.map((h) => h.card);
+  const fullScore = scoreCardPotential(handCards, openBoard);
+
+  let bestIdx: number | null = null;
+  let bestScore = -Infinity;
+
+  for (let idx = 0; idx < actor.hand.length; idx += 1) {
+    const hc = actor.hand[idx];
+    if (
+      hc.visibility !== 'open' ||
+      hc.card.isBlank ||
+      (hc.tamperedBy && hc.tamperedBy.length > 0)
+    ) {
+      continue;
+    }
+    const act: GameAction = { type: 'hack', handIndex: idx, skill: 'null-erase' };
+    if (!isActionLegal(state, act)) continue;
+
+    const remaining = handCards.filter((_, i) => i !== idx);
+    const loss = fullScore - scoreCardPotential(remaining, openBoard);
+    // Prefer erasing an open card that hurts AI potential the least, while looking high-rank enough to bait swaps
+    const baitValue = hc.card.rank * 4 - loss;
+    if (baitValue > bestScore) {
+      bestScore = baitValue;
+      bestIdx = idx;
+    }
+  }
+
+  return bestIdx !== null && bestScore > -40
+    ? { type: 'hack', handIndex: bestIdx, skill: 'null-erase' }
+    : null;
+}
+
 function pickBestSwappableHandIndex(
   state: GameState,
   actorId: PlayerId,
@@ -319,8 +365,8 @@ function pickBestSwappableHandIndex(
     .filter((b) => b.isOpen)
     .map((b) => getVisibleBoardCard(b, actorId, false));
 
-  // 潜行改牌流派：若手上已有改过的明牌且仍有未锁定槽位，优先将其换入公共牌池以欺骗玩家视线
-  if (cheatProfile === 'phantom-hacker') {
+  // 潜行改牌流派 / 信息抹除设陷：若手上已有改过的明牌且仍有未锁定槽位，优先将其换入公共牌池以欺骗玩家视线
+  if (cheatProfile === 'phantom-hacker' || state.aiSpecialCheatSkill === 'null-erase') {
     const tamperedIdx = actor.hand.findIndex(
       (hc) => hc.visibility === 'open' && !hc.lockedFromSwap && Boolean(hc.tamperedBy?.length)
     );
@@ -546,6 +592,20 @@ export class LocalAiAgent implements OpponentAgent {
         };
       }
 
+      const nullEraseAct = pickSpecialNullEraseAction(state, this.playerId);
+      if (nullEraseAct && roll < 0.48) {
+        return {
+          action: nullEraseAct,
+          dialogue: buildDialogue(
+            speaker,
+            'thinking',
+            '（把这张明牌的信息全部抹掉……变成没有任何意义的废牌吧。）',
+            telemetry,
+            'smile'
+          ),
+        };
+      }
+
       const smartScan = pickSmartScanAction(
         state,
         this.playerId,
@@ -567,9 +627,9 @@ export class LocalAiAgent implements OpponentAgent {
         };
       }
 
-      // 潜行改牌流派：如果手上已有篡改过的明牌且仍有未翻开公共槽，优先将其换入公共牌池制造视野陷阱！
+      // 潜行改牌流派 / 信息抹除设陷：如果手上已有篡改过的明牌且仍有未翻开公共槽，优先将其换入公共牌池制造视野陷阱！
       if (
-        this.cheatProfile === 'phantom-hacker' &&
+        (this.cheatProfile === 'phantom-hacker' || state.aiSpecialCheatSkill === 'null-erase') &&
         diff === 0 &&
         state.phase !== 'river' &&
         hiddenCount > 0 &&

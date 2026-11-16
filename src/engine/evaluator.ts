@@ -168,23 +168,85 @@ export function evaluateFiveCards(cards: Card[]): HandEvaluation {
   };
 }
 
+function evaluateSubFiveCards(validCards: Card[]): HandEvaluation {
+  const rankMap = new Map<number, number>();
+  for (const c of validCards) {
+    rankMap.set(c.rank, (rankMap.get(c.rank) ?? 0) + 1);
+  }
+  const groups = Array.from(rankMap.entries()).sort((a, b) =>
+    b[1] !== a[1] ? b[1] - a[1] : b[0] - a[0]
+  );
+  const tiebreakers = groups.map(([r]) => r);
+  const bestFive = [...validCards].sort((a, b) => b.rank - a.rank);
+
+  if (groups[0]?.[1] === 4) {
+    return {
+      category: 8,
+      categoryKey: 'four-of-a-kind',
+      categoryName: '四条',
+      tiebreakers,
+      score: encodeBase15(8, tiebreakers),
+      bestFive,
+    };
+  }
+  if (groups[0]?.[1] === 3) {
+    return {
+      category: 4,
+      categoryKey: 'three-of-a-kind',
+      categoryName: '三条',
+      tiebreakers,
+      score: encodeBase15(4, tiebreakers),
+      bestFive,
+    };
+  }
+  if (groups[0]?.[1] === 2 && groups[1]?.[1] === 2) {
+    return {
+      category: 3,
+      categoryKey: 'two-pair',
+      categoryName: '两对',
+      tiebreakers,
+      score: encodeBase15(3, tiebreakers),
+      bestFive,
+    };
+  }
+  if (groups[0]?.[1] === 2) {
+    return {
+      category: 1,
+      categoryKey: 'one-pair',
+      categoryName: '一对',
+      tiebreakers,
+      score: encodeBase15(1, tiebreakers),
+      bestFive,
+    };
+  }
+  return {
+    category: 0,
+    categoryKey: 'high-card',
+    categoryName: validCards.length === 0 ? '全废牌' : '高牌',
+    tiebreakers: tiebreakers.length > 0 ? tiebreakers : [0],
+    score: encodeBase15(0, tiebreakers.length > 0 ? tiebreakers : [0]),
+    bestFive,
+  };
+}
+
 export function evaluateSevenCards(cards: Card[]): HandEvaluation {
-  if (cards.length < 5) {
-    throw new Error(`evaluateSevenCards expects at least 5 cards, got ${cards.length}`);
+  const validCards = cards.filter((c) => !c.isBlank);
+  if (validCards.length < 5) {
+    return evaluateSubFiveCards(validCards);
   }
   let best: HandEvaluation | null = null;
-  const n = cards.length;
+  const n = validCards.length;
   for (let i = 0; i < n - 4; i++) {
     for (let j = i + 1; j < n - 3; j++) {
       for (let k = j + 1; k < n - 2; k++) {
         for (let l = k + 1; l < n - 1; l++) {
           for (let m = l + 1; m < n; m++) {
             const candidate = evaluateFiveCards([
-              cards[i],
-              cards[j],
-              cards[k],
-              cards[l],
-              cards[m],
+              validCards[i],
+              validCards[j],
+              validCards[k],
+              validCards[l],
+              validCards[m],
             ]);
             if (!best || candidate.score > best.score) {
               best = candidate;
@@ -201,11 +263,15 @@ export function evaluateVisibleHandSummary(
   knownCards: Card[],
   hiddenCount: number
 ): VisibleHandSummary {
-  const suffix = hiddenCount > 0 ? ` (+${hiddenCount}暗牌)` : '';
-  const n = knownCards.length;
+  const validKnown = knownCards.filter((c) => !c.isBlank);
+  const blankCount = knownCards.length - validKnown.length;
+  const suffix =
+    (hiddenCount > 0 ? ` (+${hiddenCount}暗牌)` : '') +
+    (blankCount > 0 ? ` · ${blankCount}废牌` : '');
+  const n = validKnown.length;
 
   if (n >= 5) {
-    const res = evaluateSevenCards(knownCards);
+    const res = evaluateSevenCards(validKnown);
     return {
       knownCount: n,
       hiddenCount,
@@ -219,15 +285,15 @@ export function evaluateVisibleHandSummary(
     return {
       knownCount: 0,
       hiddenCount,
-      label: '全暗牌',
-      detail: `+${hiddenCount}暗牌`,
+      label: blankCount > 0 ? '全废牌' : '全暗牌',
+      detail: blankCount > 0 ? `${blankCount}废牌${hiddenCount > 0 ? ` +${hiddenCount}暗牌` : ''}` : `+${hiddenCount}暗牌`,
       category: 0,
     };
   }
 
   const rankCounts = new Map<number, number>();
   const suitCounts = new Map<string, number>();
-  for (const c of knownCards) {
+  for (const c of validKnown) {
     rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
     suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
   }

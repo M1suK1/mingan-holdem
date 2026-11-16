@@ -23,6 +23,17 @@ export const SEC01_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   shy: `${SEC01_ASSET_BASE}/shy.webp`,
 };
 
+export const SEC02_ASSET_BASE = './assets/story/sec02';
+
+export const SEC02_EXPRESSION_PATHS: Record<ContractExpression, string> = {
+  calm: `${SEC02_ASSET_BASE}/calm.webp`,
+  smile: `${SEC02_ASSET_BASE}/smile.webp`,
+  surprise: `${SEC02_ASSET_BASE}/surprise.webp`,
+  sad: `${SEC02_ASSET_BASE}/sad.webp`,
+  angry: `${SEC02_ASSET_BASE}/angry.webp`,
+  shy: `${SEC02_ASSET_BASE}/shy.webp`,
+};
+
 function buildDualVariants(paths: Record<ContractExpression, string>): Record<string, string> {
   const variants: Record<string, string> = { ...paths };
   for (const [expr, url] of Object.entries(paths)) {
@@ -196,9 +207,89 @@ export const SEC01_CHARACTER_DOSSIER: ContractCharacter = {
   hasVoice: false,
 };
 
+/**
+ * SEC-02 中继审计网关追捕者：「芙兰 // MUTE-02」黑河失声孤儿双刃猎手档案
+ * - 原本是孤儿且失声，走投无路时被黑河企业接纳并定向培养为算力猎手
+ * - 对外发言终端全部表现为乱码，唯有虚线心理活动保持正常清醒
+ */
+export const SEC02_CHARACTER_DOSSIER: ContractCharacter = {
+  id: 'sec02-mute-hunter',
+  fileName: 'story-sec02-dossier.json',
+  name: '芙兰',
+  codename: 'MUTE-02',
+  title: '黑河失声双刃猎手 · 断链行刑人',
+  element: '幽碧暗锋系',
+  archetype: '强袭',
+  color: '#38BDF8',
+  quote:
+    '（……声带和语音总线早就坏掉了，但没关系。只要挥下双刃把对方的作弊线切断，黑河就不会再丢掉我。）',
+  goal:
+    '替收留自己的黑河企业清理中继审计网关中的异常逃亡者，用「富兰克林之死」斩断敌方算力回路，确保自己作为合格猎手的存在价值。',
+  appearance:
+    '身形娇小却散发危险狂气的双刃少女。浅灰绿微卷短发斜扎着一侧小马尾，头戴黑色哥特蕾丝小礼帽，墨绿圆瞳大睁；身穿黑蓝哥特露肩蕾丝高开衩短裙与蓬松薄纱袖套、黑蕾丝过膝长袜配厚底短靴，双手各反握一柄寒光银匕。',
+  personality:
+    '原本是流落街头的失声孤儿，走投无路之际被「黑河企业」接纳并定向培养为算力猎手。因发声模块无法接入语音协议，对外弹出的对话框永远是一串无法识别的冰冷乱码；唯有她的真实心理活动清澈而敏锐——既对被丢弃抱有深层惶恐，又在挥舞双刃切割对手技能与抹除牌面信息时展现出近乎病态的专注与病娇式欢愉。',
+  witchPersonality:
+    '当双刃彻底超频挥斩时，苍白面庞上咧开近乎失控的弧度，内心却仍在安静地默数着必须完成的猎杀指标——“切掉这条线，黑河就会夸奖我吧”。',
+  outfitDescription:
+    '深蓝黑拼接哥特蕾丝挂脖短裙、黑色蕾丝帽饰、双侧薄纱灯笼袖套、黑蕾丝过膝长袜、黑色系带厚底靴、双持银色直刃短匕。',
+  stats: {
+    magic: 80,
+    insight: 86,
+    agility: 88,
+    empathy: 44,
+  },
+  traits: [
+    {
+      id: 'sec02-vocal-garble',
+      name: '失声总线 // VOCAL NULL',
+      polarity: 'negative',
+      tags: ['孤儿出身', '对话乱码'],
+      description:
+        '因先天失声且未配发语音合成补丁，她在对局中的所有对外发言都会输出为破碎乱码；唯有内心心理活动（THOUGHT）能传达真实想法。',
+    },
+    {
+      id: 'sec02-franklin-slash',
+      name: '富兰克林之死 // BLADE CUT',
+      polarity: 'positive',
+      tags: ['SEC-02 专属', '切割作弊技'],
+      description:
+        '每手开局挥舞双刃沿斜角劈开玩家 1 项作弊技能链路，伴随斩击切痕特效使该作弊技能本手彻底瘫痪。',
+    },
+    {
+      id: 'sec02-null-erase',
+      name: '信息抹除 // NULL ERASE',
+      polarity: 'positive',
+      tags: ['作弊技能', '明牌废牌'],
+      description:
+        '与 +1/-1/反色同级的特权作弊技：预支 50 算力将手中 1 张明牌的所有点数花色信息抹成「废牌」（仅己方可见），不计入牌型计算且可换入公共区误导对手。',
+    },
+  ],
+  voice: {
+    tone: '对外仅输出破碎的十六进制与方块乱码；内心独白声线轻柔细小、略带孤儿般小心翼翼的执拗与寒意。',
+    habits: [
+      '发不出声音时只会咧嘴露出略显惊悚的笑容并举起双匕',
+      '心理活动里常反覆确认“黑河交给我的任务有没有做好”',
+      '在准备抹除手牌换进公共区设陷前，心里会悄悄倒数三拍',
+    ],
+    samples: [
+      '（……咽喉发不出音节。终端又只吐出了乱码吗。算了，直接动手吧——黑河在看着呢。）',
+      '（富兰克林之死，落刃。……这一条作弊链路，已经替黑河切干净了。）',
+      '（把这张明牌的点数和花色全都抹成废牌……外面看起来还是好牌对吧？快换进去吧。）',
+      '（……输了吗。如果不被黑河需要的话，我是不是又要回到那个没有声音的雨夜了……）',
+    ],
+  },
+  portrait: SEC02_EXPRESSION_PATHS.calm,
+  witchPortrait: SEC02_EXPRESSION_PATHS.smile,
+  variants: buildDualVariants(SEC02_EXPRESSION_PATHS),
+  expressionCount: 6,
+  hasVoice: false,
+};
+
 export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
   ECHO0_CHARACTER_DOSSIER,
   SEC01_CHARACTER_DOSSIER,
+  SEC02_CHARACTER_DOSSIER,
 ];
 
 export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
@@ -209,8 +300,36 @@ export function resolveSec01Sprite(expression: ContractExpression = 'calm'): str
   return SEC01_EXPRESSION_PATHS[expression] ?? SEC01_EXPRESSION_PATHS.calm;
 }
 
+export function resolveSec02Sprite(expression: ContractExpression = 'calm'): string {
+  return SEC02_EXPRESSION_PATHS[expression] ?? SEC02_EXPRESSION_PATHS.calm;
+}
+
+export function isMuteGarbledCharacter(characterId?: string): boolean {
+  return characterId === SEC02_CHARACTER_DOSSIER.id;
+}
+
+const MUTE_GARBLE_GLYPHS = ['▓', '▒', '░', '█', '╳', '≠', '§', '0x3F', 'NULL', 'ERR'];
+
+export function formatMuteGarbledText(seedText: string): string {
+  const len = Math.max(8, Math.min(28, seedText.trim().length || 12));
+  let hash = 2166136261;
+  for (let i = 0; i < seedText.length; i += 1) {
+    hash = Math.imul(hash ^ seedText.charCodeAt(i), 16777619) >>> 0;
+  }
+  const tokens: string[] = [];
+  const count = Math.max(4, Math.min(8, Math.ceil(len / 4)));
+  for (let i = 0; i < count; i += 1) {
+    hash = Math.imul(hash ^ (i + 17), 16777619) >>> 0;
+    const g = MUTE_GARBLE_GLYPHS[hash % MUTE_GARBLE_GLYPHS.length];
+    const hex = ((hash >>> 8) & 0xff).toString(16).toUpperCase().padStart(2, '0');
+    tokens.push(i % 2 === 0 ? `${g}${g}` : `0x${hex}${g}`);
+  }
+  return `[VOCAL_ERR] ${tokens.join(' ')} // ...`;
+}
+
 export function getStoryCharacterByEscapeNode(nodeIndex: number | null): ContractCharacter | null {
   if (nodeIndex === 0) return ECHO0_CHARACTER_DOSSIER;
   if (nodeIndex === 1) return SEC01_CHARACTER_DOSSIER;
+  if (nodeIndex === 2) return SEC02_CHARACTER_DOSSIER;
   return null;
 }

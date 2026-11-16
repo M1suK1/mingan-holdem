@@ -136,7 +136,14 @@ export function getSkillGroup(skillId: string): SkillGroup {
     SKILL_POOL_REGISTRY.find((s) => s.id === skillId) ??
     BASE_CHEAT_SKILLS.find((s) => s.id === skillId);
   if (found?.skillGroup) return found.skillGroup;
-  if (skillId === 'plus-one' || skillId === 'minus-one' || skillId === 'flip-suit' || skillId === 'crown-ace' || skillId === 'parity-spoof') {
+  if (
+    skillId === 'plus-one' ||
+    skillId === 'minus-one' ||
+    skillId === 'flip-suit' ||
+    skillId === 'crown-ace' ||
+    skillId === 'parity-spoof' ||
+    skillId === 'null-erase'
+  ) {
     return 'cheat';
   }
   return 'support';
@@ -194,6 +201,17 @@ export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
     tags: ['作弊技能', '同级改牌·每回合限1次'],
   },
   {
+    id: 'null-erase',
+    name: '信息抹除',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '与 +1 / -1 / 反色同级作弊技（一轮可跨回合多次使用，每回合限 1 次）：预支 50 算力抹去己方 1 张明牌的所有信息使其变为废牌，不参与牌型计算（对端仍见原牌，可换入公共池设陷或被扫描抓获）。',
+    costHint: 50,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '信息抹除·废牌'],
+  },
+  {
     id: 'siphon-cache',
     name: '算力虹吸',
     category: 'passive',
@@ -206,14 +224,14 @@ export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
   },
   {
     id: 'cold-freq-lock',
-    name: '冷频封锁',
+    name: '富兰克林之死',
     category: 'protocol',
     skillGroup: 'support',
-    summary: '非作弊辅助：预支 45 算力对对端终端执行频率冻结，随机禁用对手本手 1 项基础作弊改牌技能。',
+    summary: '非作弊辅助：预支 45 算力挥刃切割对端终端链路，随机斩断对手本手 1 项基础作弊改牌技能。',
     costHint: 45,
     targetMode: 'instant',
     implemented: true,
-    tags: ['辅助技能', '主动·每局限1次'],
+    tags: ['辅助技能', '切割链路'],
   },
   {
     id: 'ghost-packet',

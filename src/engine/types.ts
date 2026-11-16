@@ -13,11 +13,13 @@ export interface Card {
   suit: Suit;
   rank: Rank;
   copy?: 0 | 1;
+  /** True when erased by null-erase cheat skill into a dead/blank card excluded from evaluation */
+  isBlank?: boolean;
 }
 
 export type PlayerId = 'human' | 'ai';
 
-export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit' | 'crown-ace';
+export type HackSkillId = 'plus-one' | 'minus-one' | 'flip-suit' | 'crown-ace' | 'null-erase';
 
 export type OpponentSignatureSkillId =
   | 'siphon-cache'
@@ -272,7 +274,7 @@ export interface GameState {
   peekedBoardIndices: number[];
   frozenBoardIndices: number[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase';
   lockedHumanHackSkill?: HackSkillId;
   lockedAiHackSkill?: HackSkillId;
   siphonUsedThisHand?: { human: boolean; ai: boolean };

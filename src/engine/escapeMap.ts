@@ -34,7 +34,7 @@ export interface EscapeRouteNode {
   signatureSkillId?: OpponentSignatureSkillId;
   signatureSkillName?: string;
   signatureSkillDesc?: string;
-  specialCheatSkillId?: 'crown-ace';
+  specialCheatSkillId?: 'crown-ace' | 'null-erase';
   specialCheatSkillName?: string;
   specialCheatSkillDesc?: string;
   rewardSkillChoices?: string[];
@@ -132,14 +132,17 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     code: 'SEC-02',
     title: '中继审计网关',
     sector: '灰区路由层 // 合规封锁网',
-    opponentName: '白律·赛琳',
-    opponentSubtitle: '中继网关审计官 · 稳健反扫',
+    opponentName: '芙兰',
+    opponentSubtitle: '黑河失声双刃猎手 · 富兰克林之死 + 信息抹除',
     opponentChips: 750,
     difficulty: 'standard',
     accentColor: '#38bdf8',
     signatureSkillId: 'cold-freq-lock',
-    signatureSkillName: '冷频封锁',
-    signatureSkillDesc: '每手开局随机冻结玩家 1 项基础改牌技（+1 / -1 / 反色）。',
+    signatureSkillName: '富兰克林之死',
+    signatureSkillDesc: '每手开局挥刃切割玩家 1 项作弊技能链路，被斩断的技能本手无法使用。',
+    specialCheatSkillId: 'null-erase',
+    specialCheatSkillName: '信息抹除',
+    specialCheatSkillDesc: '与 +1/-1/反色同级的作弊技：隐秘抹去手中 1 张明牌的全部信息使其变为不计入牌型的废牌。',
     rewardSkillChoices: ['cold-freq-lock', 'ice-firewall'],
     pos: { x: 416, y: 286 },
     escapePath: [

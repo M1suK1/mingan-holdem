@@ -3,10 +3,15 @@ import assert from 'node:assert/strict';
 import {
   ECHO0_CHARACTER_DOSSIER,
   SEC01_CHARACTER_DOSSIER,
+  SEC02_CHARACTER_DOSSIER,
   SEC01_EXPRESSION_PATHS,
+  SEC02_EXPRESSION_PATHS,
   STORY_CHARACTER_DOSSIERS,
+  formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
+  isMuteGarbledCharacter,
   resolveSec01Sprite,
+  resolveSec02Sprite,
 } from '../src/engine/storyCharacters.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
@@ -19,11 +24,13 @@ import {
   applyAction,
   createDeck,
   createInitialState,
+  getVisibleBoardCard,
   getVisibleHandCard,
   getVisiblePlayerChips,
   isActionLegal,
 } from '../src/engine/gameEngine.ts';
-import { getSkillById } from '../src/engine/skillPool.ts';
+import { evaluateSevenCards } from '../src/engine/evaluator.ts';
+import { getSkillById, getSkillGroup } from '../src/engine/skillPool.ts';
 
 describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小姐档案与技能保留', () => {
   it('defines SEC01_CHARACTER_DOSSIER with arrogant heiress persona, traits, voice, and 6 expressions', () => {
@@ -150,5 +157,107 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(afterScan.result?.winner, 'human');
     assert.ok(afterScan.players.ai.sealedSkills.includes('crown-ace'));
     assert.ok(!afterScan.players.ai.sealedSkills.includes('plus-one'));
+  });
+
+  it('replaces SEC-02 with mute orphan hunter 「芙兰 // MUTE-02」, renames cold-freq-lock to 富兰克林之死, and garbles speech', () => {
+    assert.equal(SEC02_CHARACTER_DOSSIER.name, '芙兰');
+    assert.equal(SEC02_CHARACTER_DOSSIER.codename, 'MUTE-02');
+    assert.equal(SEC02_CHARACTER_DOSSIER.expressionCount, 6);
+    assert.ok(SEC02_CHARACTER_DOSSIER.personality.includes('孤儿'));
+    assert.ok(SEC02_CHARACTER_DOSSIER.personality.includes('失声'));
+    assert.ok(SEC02_CHARACTER_DOSSIER.personality.includes('黑河'));
+    assert.ok(SEC02_CHARACTER_DOSSIER.traits.length >= 3);
+    assert.ok((SEC02_CHARACTER_DOSSIER.voice?.samples.length ?? 0) >= 4);
+
+    for (const expr of CONTRACT_EXPRESSIONS) {
+      assert.equal(resolveSec02Sprite(expr), `./assets/story/sec02/${expr}.webp`);
+      assert.equal(SEC02_CHARACTER_DOSSIER.variants[`witchform:${expr}`], SEC02_EXPRESSION_PATHS[expr]);
+    }
+
+    assert.equal(getStoryCharacterByEscapeNode(2)?.id, SEC02_CHARACTER_DOSSIER.id);
+    const sec02 = ESCAPE_ROUTE_NODES[2];
+    assert.equal(sec02.opponentName, '芙兰');
+    assert.equal(sec02.signatureSkillId, 'cold-freq-lock');
+    assert.equal(sec02.signatureSkillName, '富兰克林之死');
+    assert.equal(sec02.specialCheatSkillId, 'null-erase');
+    assert.equal(getSkillById('cold-freq-lock')?.name, '富兰克林之死');
+
+    assert.equal(isMuteGarbledCharacter(SEC02_CHARACTER_DOSSIER.id), true);
+    assert.equal(isMuteGarbledCharacter(SEC01_CHARACTER_DOSSIER.id), false);
+    const garbled = formatMuteGarbledText('准备收割你的算力链路');
+    assert.ok(garbled.length > 4);
+    assert.ok(!garbled.includes('准备收割你的算力链路'));
+  });
+
+  it('executes null-erase on own open hand card secretly, excludes blank cards from evaluation, and seals on scan', () => {
+    const sk = getSkillById('null-erase');
+    assert.ok(sk);
+    assert.equal(getSkillGroup('null-erase'), 'cheat');
+
+    const full = createDeck();
+    const pick = (rank: number, suit: 'B' | 'P', copy: 0 | 1 = 0) =>
+      full.find((c) => c.rank === rank && c.suit === suit && (c.copy ?? 0) === copy)!;
+
+    // 4 Aces would normally be Quads, but if one Ace is blanked (isBlank: true), only 3 Aces remain -> Trips!
+    const erasedAce = { ...pick(14, 'P', 1), isBlank: true };
+    const evalWithoutOne = evaluateSevenCards([
+      pick(14, 'B', 0),
+      pick(14, 'B', 1),
+      pick(14, 'P', 0),
+      erasedAce,
+      pick(9, 'B', 0),
+      pick(6, 'P', 0),
+      pick(2, 'B', 0),
+    ]);
+    assert.equal(evalWithoutOne.categoryKey, 'three-of-a-kind');
+
+    // Even when 3 cards are blanked leaving only 4 cards, evaluateSevenCards never throws
+    const evalPartial = evaluateSevenCards([
+      pick(13, 'B', 0),
+      pick(13, 'P', 0),
+      { ...pick(10, 'B', 0), isBlank: true },
+      { ...pick(8, 'P', 0), isBlank: true },
+      { ...pick(5, 'B', 0), isBlank: true },
+      pick(4, 'P', 0),
+      pick(2, 'B', 0),
+    ]);
+    assert.equal(evalPartial.categoryKey, 'one-pair');
+
+    let state = createInitialState({
+      opponentName: '芙兰',
+      chips: { human: 750, ai: 750 },
+      aiSpecialCheatSkill: 'null-erase',
+      deckOverride: [
+        pick(10, 'B', 0), pick(9, 'P', 0), pick(4, 'B', 0),
+        pick(14, 'P', 0), pick(12, 'B', 0), pick(5, 'B', 0),
+        pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
+      ],
+    });
+    state = { ...state, currentTurn: 'ai' };
+    const eraseAct = { type: 'hack' as const, handIndex: 0, skill: 'null-erase' as const };
+    assert.equal(isActionLegal(state, eraseAct), true);
+
+    const afterErase = applyAction(state, eraseAct);
+    assert.equal(afterErase.players.ai.hand[0].card.isBlank, true);
+    assert.equal(afterErase.players.ai.hand[0].originalCard?.rank, 14);
+    assert.deepEqual(afterErase.players.ai.hand[0].tamperedBy, ['null-erase']);
+    assert.equal(afterErase.usedHackThisTurn, true);
+    assert.equal(afterErase.usedProtocolSkillThisHand, false);
+    // Opponent still sees unmodified 14P!
+    assert.equal(getVisibleHandCard(afterErase.players.ai.hand[0], 'human', 'ai', false).isBlank, undefined);
+    assert.equal(getVisibleHandCard(afterErase.players.ai.hand[0], 'human', 'ai', false).rank, 14);
+
+    // AI swaps that erased card into board[0] -> human sees 14P on board, but real card is blanked!
+    const afterSwap = applyAction(afterErase, { type: 'swap', handIndex: 0, boardIndex: 0 });
+    assert.equal(afterSwap.board[0].card.isBlank, true);
+    assert.equal(getVisibleBoardCard(afterSwap.board[0], 'human', false).isBlank, undefined);
+    assert.equal(getVisibleBoardCard(afterSwap.board[0], 'human', false).rank, 14);
+
+    // Human scans board[0] and catches null-erase -> seals 'null-erase'
+    const afterScan = applyAction(afterSwap, { type: 'scan', targetKind: 'board', targetIndex: 0 });
+    assert.equal(afterScan.phase, 'showdown');
+    assert.equal(afterScan.result?.reason, 'scan-caught');
+    assert.equal(afterScan.result?.winner, 'human');
+    assert.ok(afterScan.players.ai.sealedSkills.includes('null-erase'));
   });
 });
