@@ -270,6 +270,44 @@ export function pickBestHackAction(
   return bestGain >= minGain ? bestAct : null;
 }
 
+function pickSpecialCrownAceAction(
+  state: GameState,
+  actorId: PlayerId
+): GameAction | null {
+  if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'crown-ace') return null;
+  if (state.usedProtocolSkillThisHand || getBetDiff(state, actorId) > 0) return null;
+
+  const actor = state.players[actorId];
+  if (actor.chips < 180) return null;
+
+  const openBoard = state.board
+    .filter((b) => b.isOpen)
+    .map((b) => getVisibleBoardCard(b, actorId, false));
+  const handCards = actor.hand.map((h) => h.card);
+  const baseScore = scoreCardPotential(handCards, openBoard);
+
+  let bestAct: GameAction | null = null;
+  let bestGain = 0;
+
+  for (let idx = 0; idx < actor.hand.length; idx += 1) {
+    const hc = actor.hand[idx];
+    if (hc.visibility !== 'open' || hc.card.rank >= 14 || (hc.tamperedBy && hc.tamperedBy.length > 0)) {
+      continue;
+    }
+    const act: GameAction = { type: 'use-skill', skillId: 'crown-ace', targetIndex: idx };
+    if (!isActionLegal(state, act)) continue;
+
+    const simHand = handCards.map((c, i) => (i === idx ? { ...c, rank: 14 as Rank } : c));
+    const gain = scoreCardPotential(simHand, openBoard) - baseScore;
+    if (gain > bestGain) {
+      bestGain = gain;
+      bestAct = act;
+    }
+  }
+
+  return bestGain >= 60 ? bestAct : null;
+}
+
 function pickBestSwappableHandIndex(
   state: GameState,
   actorId: PlayerId,
@@ -493,7 +531,21 @@ export class LocalAiAgent implements OpponentAgent {
     const lastType = state.lastAction?.type;
 
     // 1. Smart Scan & Profile-Driven Hacker Skill (non-consuming)
-    if (lastType !== 'hack' && lastType !== 'scan') {
+    if (lastType !== 'hack' && lastType !== 'scan' && lastType !== 'use-skill') {
+      const crownAceAct = pickSpecialCrownAceAction(state, this.playerId);
+      if (crownAceAct && roll < 0.55) {
+        return {
+          action: crownAceAct,
+          dialogue: buildDialogue(
+            speaker,
+            'confident',
+            '哼，连这手牌面都看不懂吗？本小姐可不会在这种杂鱼局里浪费时间。',
+            telemetry,
+            'smile'
+          ),
+        };
+      }
+
       const smartScan = pickSmartScanAction(
         state,
         this.playerId,

@@ -14,6 +14,16 @@ import {
   loadContractCharacterByFile,
 } from '../src/engine/cardRepository.ts';
 import { CONTRACT_EXPRESSIONS } from '../src/engine/contractCards.ts';
+import { builtinWorldbook, worldbookContext } from '../src/engine/worldbook.ts';
+import {
+  applyAction,
+  createDeck,
+  createInitialState,
+  getVisibleHandCard,
+  getVisiblePlayerChips,
+  isActionLegal,
+} from '../src/engine/gameEngine.ts';
+import { getSkillById } from '../src/engine/skillPool.ts';
 
 describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小姐档案与技能保留', () => {
   it('defines SEC01_CHARACTER_DOSSIER with arrogant heiress persona, traits, voice, and 6 expressions', () => {
@@ -61,5 +71,65 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
 
     const { cards } = await fetchContractCatalog();
     assert.ok(cards.some((c) => c.fileName === SEC01_CHARACTER_DOSSIER.fileName));
+  });
+
+  it('syncs Black River / BLACK BOX / Perfect Virtual Entity / ECHO-0 empathy lore into worldbook and dossiers', () => {
+    const entries = builtinWorldbook();
+    const res = worldbookContext('黑河企业 黑盒 猎杀榜 完美虚拟实体 ECHO-0 共情', entries, 4000);
+    assert.ok(res.text.includes('黑河企业'));
+    assert.ok(res.text.includes('黑盒'));
+    assert.ok(res.text.includes('完美虚拟实体'));
+    assert.ok(res.text.includes('共情'));
+
+    assert.ok(!ECHO0_CHARACTER_DOSSIER.goal.includes('原初账本'));
+    assert.ok(ECHO0_CHARACTER_DOSSIER.goal.includes('完美虚拟实体'));
+    assert.ok(ECHO0_CHARACTER_DOSSIER.personality.includes('共情'));
+
+    assert.ok(SEC01_CHARACTER_DOSSIER.personality.includes('实名'));
+    assert.ok(SEC01_CHARACTER_DOSSIER.personality.includes('没人敢赢'));
+    assert.ok(SEC01_CHARACTER_DOSSIER.traits.some((t) => t.name.includes('钦定王牌')));
+  });
+
+  it('executes Ling Fei special cheat skill crown-ace to turn an open hand card into same-suit Ace secretly', () => {
+    const skillMeta = getSkillById('crown-ace');
+    assert.ok(skillMeta);
+    assert.equal(skillMeta.name, '钦定王牌');
+    assert.equal(ESCAPE_ROUTE_NODES[1].specialCheatSkillId, 'crown-ace');
+
+    const full = createDeck();
+    const pick = (rank: number, suit: 'B' | 'P', copy: 0 | 1 = 0) =>
+      full.find((c) => c.rank === rank && c.suit === suit && (c.copy ?? 0) === copy)!;
+
+    let state = createInitialState({
+      opponentName: '凌翡',
+      chips: { human: 600, ai: 600 },
+      aiSpecialCheatSkill: 'crown-ace',
+      deckOverride: [
+        pick(10, 'B', 0), pick(9, 'P', 0), pick(4, 'B', 0),
+        pick(3, 'P', 0), pick(12, 'B', 0), pick(5, 'B', 0),
+        pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
+      ],
+    });
+    // Force AI turn with diff = 0 to test AI crown-ace
+    state = { ...state, currentTurn: 'ai' };
+    const legalAct = { type: 'use-skill' as const, skillId: 'crown-ace', targetIndex: 0 };
+    assert.equal(isActionLegal(state, legalAct), true);
+
+    const afterCheat = applyAction(state, legalAct);
+    // Card[0] was 3P -> becomes 14P (Ace of Pink), originalCard preserved as 3P
+    assert.equal(afterCheat.players.ai.hand[0].card.rank, 14);
+    assert.equal(afterCheat.players.ai.hand[0].card.suit, 'P');
+    assert.equal(afterCheat.players.ai.hand[0].originalCard?.rank, 3);
+    assert.equal(afterCheat.currentTurn, 'ai'); // Does NOT end turn
+    // Human viewer still sees unmodified 3P and unmodified chips!
+    assert.equal(getVisibleHandCard(afterCheat.players.ai.hand[0], 'human', 'ai', false).rank, 3);
+    assert.equal(getVisiblePlayerChips(afterCheat, 'ai', 'human'), 590); // 600 - 10 ante
+
+    // Human can scan and catch the crown-ace tamper!
+    const humanTurnState = applyAction(afterCheat, { type: 'flip', boardIndex: 1 });
+    const afterScan = applyAction(humanTurnState, { type: 'scan', targetKind: 'hand', targetIndex: 0 });
+    assert.equal(afterScan.phase, 'showdown');
+    assert.equal(afterScan.result?.reason, 'scan-caught');
+    assert.equal(afterScan.result?.winner, 'human');
   });
 });

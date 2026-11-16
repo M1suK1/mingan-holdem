@@ -28,6 +28,9 @@ export interface EscapeRouteNode {
   signatureSkillId?: OpponentSignatureSkillId;
   signatureSkillName?: string;
   signatureSkillDesc?: string;
+  specialCheatSkillId?: 'crown-ace';
+  specialCheatSkillName?: string;
+  specialCheatSkillDesc?: string;
   rewardSkillChoices?: string[];
   pos: EscapePoint;
   escapePath: EscapePoint[];
@@ -89,13 +92,16 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     title: '底层排水巷道',
     sector: '边缘拾荒区 // 第一追击带',
     opponentName: '凌翡',
-    opponentSubtitle: '黑市财阀嚣张千金 · 算力虹吸压迫',
+    opponentSubtitle: '实名上网的财阀千金 · 算力虹吸 + 钦定王牌',
     opponentChips: 600,
     difficulty: 'rookie',
     accentColor: '#ffb020',
     signatureSkillId: 'siphon-cache',
     signatureSkillName: '算力虹吸',
     signatureSkillDesc: '每手首次主动加注成功时，额外从玩家吸取 25 算力。',
+    specialCheatSkillId: 'crown-ace',
+    specialCheatSkillName: '钦定王牌',
+    specialCheatSkillDesc: '可挑选手中 1 张非 A 明牌直接篡改为对应花色的 A（隐藏篡改，可被扫描抓获）。',
     rewardSkillChoices: ['siphon-cache', 'overclock-bluff'],
     pos: { x: 254, y: 132 },
     escapePath: [
