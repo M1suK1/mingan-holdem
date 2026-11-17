@@ -207,7 +207,7 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     accentColor: '#ff4757',
     signatureSkillId: 'gate-minefield',
     signatureSkillName: '灼心·火符',
-    signatureSkillDesc: '公共暗牌中潜藏 3 道灼心火符，翻开或换入触符将立刻焚毁算力归零。',
+    signatureSkillDesc: '每轮在公共暗牌中随机隐藏 1 道灼心火符（双方均不可见），玩家翻开或换入触符将直接燃烧损失 100 算力。',
     specialCheatSkillId: 'mikiri-counter',
     specialCheatSkillName: '见切·燕返',
     specialCheatSkillDesc: '与 +1/-1/反色同级的作弊技：对己方 1 张未篡改明牌施放反制剑意（换入公共区依然有效），若对手扫描此牌则本小局自己直接获胜。',

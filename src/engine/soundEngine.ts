@@ -21,7 +21,8 @@ export type SoundCue =
   | 'ui-click'
   | 'charge-tick'
   | 'wall-hit'
-  | 'blade-slash';
+  | 'blade-slash'
+  | 'fire-burn';
 
 export interface SoundSettings {
   enabled: boolean;
@@ -81,6 +82,9 @@ export function actionToSoundCue(
   if (!action) return null;
   if ((action.type === 'hack' || action.type === 'use-skill') && action.actor && action.actor !== 'human') {
     return null;
+  }
+  if (action.label?.includes('灼心·火符')) {
+    return 'fire-burn';
   }
   switch (action.type) {
     case 'flip':
@@ -474,6 +478,21 @@ export function playSound(cue: SoundCue, opts?: { progress?: number }): boolean 
         type: 'square',
         gain: 0.14,
         filterHz: 900,
+      });
+      return true;
+
+    case 'fire-burn':
+      // Ignition flame whoosh + crackling embers + low burn impact
+      playNoiseSnap(ctx, out, { duration: 0.36, centerHz: 680, q: 1.2, gain: 0.28 });
+      playNoiseSnap(ctx, out, { startOffset: 0.04, duration: 0.08, centerHz: 2600, q: 1.8, gain: 0.16 });
+      playNoiseSnap(ctx, out, { startOffset: 0.14, duration: 0.09, centerHz: 3100, q: 2.0, gain: 0.14 });
+      playTone(ctx, out, {
+        duration: 0.24,
+        freqStart: 195,
+        freqEnd: 56,
+        type: 'sawtooth',
+        gain: 0.18,
+        filterHz: 520,
       });
       return true;
 

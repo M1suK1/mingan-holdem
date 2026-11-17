@@ -22,6 +22,7 @@ interface CyberCard3DProps {
   tamperLabel?: string;
   isScanTarget?: boolean;
   isScannedClean?: boolean;
+  isBurningHit?: boolean;
   actionHint?: string;
   onClick?: () => void;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
@@ -51,6 +52,7 @@ export function CyberCard3D({
   tamperLabel,
   isScanTarget = false,
   isScannedClean = false,
+  isBurningHit = false,
   actionHint,
   onClick,
   onDragStart,
@@ -80,6 +82,7 @@ export function CyberCard3D({
     isDropHover ? 'is-drop-hover' : '',
     isSwappingHidden ? 'is-swapping-hidden' : '',
     isScanTarget ? 'is-scan-target' : '',
+    isBurningHit ? 'is-burning-hit' : '',
     selected ? 'is-selected' : '',
     targetable ? 'is-targetable' : '',
   ]
@@ -133,6 +136,15 @@ export function CyberCard3D({
         }
       >
         <div className={frontClasses}>
+          {isBurningHit && (
+            <div className="px-card-burn-fx" aria-hidden="true">
+              <span className="px-burn-badge">-100 灼烧</span>
+              <span className="px-burn-spark s1" />
+              <span className="px-burn-spark s2" />
+              <span className="px-burn-spark s3" />
+              <span className="px-burn-spark s4" />
+            </div>
+          )}
           {/* Cyber Top Header Strip */}
           <div className="px-card-hud-top">
             <span className="px-card-hex">{tamperLabel ?? hexCode}</span>

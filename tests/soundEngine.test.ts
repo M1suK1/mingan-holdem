@@ -44,6 +44,18 @@ describe('soundEngine: action/showdown cue mapping, settings clamping & Node fal
       actionToSoundCue({ type: 'use-skill', actor: 'human', label: '我方 激活「富兰克林之死」' }),
       'blade-slash'
     );
+    assert.equal(
+      actionToSoundCue({ type: 'scan', actor: 'human', caught: true, label: '见切·燕返拔刀反杀' }),
+      'blade-slash'
+    );
+    assert.equal(
+      actionToSoundCue({ type: 'flip', actor: 'human', label: '触动「灼心·火符」灼烧 -100 算力！' }),
+      'fire-burn'
+    );
+    assert.equal(
+      actionToSoundCue({ type: 'swap', actor: 'human', label: '触动「灼心·火符」灼烧 -100 算力！' }),
+      'fire-burn'
+    );
   });
 
   it('maps showdown & bankrupt outcomes accurately for player vs opponent', () => {

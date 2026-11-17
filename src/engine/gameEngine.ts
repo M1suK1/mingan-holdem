@@ -398,12 +398,7 @@ function pickRandomHackToLock(
 }
 
 function pickDefaultTrappedBoardIndices(rng: () => number = Math.random): number[] {
-  const pool = [0, 1, 2, 3];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, 3).sort((a, b) => a - b);
+  return [Math.floor(rng() * 4) % 4];
 }
 
 export function createInitialState(options: CreateStateOptions = {}): GameState {
@@ -600,7 +595,6 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
     playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     opponentSignatureSkill: prev.opponentSignatureSkill,
     aiSpecialCheatSkill: prev.aiSpecialCheatSkill,
-    confirmedTrapIndices: [...(prev.confirmedTrapIndices ?? [])],
     pastHands: nextPastHands.slice(-12),
   });
 }
@@ -967,60 +961,23 @@ function autoRunoutToShowdown(state: GameState, actor: PlayerId): GameState {
   return settled;
 }
 
-function triggerGateTrapLoss(next: GameState, boardIndex: number): GameState {
-  const human = next.players.human;
-  const ai = next.players.ai;
-  next.board[boardIndex].isOpen = true;
-  next.board[boardIndex].source = 'flipped';
-  if (next.hackEscrowPot > 0) {
-    next.pot += next.hackEscrowPot;
-    next.hackEscrowPot = 0;
-  }
-  human.hiddenHackEscrow = 0;
-  ai.hiddenHackEscrow = 0;
-
-  const seizedChips = human.chips + next.pot;
-  ai.chips += seizedChips;
-  human.chips = 0;
-  next.pot = 0;
-  next.justCalledThisTurn = false;
-  next.phase = 'showdown';
+function applyBurningTalismanHit(next: GameState, boardIndex: number): number {
+  const burnLoss = Math.min(100, next.players.human.chips);
+  next.players.human.chips -= burnLoss;
+  next.players.ai.chips += burnLoss;
   next.triggeredTrapIndex = boardIndex;
   next.confirmedTrapIndices = Array.from(
     new Set([...(next.confirmedTrapIndices ?? []), boardIndex])
   ).sort((a, b) => a - b);
-
-  next.result = {
-    winner: 'ai',
-    reason: 'showdown',
-    potWon: seizedChips,
-    payouts: { human: 0, ai: seizedChips },
-  };
-  const summary = `触发「灼心·火符」陷阱（公共节点 #${boardIndex + 1}）：算力瞬间灼毁归零！`;
-  next.lastAction = {
-    id: makeEventId(),
-    type: 'showdown',
-    actor: 'ai',
-    boardIndex,
-    amount: seizedChips,
-    label: summary,
-  };
-  next.actionHistory.push({
-    id: makeEventId(),
-    handNumber: next.handNumber,
-    actor: 'system',
-    phase: 'showdown',
-    summary,
-    timestamp: Date.now(),
-  });
-  return next;
+  next.trappedBoardIndices = next.trappedBoardIndices?.filter((i) => i !== boardIndex);
+  return burnLoss;
 }
 
 function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): GameState {
   const next = cloneState(state);
-  if (actorId === 'human' && next.trappedBoardIndices?.includes(boardIndex)) {
-    return triggerGateTrapLoss(next, boardIndex);
-  }
+  const triggeredFire =
+    actorId === 'human' && Boolean(next.trappedBoardIndices?.includes(boardIndex));
+  const burnLoss = triggeredFire ? applyBurningTalismanHit(next, boardIndex) : 0;
   const slot = next.board[boardIndex];
   slot.isOpen = true;
   slot.source = 'flipped';
@@ -1040,6 +997,32 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
     next.shroudUsedThisHand = true;
   }
 
+  const fireSuffix = triggeredFire ? ` · 触动「灼心·火符」灼烧 -${burnLoss} 算力！` : '';
+  const summary = useShroud
+    ? `${actorLabel} 发动「伪影迷雾」破译了隐匿公共节点（槽位与牌面轨迹已混淆）`
+    : `${actorLabel} 破译公共节点 #${boardIndex + 1}（${cardTxt}）${fireSuffix}`;
+
+  if (triggeredFire && next.players.human.chips === 0) {
+    next.players.human.allIn = true;
+    next.actionHistory.push({
+      id: makeEventId(),
+      handNumber: next.handNumber,
+      actor: actorId,
+      phase: next.phase,
+      summary,
+      timestamp: Date.now(),
+    });
+    const settled = autoRunoutToShowdown(next, 'human');
+    if (settled.lastAction) {
+      settled.lastAction = {
+        ...settled.lastAction,
+        boardIndex,
+        label: `灼心·火符 -${burnLoss} · ${settled.lastAction.label}`,
+      };
+    }
+    return settled;
+  }
+
   if (hiddenAfter === 0) {
     next.phase = 'river';
     next.currentTurn = otherPlayer(actorId);
@@ -1050,15 +1033,13 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
     next.currentTurn = otherPlayer(actorId);
   }
 
-  const summary = useShroud
-    ? `${actorLabel} 发动「伪影迷雾」破译了隐匿公共节点（槽位与牌面轨迹已混淆）`
-    : `${actorLabel} 破译公共节点 #${boardIndex + 1}（${cardTxt}）`;
   next.lastAction = {
     id: makeEventId(),
     type: 'flip',
     actor: actorId,
     boardIndex: useShroud ? undefined : boardIndex,
     cardLabel: useShroud ? undefined : cardTxt,
+    amount: triggeredFire ? burnLoss : undefined,
     label: summary,
   };
   next.actionHistory.push({
@@ -1086,9 +1067,6 @@ function performSwap(
   boardIndex: number
 ): GameState {
   const next = cloneState(state);
-  if (actorId === 'human' && next.trappedBoardIndices?.includes(boardIndex)) {
-    return triggerGateTrapLoss(next, boardIndex);
-  }
   const actor = next.players[actorId];
   const fee = getNextSwapFee(next, actorId);
 
@@ -1099,6 +1077,10 @@ function performSwap(
   next.justCalledThisTurn = false;
   next.usedHackThisTurn = false;
   next.usedScanThisTurn = false;
+
+  const triggeredFire =
+    actorId === 'human' && Boolean(next.trappedBoardIndices?.includes(boardIndex));
+  const burnLoss = triggeredFire ? applyBurningTalismanHit(next, boardIndex) : 0;
 
   const discardedHc = actor.hand[handIndex];
   const discarded = discardedHc.card;
@@ -1131,11 +1113,12 @@ function performSwap(
   if (useShroud) {
     next.shroudUsedThisHand = true;
   }
+  const fireSuffix = triggeredFire ? ` · 触动「灼心·火符」灼烧 -${burnLoss} 算力！` : '';
   const summary = useShroud
     ? `${actorLabel} 发动「伪影迷雾」消耗 ${fee} 执行隐匿换牌（换入槽位与释放牌面已混淆）`
     : `${actorLabel} 消耗 ${fee} 覆写换牌（释放 ${discardedTxt} 置换加密节点 #${
         boardIndex + 1
-      }）`;
+      }）${fireSuffix}`;
 
   if (actor.chips === 0) {
     actor.allIn = true;
@@ -1147,7 +1130,15 @@ function performSwap(
       summary,
       timestamp: Date.now(),
     });
-    return autoRunoutToShowdown(next, actorId);
+    const settled = autoRunoutToShowdown(next, actorId);
+    if (triggeredFire && settled.lastAction) {
+      settled.lastAction = {
+        ...settled.lastAction,
+        boardIndex,
+        label: `灼心·火符 -${burnLoss} · ${settled.lastAction.label}`,
+      };
+    }
+    return settled;
   }
 
   if (hiddenAfter === 0) {

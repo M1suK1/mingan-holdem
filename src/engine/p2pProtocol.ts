@@ -161,8 +161,9 @@ export function sanitizeStateForGuest(hostState: GameState): GameState {
     return slot;
   });
 
-  // Hide host-only peeked/frozen private hints unless revealed
+  // Hide host-only peeked/frozen/trapped private hints unless revealed
   cloned.peekedBoardIndices = [];
+  cloned.trappedBoardIndices = undefined;
   if (!revealAll) {
     cloned.actionHistory = cloned.actionHistory.filter(
       (entry) => !(entry.actor === 'human' && entry.summary.includes('终端篡改'))

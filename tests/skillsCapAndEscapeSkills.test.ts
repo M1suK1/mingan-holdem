@@ -157,18 +157,28 @@ describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能'
     assert.equal(afterFlip.shroudUsedThisHand, true);
   });
 
-  it('triggers gate-minefield trap when human flips or swaps a trapped board slot and records confirmed trap', () => {
-    const base = createInitialState({
+  it('triggers gate-minefield trap (1 random slot) deducting 100 compute while conserving chips', () => {
+    const autoBase = createInitialState({
       opponentSignatureSkill: 'gate-minefield',
-      trappedBoardIndices: [0, 1, 2],
+    });
+    assert.equal(autoBase.trappedBoardIndices?.length, 1);
+
+    const base = createInitialState({
+      chips: { human: 500, ai: 500 },
+      opponentSignatureSkill: 'gate-minefield',
+      trappedBoardIndices: [1],
     });
     const humanTurn = { ...base, currentTurn: 'human' as const };
+    const beforeHumanChips = humanTurn.players.human.chips;
+    const beforeAiChips = humanTurn.players.ai.chips;
     const afterTrap = applyAction(humanTurn, { type: 'flip', boardIndex: 1 });
 
-    assert.equal(afterTrap.phase, 'showdown');
-    assert.equal(afterTrap.players.human.chips, 0);
+    assert.notEqual(afterTrap.phase, 'showdown');
+    assert.equal(afterTrap.players.human.chips, beforeHumanChips - 100);
+    assert.equal(afterTrap.players.ai.chips, beforeAiChips + 100);
     assert.equal(afterTrap.triggeredTrapIndex, 1);
     assert.equal(afterTrap.confirmedTrapIndices?.includes(1), true);
+    assert.ok(afterTrap.lastAction?.label.includes('灼心·火符'));
   });
 
   it('parses debug skill and clearskills commands cleanly', () => {

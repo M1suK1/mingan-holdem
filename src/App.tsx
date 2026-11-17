@@ -469,6 +469,10 @@ export function App() {
     'auto' | 'human-low' | 'human-bankrupt' | 'ai-low' | 'ai-bankrupt'
   >('auto');
   const [swapFlight, setSwapFlight] = useState<SwapFlightState | null>(null);
+  const [burningCardVfx, setBurningCardVfx] = useState<{
+    id: string;
+    boardIndex: number;
+  } | null>(null);
   const [scanVfx, setScanVfx] = useState<{
     id: string;
     rect: { left: number; top: number; width: number; height: number };
@@ -477,6 +481,7 @@ export function App() {
 
   const holdIntervalRef = useRef<number | null>(null);
   const lastHandledScanIdRef = useRef<string | null>(null);
+  const lastHandledBurnIdRef = useRef<string | null>(null);
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
@@ -1689,6 +1694,31 @@ export function App() {
       playSound(cue);
     }
   }, [state.lastAction]);
+
+  // Card burn VFX & toast when "灼心·火符" triggers on a flipped/swapped board slot
+  useEffect(() => {
+    const evt = state.lastAction;
+    if (
+      !evt ||
+      lastHandledBurnIdRef.current === evt.id ||
+      evt.boardIndex === undefined ||
+      !evt.label.includes('灼心·火符')
+    ) {
+      return;
+    }
+    lastHandledBurnIdRef.current = evt.id;
+    const activeId = evt.id;
+    setBurningCardVfx({ id: activeId, boardIndex: evt.boardIndex });
+    pushToast(
+      'error',
+      '灼心·火符触发！',
+      `公共节点 #${evt.boardIndex + 1} 燃起火符，损失 ${evt.amount ?? 100} 点算力`
+    );
+    const timer = window.setTimeout(() => {
+      setBurningCardVfx((curr) => (curr?.id === activeId ? null : curr));
+    }, 1350);
+    return () => window.clearTimeout(timer);
+  }, [state.lastAction, pushToast]);
 
   // Blade-Slash VFX when "富兰克林之死" severs one of player's cheat skills
   useEffect(() => {
@@ -3778,7 +3808,7 @@ export function App() {
               <span className="lc-micro-tag pink">粉曜迷彩 · 明牌全粉</span>
             )}
             {isBurningBoardActive && (
-              <span className="lc-micro-tag danger">灼心·火符 · 3处暗符</span>
+              <span className="lc-micro-tag danger">灼心·火符 · 1处暗符</span>
             )}
             <span className="lc-micro-tag cyan">
               剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}
@@ -3855,6 +3885,7 @@ export function App() {
                   tamperLabel={boardTamperLabel}
                   isScanTarget={canScanBoard}
                   isScannedClean={alreadyScannedBoard}
+                  isBurningHit={burningCardVfx?.boardIndex === slot.index}
                   justActed={Boolean(
                     !isSwappingHidden &&
                       evt &&
