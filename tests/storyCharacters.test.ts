@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ECHO0_CHARACTER_DOSSIER,
+  LIN_LONGXIN_CASUAL_SPRITE,
   MUTE_DECOY_THOUGHT_POOL,
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
@@ -20,7 +21,14 @@ import {
   resolveSec02Sprite,
   resolveSec03Sprite,
   resolveSec04Sprite,
+  resolveStoryPlayerEntity,
 } from '../src/engine/storyCharacters.ts';
+import { SEC00_VN_SCRIPT } from '../src/engine/sec00Tutorial.ts';
+import { SEC01_VN_SCRIPT } from '../src/engine/sec01Intro.ts';
+import { SEC01_EPILOGUE_VN_SCRIPT } from '../src/engine/sec01Epilogue.ts';
+import { SEC02_VN_SCRIPT } from '../src/engine/sec02Intro.ts';
+import { SEC02_EPILOGUE_VN_SCRIPT } from '../src/engine/sec02Epilogue.ts';
+import { SEC03_VN_SCRIPT } from '../src/engine/sec03Intro.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
   fetchContractCatalog,
@@ -632,5 +640,236 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(boardCounterWin.phase, 'showdown');
     assert.equal(boardCounterWin.result?.reason, 'mikiri-counter');
     assert.equal(boardCounterWin.result?.winner, 'ai');
+  });
+
+  it('switches player portrait to ECHO-0 across story nodes after SEC-00 overwrite', () => {
+    assert.equal(
+      resolveStoryPlayerEntity({
+        isStoryMode: false,
+        activeNodeIndex: 1,
+        clearedIndices: [0],
+      }),
+      null
+    );
+    assert.equal(
+      resolveStoryPlayerEntity({
+        isStoryMode: true,
+        activeNodeIndex: 0,
+        clearedIndices: [],
+        sec00EpilogueBeatIndex: 0,
+      }),
+      null
+    );
+
+    const midVn = resolveStoryPlayerEntity({
+      isStoryMode: true,
+      activeNodeIndex: 0,
+      clearedIndices: [],
+      sec00EpilogueBeatIndex: 6,
+      expression: 'surprise',
+    });
+    assert.ok(midVn);
+    assert.equal(midVn.isOverwrittenEcho0, true);
+    assert.equal(midVn.portraitSrc, './assets/story/echo0/surprise.webp');
+
+    const sec01Player = resolveStoryPlayerEntity({
+      isStoryMode: true,
+      activeNodeIndex: 1,
+      clearedIndices: [0],
+    });
+    assert.ok(sec01Player);
+    assert.equal(sec01Player.isOverwrittenEcho0, true);
+    assert.equal(sec01Player.label, '替壳：SHELL://ECHO-0');
+    assert.equal(sec01Player.portraitSrc, './assets/story/echo0/calm.webp');
+  });
+
+  it('defines 18-line SEC-01 dual-portrait intro script with Ling Fei inner thoughts and zero ECHO-0 spoilers', () => {
+    assert.equal(SEC01_VN_SCRIPT.length, 18);
+    assert.equal(SEC01_VN_SCRIPT[0].rightSprite?.visibility, 'hidden');
+    assert.equal(SEC01_VN_SCRIPT[0].leftSprite?.character, 'echo0');
+
+    for (let i = 1; i < SEC01_VN_SCRIPT.length; i += 1) {
+      const line = SEC01_VN_SCRIPT[i];
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec01');
+      assert.ok(line.leftSprite?.visibility !== 'hidden');
+      assert.ok(line.rightSprite?.visibility !== 'hidden');
+    }
+
+    // Lines 13-14 (index 12-13) are Ling Fei's inner doubts rendered with dashed thought style
+    assert.equal(SEC01_VN_SCRIPT[12].isThought, true);
+    assert.equal(SEC01_VN_SCRIPT[13].isThought, true);
+    assert.equal(SEC01_VN_SCRIPT[12].rightSprite?.expression, 'shy');
+
+    const fullCopy = SEC01_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('凌翡'));
+    assert.ok(fullCopy.includes('财黑帮'));
+    assert.ok(fullCopy.includes('一败涂地'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-01 intro should not spoil "${spoiler}"`);
+    }
+  });
+
+  it('defines 20-line SEC-01 post-defeat script covering dox threat, entity extraction, recognition, discard, and zero ECHO-0 spoilers', () => {
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT.length, 20);
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[3].isThought, true);
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[3].rightSprite?.expression, 'sad');
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[11].rightSprite?.visibility, 'shell-dim');
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[18].rightSprite?.visibility, 'hidden');
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[19].rightSprite?.visibility, 'hidden');
+    assert.equal(SEC01_EPILOGUE_VN_SCRIPT[19].stageEffect, 'escape-cta');
+
+    for (const line of SEC01_EPILOGUE_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec01');
+    }
+
+    const fullCopy = SEC01_EPILOGUE_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('开盒'));
+    assert.ok(fullCopy.includes('线下真实'));
+    assert.ok(fullCopy.includes('你给我等着'));
+    assert.ok(fullCopy.includes('凌翡'));
+    assert.ok(fullCopy.includes('跑路'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-01 epilogue should not spoil "${spoiler}"`);
+    }
+  });
+
+  it('defines 18-line SEC-02 ambush intro with garbled Fulan speech, no thought boxes, Lin Longxin flashback, and codename placeholders', () => {
+    assert.equal(SEC02_VN_SCRIPT.length, 18);
+    assert.equal(LIN_LONGXIN_CASUAL_SPRITE, './assets/story/sec03/casual.webp');
+
+    // No psychological thought dialog boxes at all in SEC-02 intro
+    for (const line of SEC02_VN_SCRIPT) {
+      assert.equal(Boolean(line.isThought), false, `line ${line.lineNo} should not use isThought`);
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.leftSprite?.label, '{codename} // SHELL://ECHO-0');
+    }
+
+    // All Fulan speech lines are strictly [VOCAL_ERR] garbled output
+    const fulanSpeech = SEC02_VN_SCRIPT.filter((l) => l.speakerKind === 'opponent');
+    assert.equal(fulanSpeech.length, 5);
+    for (const line of fulanSpeech) {
+      assert.ok(line.text.startsWith('[VOCAL_ERR]'));
+      assert.equal(line.rightSprite?.character, 'sec02');
+    }
+
+    // Line 02 (index 1) has blade-cut slash effect; Line 04 (index 3) shows Fulan silhouette; Line 05 (index 4) emerges from dark
+    assert.equal(SEC02_VN_SCRIPT[1].leftSprite?.effect, 'blade-cut');
+    assert.equal(SEC02_VN_SCRIPT[3].rightSprite?.character, 'sec02');
+    assert.equal(SEC02_VN_SCRIPT[3].rightSprite?.visibility, 'silhouette');
+    assert.equal(SEC02_VN_SCRIPT[4].rightSprite?.visibility, 'active');
+    assert.equal(SEC02_VN_SCRIPT[4].rightSprite?.effect, 'emerge');
+
+    // Line 10 (index 9) keeps Fulan on the right and places darkened Lin Longxin memory sprite on the left of player
+    const flashback = SEC02_VN_SCRIPT[9];
+    assert.equal(flashback.auxLeftSprite?.character, 'linlongxin');
+    assert.equal(flashback.auxLeftSprite?.visibility, 'dimmed');
+    assert.equal(flashback.auxLeftSprite?.effect, 'flashback');
+    assert.equal(flashback.rightSprite?.character, 'sec02');
+    assert.equal(flashback.rightSprite?.visibility, 'dimmed');
+    assert.ok(flashback.text.includes('林龙心'));
+    assert.ok(flashback.text.includes('{codename}'));
+
+    // Zero Chinese/ASCII semicolons, narrator "你", or contradictory veteran phrases across all VN scripts
+    for (const [name, script] of [
+      ['SEC00_VN_SCRIPT', SEC00_VN_SCRIPT],
+      ['SEC01_VN_SCRIPT', SEC01_VN_SCRIPT],
+      ['SEC01_EPILOGUE_VN_SCRIPT', SEC01_EPILOGUE_VN_SCRIPT],
+      ['SEC02_VN_SCRIPT', SEC02_VN_SCRIPT],
+      ['SEC02_EPILOGUE_VN_SCRIPT', SEC02_EPILOGUE_VN_SCRIPT],
+      ['SEC03_VN_SCRIPT', SEC03_VN_SCRIPT],
+    ] as const) {
+      for (const line of script) {
+        assert.equal(line.text.includes('；'), false, `${name} line ${line.lineNo} contains "；"`);
+        assert.equal(line.text.includes(';'), false, `${name} line ${line.lineNo} contains ";"`);
+        if (line.speakerKind === 'narrator') {
+          assert.equal(
+            line.text.includes('你'),
+            false,
+            `${name} narrator line ${line.lineNo} should use "{codename}" instead of "你"`
+          );
+        }
+        assert.equal(line.text.includes('老子'), false, `${name} line ${line.lineNo} contains "老子"`);
+        assert.equal(line.text.includes('好几年'), false, `${name} line ${line.lineNo} contradicts rookie return lore`);
+      }
+    }
+
+    // Final line enters combat CTA
+    assert.equal(SEC02_VN_SCRIPT[17].stageEffect, 'escape-cta');
+
+    const fullCopy = SEC02_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('富兰克林之死'));
+    assert.ok(fullCopy.includes('算力猎手'));
+    assert.ok(fullCopy.includes('心魔'));
+    assert.equal(fullCopy.includes('老子'), false);
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-02 intro should not spoil "${spoiler}"`);
+    }
+  });
+
+  it('defines 18-line SEC-02 post-defeat epilogue covering Black River forced logout, revocation, permanent deletion, and escape alarm', () => {
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT.length, 18);
+
+    // Fulan continues using garbled speech without any thought dialog boxes
+    for (const line of SEC02_EPILOGUE_VN_SCRIPT) {
+      assert.equal(Boolean(line.isThought), false, `line ${line.lineNo} should not use isThought`);
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.leftSprite?.label, '{codename} // SHELL://ECHO-0');
+    }
+
+    const fulanSpeech = SEC02_EPILOGUE_VN_SCRIPT.filter((l) => l.speakerKind === 'opponent');
+    assert.equal(fulanSpeech.length, 3);
+    for (const line of fulanSpeech) {
+      assert.ok(line.text.startsWith('[VOCAL_ERR]'));
+      assert.equal(line.rightSprite?.character, 'sec02');
+    }
+
+    // Fulan uses sad tearful expression on corporate termination, then shell-dim + dissipating purge, then vanishes
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[5].rightSprite?.expression, 'sad');
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[7].rightSprite?.visibility, 'shell-dim');
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[8].rightSprite?.effect, 'dissipating');
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[9].rightSprite?.effect, 'dissipating');
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[10].rightSprite?.visibility, 'hidden');
+
+    // Alarm triggers before escape CTA into SEC-03
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[15].soundCue, 'alarm-siren');
+    assert.equal(SEC02_EPILOGUE_VN_SCRIPT[17].stageEffect, 'escape-cta');
+
+    const fullCopy = SEC02_EPILOGUE_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('强行踢断登出'));
+    assert.ok(SEC02_EPILOGUE_VN_SCRIPT[6].hudAlerts?.some((a) => a.includes('强制登出')));
+    assert.ok(fullCopy.includes('注销'));
+    assert.ok(fullCopy.includes('永久删除'));
+    assert.ok(fullCopy.includes('被公司直接开除'));
+    assert.ok(fullCopy.includes('红色警报'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-02 epilogue should not spoil "${spoiler}"`);
+    }
+  });
+
+  it('defines 16-line SEC-03 collision intro with Pink Dragon misunderstanding ECHO-0 as Miss Zero and pulling player into duel', () => {
+    assert.equal(SEC03_VN_SCRIPT.length, 16);
+    for (const line of SEC03_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.leftSprite?.label, '{codename} // SHELL://ECHO-0');
+      assert.equal(line.rightSprite?.character, 'sec03');
+    }
+    assert.equal(SEC03_VN_SCRIPT[1].soundCue, 'wall-hit');
+    assert.equal(SEC03_VN_SCRIPT[1].leftSprite?.effect, 'collide');
+    assert.equal(SEC03_VN_SCRIPT[1].rightSprite?.effect, 'collide');
+    assert.equal(SEC03_VN_SCRIPT[15].stageEffect, 'escape-cta');
+
+    const fullCopy = SEC03_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('撞进了对面'));
+    assert.ok(fullCopy.includes('痛痛痛——哇啊、哪来的冒失鬼横冲直撞的？！等等，别急，让我先稳定一下平衡……'));
+    assert.ok(fullCopy.includes('没事没事，我皮厚着呢！倒是我这双龙角差点戳到你——哎呀，等等，你这造型，我该不会真撞到大人物了吧？！'));
+    assert.ok(fullCopy.includes('熟悉'));
+    assert.ok(fullCopy.includes('现在全网都在传着你的消息呢，我可不会放过和强者对决的机会！来决斗吧，零小姐！'));
+    assert.ok(fullCopy.includes('等等，我还没……'));
+    assert.ok(fullCopy.includes('强行拖入了对局'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-03 intro should not spoil "${spoiler}"`);
+    }
   });
 });

@@ -86,5 +86,8 @@ describe('soundEngine: action/showdown cue mapping, settings clamping & Node fal
     assert.equal(playSound('flip'), false);
     assert.equal(playSound('charge-tick', { progress: 55 }), false);
     assert.equal(playSound('wall-hit'), false);
+    assert.equal(playSound('rewind-crack'), false);
+    assert.equal(playSound('rewind-shatter'), false);
+    assert.equal(playSound('alarm-siren'), false);
   });
 });

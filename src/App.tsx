@@ -148,8 +148,11 @@ import {
 } from './engine/debugCmd.ts';
 import {
   REWIND_HOLD_DURATION_MS,
+  SEC04_MAX_REWIND_USES,
+  canHoldRewindRestart,
   computeRewindHoldProgress,
   getRewindButtonMeta,
+  getSec04RewindDurability,
   resolveRewindTapAction,
 } from './engine/rewindHold.ts';
 import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
@@ -159,6 +162,7 @@ import {
   claimEscapeNodeSkill,
   completeEscapeTransition,
   loadEscapeProgress,
+  markEscapeIntroSeen,
   markEscapeNodeCleared,
   markEscapeWallRevealed,
   resetEscapeProgress,
@@ -167,12 +171,18 @@ import {
 } from './engine/escapeMap.ts';
 import {
   SEC00_MONOLOGUE_STEPS,
+  SEC00_VN_SCRIPT,
   createSec00TutorialState,
   getSec00Capabilities,
   getSec00Guidance,
   isSec00ActionAllowed,
   pickSec00AiAction,
 } from './engine/sec00Tutorial.ts';
+import { SEC01_VN_SCRIPT } from './engine/sec01Intro.ts';
+import { SEC01_EPILOGUE_VN_SCRIPT } from './engine/sec01Epilogue.ts';
+import { SEC02_VN_SCRIPT } from './engine/sec02Intro.ts';
+import { SEC02_EPILOGUE_VN_SCRIPT } from './engine/sec02Epilogue.ts';
+import { SEC03_VN_SCRIPT } from './engine/sec03Intro.ts';
 import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
@@ -188,6 +198,7 @@ import {
   resolveSec02Sprite,
   resolveSec03Sprite,
   resolveSec04Sprite,
+  resolveStoryPlayerEntity,
 } from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
@@ -206,6 +217,7 @@ import {
   PixelNodesIcon,
   PixelPlusOneIcon,
   PixelRestartIcon,
+  PixelRewindCrackOverlay,
   PixelScanIcon,
   PixelSendIcon,
   PixelSeverIcon,
@@ -230,6 +242,7 @@ const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
 const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.tsx'));
 const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
 const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
+const VisualNovelStoryModal = lazy(() => import('./components/VisualNovelStoryModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
@@ -438,6 +451,36 @@ export function App() {
     const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
     return initNodeIdx === 0 && !initEsc.clearedIndices.includes(0) ? 0 : null;
   });
+  const INTRO_VN_BY_NODE: Record<
+    number,
+    'sec01-intro' | 'sec02-intro' | 'sec03-intro' | undefined
+  > = {
+    1: 'sec01-intro',
+    2: 'sec02-intro',
+    3: 'sec03-intro',
+  };
+  const [activeVnStory, setActiveVnStory] = useState<{
+    kind:
+      | 'sec00-epilogue'
+      | 'sec01-intro'
+      | 'sec01-epilogue'
+      | 'sec02-intro'
+      | 'sec02-epilogue'
+      | 'sec03-intro';
+    index: number;
+  } | null>(() => {
+    const initEsc = loadEscapeProgress();
+    const initNodeIdx = initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
+    const introKind = INTRO_VN_BY_NODE[initNodeIdx];
+    if (
+      introKind &&
+      !initEsc.seenIntroNodes.includes(initNodeIdx) &&
+      !initEsc.clearedIndices.includes(initNodeIdx)
+    ) {
+      return { kind: introKind, index: 0 };
+    }
+    return null;
+  });
   const [thoughtSpotlightActive, setThoughtSpotlightActive] = useState(false);
   const thoughtSpotlightTimerRef = useRef<number | null>(null);
   const sec00GuideActiveRef = useRef(sec00GuideActive);
@@ -506,12 +549,48 @@ export function App() {
   const lastHandledBurnIdRef = useRef<string | null>(null);
   const storyRewindStackRef = useRef<GameState[]>([]);
   const [rewindStepCount, setRewindStepCount] = useState(0);
+  const [sec04RewindUses, setSec04RewindUses] = useState(0);
+  const sec04RewindUsesRef = useRef(0);
   const [rewindHoldProgress, setRewindHoldProgress] = useState(0);
   const rewindHoldIntervalRef = useRef<number | null>(null);
   const rewindHoldStartMsRef = useRef<number | null>(null);
   const rewindHoldLastElapsedRef = useRef<number>(0);
   const rewindHoldTriggeredRef = useRef<boolean>(false);
   const rewindChargeStepRef = useRef<number>(-1);
+
+  const [tableEntranceActive, setTableEntranceActive] = useState(false);
+  const tableEntranceTimerRef = useRef<number | null>(null);
+  const tableEntranceRafRef = useRef<number | null>(null);
+  const triggerTableEntrance = useCallback(() => {
+    if (tableEntranceTimerRef.current !== null) {
+      window.clearTimeout(tableEntranceTimerRef.current);
+      tableEntranceTimerRef.current = null;
+    }
+    if (tableEntranceRafRef.current !== null) {
+      window.cancelAnimationFrame(tableEntranceRafRef.current);
+      tableEntranceRafRef.current = null;
+    }
+    setTableEntranceActive(false);
+    tableEntranceRafRef.current = window.requestAnimationFrame(() => {
+      tableEntranceRafRef.current = null;
+      setTableEntranceActive(true);
+      tableEntranceTimerRef.current = window.setTimeout(() => {
+        tableEntranceTimerRef.current = null;
+        setTableEntranceActive(false);
+      }, 1450);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (tableEntranceTimerRef.current !== null) {
+        window.clearTimeout(tableEntranceTimerRef.current);
+      }
+      if (tableEntranceRafRef.current !== null) {
+        window.cancelAnimationFrame(tableEntranceRafRef.current);
+      }
+    };
+  }, []);
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
@@ -1933,7 +2012,11 @@ export function App() {
       return;
     }
 
-    if (!sec00GuideActiveRef.current || state.players.ai.chips > 0) {
+    const isSec00Victory = activeEscapeNodeRef.current === 0 && state.players.ai.chips === 0;
+    const isSec01Victory = activeEscapeNodeRef.current === 1 && state.players.ai.chips === 0;
+    if (!sec00GuideActiveRef.current && !isSec00Victory && !isSec01Victory) {
+      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+    } else if (sec00GuideActiveRef.current && state.players.ai.chips > 0) {
       enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
     }
 
@@ -1944,13 +2027,52 @@ export function App() {
         const clearedNode = ESCAPE_ROUTE_NODES[clearedIdx];
         if (!escapeClearQueuedForMatchRef.current) {
           escapeClearQueuedForMatchRef.current = true;
-          if (sec00GuideActiveRef.current) {
+          if (clearedIdx === 0) {
             setActiveExpression('surprise');
             enqueueTask({
               kind: 'opponent',
               speaker: clearedNode?.opponentName ?? '匿名终端 [UNKNOWN_0x00]',
               text: '算力归零。按黑域协议，这具虚拟实体归你了。……别回头，带上它走。',
             });
+            pushToast(
+              'success',
+              `突破 ${clearedNode?.code ?? 'SEC-00'}：${clearedNode?.title ?? ''}`,
+              '正在接入敌方虚拟实体数据流...'
+            );
+            scheduleTimeout(() => {
+              const latest = latestStateRef.current;
+              if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+              setActiveVnStory({ kind: 'sec00-epilogue', index: 0 });
+            }, 1150);
+            return;
+          }
+          if (clearedIdx === 1) {
+            setActiveExpression('surprise');
+            pushToast(
+              'success',
+              `突破 ${clearedNode?.code ?? 'SEC-01'}：${clearedNode?.title ?? ''}`,
+              '正在接入战败结算与实体剥离协议...'
+            );
+            scheduleTimeout(() => {
+              const latest = latestStateRef.current;
+              if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+              setActiveVnStory({ kind: 'sec01-epilogue', index: 0 });
+            }, 1150);
+            return;
+          }
+          if (clearedIdx === 2) {
+            setActiveExpression('sad');
+            pushToast(
+              'success',
+              `突破 ${clearedNode?.code ?? 'SEC-02'}：${clearedNode?.title ?? ''}`,
+              '正在接入战败结算与黑河审计通道...'
+            );
+            scheduleTimeout(() => {
+              const latest = latestStateRef.current;
+              if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+              setActiveVnStory({ kind: 'sec02-epilogue', index: 0 });
+            }, 1150);
+            return;
           }
           const hasSkillLoot = Boolean(clearedNode?.rewardSkillChoices?.length);
           pushToast(
@@ -2522,7 +2644,8 @@ export function App() {
     nextCharacter?: ContractCharacter,
     overrideAcquiredSkills?: string[],
     overrideChips?: Record<PlayerId, number>,
-    overrideOpponentName?: string
+    overrideOpponentName?: string,
+    options?: { preserveSec04RewindUses?: boolean }
   ) => {
     if (p2pStatus === 'connected' && p2pRoleRef.current === 'guest') {
       p2pTransportRef.current?.send({ type: 'REMATCH_REQ' });
@@ -2576,6 +2699,7 @@ export function App() {
     setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
+    setActiveVnStory(null);
     setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
@@ -2585,6 +2709,10 @@ export function App() {
     pendingBundledChatRef.current = null;
     storyRewindStackRef.current = [];
     setRewindStepCount(0);
+    if (!options?.preserveSec04RewindUses) {
+      sec04RewindUsesRef.current = 0;
+      setSec04RewindUses(0);
+    }
     if (rewindHoldIntervalRef.current !== null) {
       window.clearInterval(rewindHoldIntervalRef.current);
       rewindHoldIntervalRef.current = null;
@@ -2688,6 +2816,7 @@ export function App() {
     setAiRoundLossFlicker(false);
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
+    setActiveVnStory(null);
     setActiveEscapeNodeIndex(0);
     activeEscapeNodeRef.current = 0;
     setSec00GuideActive(true);
@@ -2703,6 +2832,8 @@ export function App() {
     lastSoundActionIdRef.current = null;
     storyRewindStackRef.current = [];
     setRewindStepCount(0);
+    sec04RewindUsesRef.current = 0;
+    setSec04RewindUses(0);
     setViewMode('arena');
     setState(createSec00TutorialState());
     setMessages([]);
@@ -2728,6 +2859,7 @@ export function App() {
     setSec00GuideActive(false);
     sec00GuideActiveRef.current = false;
     setSec00IntroIndex(null);
+    setActiveVnStory(null);
     setViewMode('arena');
     performFullReset(
       { ...state.config, aiDifficulty: node.difficulty },
@@ -2736,6 +2868,22 @@ export function App() {
       { human: state.config.startingChips, ai: node.opponentChips },
       node.opponentName
     );
+    const introKind = INTRO_VN_BY_NODE[nodeIndex];
+    if (
+      introKind &&
+      !latestEsc.seenIntroNodes.includes(nodeIndex) &&
+      !latestEsc.clearedIndices.includes(nodeIndex)
+    ) {
+      const seenEsc = markEscapeIntroSeen(latestEsc, nodeIndex);
+      setEscapeProgress(seenEsc);
+      escapeProgressRef.current = seenEsc;
+      setActiveVnStory({
+        kind: introKind,
+        index: 0,
+      });
+    } else {
+      triggerTableEntrance();
+    }
     pushToast('info', `进入 ${node.code} · ${node.title}`, `对手：${node.opponentName}（算力 ${node.opponentChips}）`);
   };
 
@@ -2750,6 +2898,7 @@ export function App() {
     setSec00GuideActive(false);
     sec00GuideActiveRef.current = false;
     setSec00IntroIndex(null);
+    setActiveVnStory(null);
     setActiveEscapeNodeIndex(null);
     activeEscapeNodeRef.current = null;
     setActiveModal({ type: 'none' });
@@ -2766,11 +2915,24 @@ export function App() {
 
   const handleTimeRewind = (forceFromCmd = false) => {
     if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
+    const isSec04Match = activeEscapeNodeRef.current === 4 && !isP2pSessionActive;
+    const currentDurability = getSec04RewindDurability(
+      sec04RewindUsesRef.current,
+      isSec04Match
+    );
+    if (currentDurability.isShattered) {
+      pushToast(
+        'error',
+        currentDurability.alertTitle ?? '时间回溯按钮已碎裂失效（0%）',
+        currentDurability.alertDetail ?? '算力回溯通道彻底断开，本局无法继续回溯'
+      );
+      return;
+    }
     if (!forceFromCmd && latestStateRef.current.players.human.chips > 0) {
       pushToast(
         'warn',
         '时间锚点未激活',
-        '仅在己方算力归零时可点按回溯上一步；长按 0.8s 可随时重开整场对局'
+        '仅在己方算力归零时可点按回溯上一步，或长按 0.8s 重开整场对局'
       );
       return;
     }
@@ -2827,22 +2989,76 @@ export function App() {
       lastHandledScanIdRef.current = restoredState.lastAction?.id ?? null;
       lastHandledBurnIdRef.current = restoredState.lastAction?.id ?? null;
       setState(restoredState);
-      playSound('skill');
-      pushToast(
-        'info',
-        'ECHO-0 · 时间回溯',
-        `时间锚点已回滚至上一次行动前（剩余可用锚点 ${nextStack.length}）`
-      );
-      enqueueTask({
-        kind: 'opponent',
-        speaker: '零回响 // ECHO-0',
-        msgKind: 'thought',
-        text: '（时间锚点回溯完成。……别浪费我好不容易截停的这一秒，重新看清牌桌再出手。）',
-      });
+      if (!isSec04Match) {
+        playSound('skill');
+        pushToast(
+          'info',
+          'ECHO-0 · 时间回溯',
+          `时间锚点已回滚至上一次行动前（剩余可用锚点 ${nextStack.length}）`
+        );
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '零回响 // ECHO-0',
+          msgKind: 'thought',
+          text: '（时间锚点回溯完成。……别浪费我好不容易截停的这一秒，重新看清牌桌再出手。）',
+        });
+      }
     } else {
-      performFullReset();
-      playSound('skill');
-      pushToast('info', 'ECHO-0 · 时间回溯', '已将当前剧情节点时间线重置回初盘');
+      performFullReset(undefined, undefined, undefined, undefined, undefined, {
+        preserveSec04RewindUses: true,
+      });
+      if (!isSec04Match) {
+        playSound('skill');
+        pushToast('info', 'ECHO-0 · 时间回溯', '已将当前剧情节点时间线重置回初盘');
+      }
+    }
+
+    if (isSec04Match) {
+      const nextUses = Math.min(SEC04_MAX_REWIND_USES, sec04RewindUsesRef.current + 1);
+      sec04RewindUsesRef.current = nextUses;
+      setSec04RewindUses(nextUses);
+      const nextDurability = getSec04RewindDurability(nextUses, true);
+      if (nextDurability.stage === 'cracked-1') {
+        playSound('rewind-crack');
+        pushToast(
+          'warn',
+          nextDurability.alertTitle ?? '算力通道轻度裂纹（72%）',
+          `${nextDurability.alertDetail}（完整度 100% -> 72%）`
+        );
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '零回响 // ECHO-0',
+          msgKind: 'thought',
+          text: '（……切，这片闸门的灼心火符正在反向撕裂我的时间锚点。通道完整度跌到 72% 了，省着点用。）',
+        });
+      } else if (nextDurability.stage === 'cracked-2') {
+        playSound('rewind-crack');
+        pushToast(
+          'error',
+          nextDurability.alertTitle ?? '算力通道临界过载（48%）',
+          `${nextDurability.alertDetail}（完整度 72% -> 48%）`
+        );
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '零回响 // ECHO-0',
+          msgKind: 'thought',
+          text: '（警告：时间通道裂纹扩散，完整度仅剩 48%！……再强行回溯一次，锚点按钮就会彻底碎裂。）',
+        });
+      } else if (nextDurability.stage === 'shattered') {
+        cancelHoldStoryRewind();
+        playSound('rewind-shatter');
+        pushToast(
+          'error',
+          nextDurability.alertTitle ?? '时间回溯按钮已碎裂失效（0%）',
+          `${nextDurability.alertDetail}（完整度 48% -> 0% 碎裂）`
+        );
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '零回响 // ECHO-0',
+          msgKind: 'thought',
+          text: '（咔嚓——时间锚点彻底碎裂了。听好了，接下来没有回溯按钮替你兜底了——稳住算力，准备迎战！）',
+        });
+      }
     }
   };
 
@@ -2859,8 +3075,23 @@ export function App() {
     setRewindHoldProgress(0);
   };
 
+  const isStoryRewindHoldUnlocked = () => {
+    if (activeEscapeNodeRef.current === null || isP2pSessionActive) return false;
+    const isSec04Match = activeEscapeNodeRef.current === 4 && !isP2pSessionActive;
+    const isShattered = getSec04RewindDurability(
+      sec04RewindUsesRef.current,
+      isSec04Match
+    ).isShattered;
+    return canHoldRewindRestart({
+      humanChips: latestStateRef.current.players.human.chips,
+      isShattered,
+    });
+  };
+
   const handleStoryLongPressRestart = () => {
-    if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
+    if (!isStoryRewindHoldUnlocked()) {
+      return;
+    }
     const wasSec00 = sec00GuideActiveRef.current;
     performFullReset();
     playSound('skill');
@@ -2882,11 +3113,7 @@ export function App() {
   };
 
   const startHoldStoryRewind = () => {
-    if (
-      activeEscapeNodeRef.current === null ||
-      isP2pSessionActive ||
-      rewindHoldIntervalRef.current !== null
-    ) {
+    if (rewindHoldIntervalRef.current !== null || !isStoryRewindHoldUnlocked()) {
       return;
     }
     const startMs = Date.now();
@@ -2895,6 +3122,10 @@ export function App() {
     rewindHoldTriggeredRef.current = false;
     rewindChargeStepRef.current = -1;
     rewindHoldIntervalRef.current = window.setInterval(() => {
+      if (!isStoryRewindHoldUnlocked()) {
+        cancelHoldStoryRewind();
+        return;
+      }
       const elapsed = Date.now() - startMs;
       if (elapsed < 120) return;
       const { progress, completed } = computeRewindHoldProgress(
@@ -2931,10 +3162,16 @@ export function App() {
     const holdElapsedMs = rewindHoldLastElapsedRef.current;
     rewindHoldTriggeredRef.current = false;
     rewindHoldLastElapsedRef.current = 0;
+    const isSec04Match = activeEscapeNodeRef.current === 4 && !isP2pSessionActive;
+    const isShattered = getSec04RewindDurability(
+      sec04RewindUsesRef.current,
+      isSec04Match
+    ).isShattered;
     const resolution = resolveRewindTapAction({
       humanChips: latestStateRef.current.players.human.chips,
       holdTriggered,
       holdElapsedMs,
+      isShattered,
     });
     if (resolution === 'ignore') return;
     handleTimeRewind(false);
@@ -2950,6 +3187,95 @@ export function App() {
     escapeProgressRef.current = fresh;
     startSec00Tutorial(true);
     pushToast('info', '已重置黑域逃亡路线', '重新从 SEC-00 公共暗区野桌单轮教学开始');
+  };
+
+  const handleFinishVnStory = () => {
+    const finishedKind = activeVnStory?.kind;
+    setActiveVnStory(null);
+    if (finishedKind === 'sec01-intro') {
+      setEscapeProgress((prev) => markEscapeIntroSeen(prev, 1));
+      setActiveExpression('angry');
+      triggerTableEntrance();
+      enqueueTask({
+        kind: 'human',
+        text: '「废话真多……后面的人快追上来了，不管你是哪路黑帮，这一局我必须赢！」',
+      });
+      return;
+    }
+    if (finishedKind === 'sec02-intro') {
+      setEscapeProgress((prev) => markEscapeIntroSeen(prev, 2));
+      setActiveExpression('angry');
+      triggerTableEntrance();
+      enqueueTask({
+        kind: 'human',
+        text: '「哪怕少了一项作弊技、对面还是传闻里那种算力猎手——这一次也绝不能再输在自己的心魔上！这一局我接下了！」',
+      });
+      return;
+    }
+    if (finishedKind === 'sec03-intro') {
+      setEscapeProgress((prev) => markEscapeIntroSeen(prev, 3));
+      setActiveExpression('angry');
+      triggerTableEntrance();
+      enqueueTask({
+        kind: 'human',
+        text: '「……彻底认错人了吧喂！！可链接已经被她单方面焊死了，眼下只能先硬着头皮撑过这一局再想办法脱身！」',
+      });
+      return;
+    }
+    if (finishedKind === 'sec01-epilogue') {
+      const sec01Node = ESCAPE_ROUTE_NODES[1];
+      enqueueTask({
+        kind: 'human',
+        text: '「……差点把实名上网的凌氏大小姐壳子往身上套！算力碎片收走，趁她家猎犬摸过来之前立刻溜进 SEC-02！」',
+      });
+      if (sec01Node?.rewardSkillChoices?.length) {
+        setPendingSkillClaim({
+          title: `击溃 ${sec01Node.opponentName} · 协议技能拆解`,
+          subtitle: `${sec01Node.code} ${sec01Node.title} 已突破！挑选 1 项技能（作弊槽上限 ${MAX_CHEAT_SKILLS} · 非作弊辅助槽上限 ${MAX_SUPPORT_SKILLS}，满额可替换）`,
+          choices: sec01Node.rewardSkillChoices,
+          clearedNodeIndex: 1,
+        });
+      } else {
+        setEscapeProgress((prev) => markEscapeNodeCleared(prev, 1));
+        setViewMode('escape-map');
+      }
+      return;
+    }
+    if (finishedKind === 'sec02-epilogue') {
+      const sec02Node = ESCAPE_ROUTE_NODES[2];
+      enqueueTask({
+        kind: 'human',
+        text: '「失败的代价竟然是被黑河直接抹除……没时间喘息了，抓起这枚残余技能模块，立刻撤往 SEC-03！」',
+      });
+      if (sec02Node?.rewardSkillChoices?.length) {
+        setPendingSkillClaim({
+          title: `击溃 ${sec02Node.opponentName} · 协议技能拆解`,
+          subtitle: `${sec02Node.code} ${sec02Node.title} 已突破！挑选 1 项技能（作弊槽上限 ${MAX_CHEAT_SKILLS} · 非作弊辅助槽上限 ${MAX_SUPPORT_SKILLS}，满额可替换）`,
+          choices: sec02Node.rewardSkillChoices,
+          clearedNodeIndex: 2,
+        });
+      } else {
+        setEscapeProgress((prev) => markEscapeNodeCleared(prev, 2));
+        setViewMode('escape-map');
+      }
+      return;
+    }
+    const sec00Node = ESCAPE_ROUTE_NODES[0];
+    enqueueTask({
+      kind: 'human',
+      text: '“……原壳层被「ECHO-0」顶替了，四面八方全是围捕信号！没时间适应这具身体了，立刻撤离！”',
+    });
+    if (sec00Node?.rewardSkillChoices?.length) {
+      setPendingSkillClaim({
+        title: '紧急断线撤离 · 剥离残余协议',
+        subtitle: `已顶着 SHELL://ECHO-0 强行断开野桌连接！临走前提取 1 项残余辅助技能（辅助槽上限 ${MAX_SUPPORT_SKILLS}），随即沿逃亡路线图躲避围捕！`,
+        choices: sec00Node.rewardSkillChoices,
+        clearedNodeIndex: 0,
+      });
+    } else {
+      setEscapeProgress((prev) => markEscapeNodeCleared(prev, 0));
+      setViewMode('escape-map');
+    }
   };
 
   const handleRetreatToEscapeMap = () => {
@@ -3076,6 +3402,7 @@ export function App() {
           { human: state.config.startingChips, ai: node.opponentChips },
           node.opponentName
         );
+        triggerTableEntrance();
         appendCmdLog('success', `[OK] 已推进并进入 ${node.code} · ${node.title}`);
         return;
       }
@@ -3091,6 +3418,7 @@ export function App() {
             (a, b) => a - b
           ),
           revealedWallIndices: base.revealedWallIndices,
+          seenIntroNodes: base.seenIntroNodes ?? [],
           equippedCheatSkills: base.equippedCheatSkills,
           equippedSkills: base.equippedSkills,
           pendingTransition: null,
@@ -3115,6 +3443,7 @@ export function App() {
             { human: state.config.startingChips, ai: node.opponentChips },
             node.opponentName
           );
+          triggerTableEntrance();
         }
         appendCmdLog('success', `[OK] 已传送至 ${node.code} · ${node.title}`);
         return;
@@ -3225,9 +3554,23 @@ export function App() {
           appendCmdLog('error', '[ERR] 当前处于自由/联机牌桌，仅剧情牌桌可调用时间回溯（可用 goto 4 进入 SEC-04）');
           return;
         }
+        const isSec04Match = activeEscapeNodeRef.current === 4 && !isP2pSessionActive;
+        const durability = getSec04RewindDurability(sec04RewindUsesRef.current, isSec04Match);
+        if (durability.isShattered) {
+          appendCmdLog('error', '[ERR] SEC-04 时间回溯按钮已碎裂失效（0%），可使用 reset 或路线图重开节点');
+          return;
+        }
         setActiveModal({ type: 'none' });
         handleTimeRewind(true);
-        appendCmdLog('success', '[OK] 已调用 ECHO-0 时间回溯');
+        if (isSec04Match) {
+          const updated = getSec04RewindDurability(sec04RewindUsesRef.current, true);
+          appendCmdLog(
+            updated.isShattered ? 'error' : 'success',
+            `[OK] 已调用 ECHO-0 时间回溯（SEC-04 通道完整度 -> ${updated.durabilityPct}%${updated.isShattered ? ' · 已碎裂失效' : ''}）`
+          );
+        } else {
+          appendCmdLog('success', '[OK] 已调用 ECHO-0 时间回溯');
+        }
         return;
       }
       case 'resetprofile': {
@@ -3524,10 +3867,13 @@ export function App() {
   const maxRaises = getMaxRaisesAllowed(state);
   const revealAllAi = isShowdown || state.config.revealOpponentHidden;
   const evt = state.lastAction;
+  const isSec04StoryNode = activeEscapeNode?.index === 4 && !isP2pConnected;
   const rewindButtonMeta = getRewindButtonMeta({
     humanChips: human.chips,
     rewindStepCount,
     holdProgress: rewindHoldProgress,
+    isSec04: isSec04StoryNode,
+    sec04RewindUses,
   });
 
   // Damage & Defeat VFX State (Strictly isolated between Opponent and Player!)
@@ -3550,6 +3896,14 @@ export function App() {
   const isSec02Boss = !isP2pConnected && effectiveCharacter.id === 'sec02-mute-hunter';
   const isSec03Boss = !isP2pConnected && effectiveCharacter.id === 'sec03-neon-dragon';
   const isSec04Boss = !isP2pConnected && effectiveCharacter.id === 'sec04-kiri-samurai';
+  const storyPlayerEntity = resolveStoryPlayerEntity({
+    isStoryMode: isStoryTable,
+    activeNodeIndex: activeEscapeNode?.index ?? null,
+    clearedIndices: escapeProgress.clearedIndices,
+    sec00EpilogueBeatIndex:
+      activeVnStory?.kind === 'sec00-epilogue' ? activeVnStory.index : null,
+    expression: isHumanBankrupt ? 'sad' : isHumanLowCompute ? 'surprise' : 'calm',
+  });
   const isPinkMirageActive = state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi;
   const isBurningBoardActive = state.opponentSignatureSkill === 'gate-minefield' && !revealAllAi;
 
@@ -3666,7 +4020,7 @@ export function App() {
     () =>
       resolveTutorialSpotlightPlan({
         viewMode,
-        hasModalOpen: activeModal.type !== 'none',
+        hasModalOpen: activeModal.type !== 'none' || activeVnStory !== null,
         hasPendingSkillClaim: pendingSkillClaim !== null,
         sec00GuideActive,
         sec00IntroIndex,
@@ -3679,6 +4033,7 @@ export function App() {
     [
       viewMode,
       activeModal.type,
+      activeVnStory,
       pendingSkillClaim,
       sec00GuideActive,
       sec00IntroIndex,
@@ -3725,6 +4080,7 @@ export function App() {
               onSkipIntro={() => {
                 setSec00IntroIndex(null);
                 setMobileChatOpen(false);
+                triggerTableEntrance();
               }}
               onOpenMobileChat={() => setMobileChatOpen(true)}
               onRetrySec00={() => startSec00Tutorial(true)}
@@ -3738,13 +4094,26 @@ export function App() {
           )}
 
           {/* Centered & Aligned 3x3 Tactical Stage */}
-          <main className="lc-stage-grid" aria-label="牌桌主视区">
+          <main
+            className={`lc-stage-grid ${tableEntranceActive ? 'is-table-entering' : ''}`}
+            aria-label="牌桌主视区"
+          >
         {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
         <aside id="lc-pool-slot" className="lc-pool-slot" aria-label="算力池计量栏">
           <ComputePoolBar
             pot={state.pot}
             startingChips={state.config.startingChips}
             lastAction={state.lastAction}
+            statusLabel={
+              isSec04StoryNode && rewindButtonMeta.durability.stage !== 'intact'
+                ? rewindButtonMeta.durability.channelBadgeText ?? undefined
+                : undefined
+            }
+            statusWarn={
+              isSec04StoryNode &&
+              (rewindButtonMeta.durability.warningLevel === 'critical' ||
+                rewindButtonMeta.durability.warningLevel === 'failed')
+            }
           />
         </aside>
 
@@ -3791,11 +4160,19 @@ export function App() {
               <button
                 id="hud-btn-rewind"
                 type="button"
+                disabled={rewindButtonMeta.disabled}
                 className={`lc-stack-btn pink lc-hold-btn ${
                   !rewindButtonMeta.tapEnabled ? 'is-tap-locked' : ''
-                } ${rewindButtonMeta.isHolding ? 'is-holding' : ''}`}
+                } ${rewindButtonMeta.isHolding ? 'is-holding' : ''} ${
+                  rewindButtonMeta.durability.isSec04
+                    ? `is-durability-${rewindButtonMeta.durability.stage}`
+                    : ''
+                }`}
                 data-tap-locked={human.chips > 0 ? 'true' : 'false'}
+                data-durability-stage={rewindButtonMeta.durability.stage}
+                data-durability-pct={rewindButtonMeta.durability.durabilityPct}
                 onPointerDown={(e) => {
+                  if (rewindButtonMeta.disabled) return;
                   if (e.pointerType === 'mouse' && e.button !== 0) return;
                   startHoldStoryRewind();
                 }}
@@ -3804,12 +4181,14 @@ export function App() {
                 onPointerCancel={cancelHoldStoryRewind}
                 onContextMenu={(e) => e.preventDefault()}
                 onKeyDown={(e) => {
+                  if (rewindButtonMeta.disabled) return;
                   if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
                     e.preventDefault();
                     startHoldStoryRewind();
                   }
                 }}
                 onKeyUp={(e) => {
+                  if (rewindButtonMeta.disabled) return;
                   if (e.key === ' ' || e.key === 'Enter') {
                     e.preventDefault();
                     cancelHoldStoryRewind();
@@ -3818,18 +4197,27 @@ export function App() {
                 }}
                 onClick={handleRewindButtonClick}
                 title={rewindButtonMeta.title}
-                aria-label="发动女主 ECHO-0 的时间回溯（点按归零后回溯，长按重开整场对局）"
+                aria-label="发动女主 ECHO-0 的时间回溯（算力归零后可点按回溯或长按重开整场对局）"
               >
                 <div
                   className="lc-hold-fill is-rewind-fill"
-                  style={{ width: `${rewindHoldProgress}%` }}
+                  style={{ width: `${rewindButtonMeta.isHolding ? rewindHoldProgress : 0}%` }}
                   aria-hidden="true"
                 />
+                <PixelRewindCrackOverlay stage={rewindButtonMeta.durability.stage} />
                 <span className="lc-btn-inline">
-                  <PixelSyncIcon size={15} />
+                  {rewindButtonMeta.durability.isShattered ? <PixelSeverIcon size={15} /> : <PixelSyncIcon size={15} />}
                   {rewindButtonMeta.mainLabel}
                 </span>
                 <span className="lc-stack-sub">{rewindButtonMeta.subLabel}</span>
+                {rewindButtonMeta.durability.isSec04 && (
+                  <div className="lc-rewind-durability-track" aria-hidden="true">
+                    <div
+                      className={`lc-rewind-durability-fill is-${rewindButtonMeta.durability.stage}`}
+                      style={{ width: `${rewindButtonMeta.durability.durabilityPct}%` }}
+                    />
+                  </div>
+                )}
               </button>
             </>
           ) : (
@@ -3922,6 +4310,22 @@ export function App() {
                           CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
                         }`}
               </span>
+              {activeEscapeNode && INTRO_VN_BY_NODE[activeEscapeNode.index] && !isP2pConnected && (
+                <button
+                  id={`hud-btn-sec0${activeEscapeNode.index}-replay-intro`}
+                  type="button"
+                  className="lc-cmd-chip-btn"
+                  onClick={() =>
+                    setActiveVnStory({
+                      kind: INTRO_VN_BY_NODE[activeEscapeNode.index]!,
+                      index: 0,
+                    })
+                  }
+                  title={`重新播放 ${activeEscapeNode.code} 开场视觉小说剧情`}
+                >
+                  开场剧情
+                </button>
+              )}
               <button
                 id="hud-btn-open-cmd"
                 type="button"
@@ -4330,16 +4734,26 @@ export function App() {
           className={`lc-hud-box lc-player-hand-zone ${isHumanLowCompute ? 'is-low-compute' : ''} ${
             isPinkMirageActive ? 'is-pink-mirage' : ''
           }`}
-          style={{ '--entity-accent': activeDisguise.accentColor } as CSSProperties}
+          style={
+            {
+              '--entity-accent': storyPlayerEntity?.accentColor ?? activeDisguise.accentColor,
+            } as CSSProperties
+          }
           aria-label="己方手牌序列区"
         >
           {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
           <div className="lc-player-portrait-layer" aria-hidden="true">
             <div className="lc-player-portrait-frame">
               <img
-                src={activeDisguise.virtualPortrait}
+                src={storyPlayerEntity?.portraitSrc ?? activeDisguise.virtualPortrait}
                 alt=""
-                className={`lc-player-portrait-img ${activeDisguise.isCore ? '' : 'is-fullbody-crop'}`}
+                className={`lc-player-portrait-img ${
+                  storyPlayerEntity?.isOverwrittenEcho0
+                    ? 'is-echo0-player-crop'
+                    : activeDisguise.isCore
+                      ? ''
+                      : 'is-fullbody-crop'
+                }`}
               />
             </div>
             <div className="lc-player-portrait-fade" />
@@ -4354,8 +4768,22 @@ export function App() {
                 <button
                   id="player-btn-switch-disguise"
                   type="button"
-                  className={`lc-disguise-pill ${activeDisguise.isCore ? 'is-core' : 'is-decoy'}`}
+                  className={`lc-disguise-pill ${
+                    storyPlayerEntity?.isOverwrittenEcho0
+                      ? 'is-decoy'
+                      : activeDisguise.isCore
+                        ? 'is-core'
+                        : 'is-decoy'
+                  }`}
                   onClick={() => {
+                    if (storyPlayerEntity?.isOverwrittenEcho0) {
+                      pushToast(
+                        'info',
+                        '当前强制绑定壳层：SHELL://ECHO-0',
+                        '自 SEC-00 遭覆写后，序章逃亡流程固定以此虚拟实体出战'
+                      );
+                      return;
+                    }
                     if (state.handNumber === 1 && state.actionHistory.length === 0) {
                       setManualDisguiseOpen(true);
                     } else if (campaign.capturedEntities.length === 0) {
@@ -4364,10 +4792,20 @@ export function App() {
                       pushToast('warn', '对局进行中不可更换伪装', '请在下一场追捕开始时切换出战虚拟实体');
                     }
                   }}
-                  title={`${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`}
-                  aria-label={`当前出战虚拟实体：${activeDisguise.name}`}
+                  title={
+                    storyPlayerEntity?.isOverwrittenEcho0
+                      ? '当前强制绑定壳层：SHELL://ECHO-0（SEC-00 覆写后使用女主虚拟实体）'
+                      : `${activeDisguise.name}（${activeDisguise.isCore ? '本体核心' : '诱饵伪装'} · 通缉LV.${campaign.wantedLevel}）`
+                  }
+                  aria-label={
+                    storyPlayerEntity?.isOverwrittenEcho0
+                      ? '当前出战虚拟实体：SHELL://ECHO-0'
+                      : `当前出战虚拟实体：${activeDisguise.name}`
+                  }
                 >
-                  {activeDisguise.isCore ? '核心' : '诱饵'}：{activeDisguise.name}
+                  {storyPlayerEntity?.isOverwrittenEcho0
+                    ? storyPlayerEntity.label
+                    : `${activeDisguise.isCore ? '核心' : '诱饵'}：${activeDisguise.name}`}
                 </button>
                 <span className="lc-micro-tag">可用算力 {human.chips}</span>
               </div>
@@ -4853,6 +5291,7 @@ export function App() {
                               onClick={() => {
                                 setSec00IntroIndex(null);
                                 setMobileChatOpen(false);
+                                triggerTableEntrance();
                               }}
                             >
                               跳过
@@ -4879,6 +5318,7 @@ export function App() {
                                   if (isLast) {
                                     setSec00IntroIndex(null);
                                     setMobileChatOpen(false);
+                                    triggerTableEntrance();
                                     enqueueTask({
                                       kind: 'human',
                                       text: '“行了，对面那点算力也就够练手。先动起来吧——”',
@@ -5565,6 +6005,29 @@ export function App() {
 
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
+        {activeVnStory !== null && (
+          <VisualNovelStoryModal
+            script={
+              (
+                {
+                  'sec00-epilogue': SEC00_VN_SCRIPT,
+                  'sec01-intro': SEC01_VN_SCRIPT,
+                  'sec01-epilogue': SEC01_EPILOGUE_VN_SCRIPT,
+                  'sec02-intro': SEC02_VN_SCRIPT,
+                  'sec02-epilogue': SEC02_EPILOGUE_VN_SCRIPT,
+                  'sec03-intro': SEC03_VN_SCRIPT,
+                } as const
+              )[activeVnStory.kind]
+            }
+            lineIndex={activeVnStory.index}
+            playerCodename={campaign.playerCodename}
+            onChangeLine={(nextIdx) =>
+              setActiveVnStory((prev) => (prev ? { ...prev, index: nextIdx } : null))
+            }
+            onFinish={handleFinishVnStory}
+          />
+        )}
+
         {pendingSkillClaim && (
           <SkillLootReplaceModal
             title={pendingSkillClaim.title}

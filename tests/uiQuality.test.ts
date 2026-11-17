@@ -96,6 +96,8 @@ describe('UI quality gates: zero emoji, zero external alerts, unique descriptive
     assert.ok(storyBranch.includes('id="hud-btn-escape-map"'));
     assert.ok(storyBranch.includes('id="hud-btn-rewind"'));
     assert.ok(storyBranch.includes('data-tap-locked={human.chips > 0'));
+    assert.ok(storyBranch.includes('data-durability-stage={rewindButtonMeta.durability.stage}'));
+    assert.ok(storyBranch.includes('data-durability-pct={rewindButtonMeta.durability.durabilityPct}'));
     assert.ok(storyBranch.includes('startHoldStoryRewind'));
     assert.ok(storyBranch.includes('is-rewind-fill'));
     assert.equal(storyBranch.includes('id="hud-btn-quick-restart"'), false);

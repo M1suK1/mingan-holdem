@@ -6,6 +6,7 @@ import {
   completeEscapeTransition,
   createInitialEscapeProgress,
   loadEscapeProgress,
+  markEscapeIntroSeen,
   markEscapeNodeCleared,
   markEscapeWallRevealed,
   resetEscapeProgress,
@@ -139,5 +140,13 @@ describe('escapeMap: 黑域逃亡路线图状态机与钻缝轨迹插值', () =>
 
     const nodeSafe = loadEscapeProgress();
     assert.equal(nodeSafe.currentNodeIndex, 0);
+
+    let seen = createInitialEscapeProgress();
+    assert.deepEqual(seen.seenIntroNodes, []);
+    seen = markEscapeIntroSeen(seen, 1);
+    seen = markEscapeIntroSeen(seen, 1);
+    assert.deepEqual(seen.seenIntroNodes, [1]);
+    const sanitizedSeen = sanitizeEscapeProgress({ seenIntroNodes: [1, 'x', -1, 9] });
+    assert.deepEqual(sanitizedSeen.seenIntroNodes, [1]);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SEC00_MONOLOGUE_STEPS,
+  SEC00_VN_SCRIPT,
   createSec00TutorialState,
   getSec00Capabilities,
   getSec00Guidance,
@@ -124,5 +125,39 @@ describe('sec00Tutorial: 女主 ECHO-0 单轮连贯剧情教学全流程', () =>
     assert.equal(state.result?.reason, 'scan-caught');
     assert.equal(state.result?.winner, 'human');
     assert.equal(state.players.ai.chips, 0);
+  });
+
+  it('defines 21-line SEC-00 visual novel epilogue with mirror sprite tags, expression shifts, and zero spoilers', () => {
+    assert.equal(SEC00_VN_SCRIPT.length, 21);
+    assert.equal(SEC00_VN_SCRIPT[0].spriteMode, 'opponent');
+    assert.equal(SEC00_VN_SCRIPT[0].expression, 'calm');
+    assert.equal(SEC00_VN_SCRIPT[1].spriteMode, 'dissipating');
+    for (let i = 2; i <= 5; i += 1) {
+      assert.equal(SEC00_VN_SCRIPT[i].spriteMode, 'none');
+    }
+    for (let i = 6; i < SEC00_VN_SCRIPT.length; i += 1) {
+      assert.equal(SEC00_VN_SCRIPT[i].spriteMode, 'mirror');
+      assert.equal(SEC00_VN_SCRIPT[i].spriteTag, '终端镜像投影 // SHELL://ECHO-0');
+    }
+
+    const expressions = new Set(
+      SEC00_VN_SCRIPT.map((l) => l.expression).filter((e): e is NonNullable<typeof e> => Boolean(e))
+    );
+    assert.deepEqual(
+      Array.from(expressions).sort(),
+      ['angry', 'calm', 'sad', 'shy', 'surprise']
+    );
+    assert.equal(SEC00_VN_SCRIPT[12].soundCue, 'alarm-siren');
+
+    const fullCopy = SEC00_VN_SCRIPT.map(
+      (l) => `${l.speakerName} ${l.text} ${(l.hudAlerts ?? []).join(' ')}`
+    ).join(' ');
+    assert.ok(fullCopy.includes('SHELL://ECHO-0'));
+    assert.ok(fullCopy.includes('警报'));
+    assert.ok(fullCopy.includes('围捕'));
+    assert.ok(fullCopy.includes('逃跑'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃', '凌翡', '芙兰', '千夜']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-00 VN should not spoil "${spoiler}"`);
+    }
   });
 });

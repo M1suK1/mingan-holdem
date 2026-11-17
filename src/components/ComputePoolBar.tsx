@@ -19,6 +19,8 @@ export function ComputePoolBar({
   pot,
   startingChips,
   lastAction,
+  statusLabel,
+  statusWarn,
 }: ComputePoolBarProps) {
   const maxRef = Math.max(120, Math.round(startingChips * 0.45));
   const ratio = Math.min(1, pot / maxRef);
@@ -80,6 +82,15 @@ export function ComputePoolBar({
           </div>
         )}
       </div>
+
+      {statusLabel && (
+        <span
+          className={`lc-pool-status-alert ${statusWarn ? 'is-critical' : 'is-warn'}`}
+          role="status"
+        >
+          {statusLabel}
+        </span>
+      )}
 
       <span className="lc-pool-tier">{tierCode}</span>
     </div>

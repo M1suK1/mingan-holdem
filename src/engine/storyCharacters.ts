@@ -35,6 +35,7 @@ export const SEC02_EXPRESSION_PATHS: Record<ContractExpression, string> = {
 };
 
 export const SEC03_ASSET_BASE = './assets/story/sec03';
+export const LIN_LONGXIN_CASUAL_SPRITE = `${SEC03_ASSET_BASE}/casual.webp`;
 
 export const SEC03_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   calm: `${SEC03_ASSET_BASE}/calm.webp`,
@@ -478,6 +479,40 @@ export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
 
 export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
   return ECHO0_EXPRESSION_PATHS[expression] ?? ECHO0_EXPRESSION_PATHS.calm;
+}
+
+export interface StoryPlayerEntityView {
+  isOverwrittenEcho0: boolean;
+  portraitSrc: string;
+  label: string;
+  accentColor: string;
+}
+
+export function resolveStoryPlayerEntity(params: {
+  isStoryMode: boolean;
+  activeNodeIndex: number | null;
+  clearedIndices: number[];
+  sec00EpilogueBeatIndex?: number | null;
+  expression?: ContractExpression;
+}): StoryPlayerEntityView | null {
+  if (!params.isStoryMode || params.activeNodeIndex === null) {
+    return null;
+  }
+  const hasEcho0Shell =
+    params.activeNodeIndex >= 1 ||
+    params.clearedIndices.includes(0) ||
+    (params.sec00EpilogueBeatIndex !== null &&
+      params.sec00EpilogueBeatIndex !== undefined &&
+      params.sec00EpilogueBeatIndex >= 6);
+  if (!hasEcho0Shell) {
+    return null;
+  }
+  return {
+    isOverwrittenEcho0: true,
+    portraitSrc: resolveEcho0Sprite(params.expression ?? 'calm'),
+    label: '替壳：SHELL://ECHO-0',
+    accentColor: '#00F0FF',
+  };
 }
 
 export function resolveSec01Sprite(expression: ContractExpression = 'calm'): string {

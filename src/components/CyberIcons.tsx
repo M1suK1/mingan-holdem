@@ -534,3 +534,59 @@ export function PixelLockIcon({ size = 14, className = '' }: IconProps) {
     </svg>
   );
 }
+
+/** 回溯按钮裂纹像素叠层（72% 轻裂 / 48% 重裂 / 0% 碎裂） */
+export function PixelRewindCrackOverlay({
+  stage,
+}: {
+  stage: 'intact' | 'cracked-1' | 'cracked-2' | 'shattered';
+}) {
+  if (stage === 'intact') return null;
+
+  return (
+    <svg
+      viewBox="0 0 64 32"
+      preserveAspectRatio="none"
+      shapeRendering="crispEdges"
+      className={`lc-rewind-crack-svg is-${stage}`}
+      aria-hidden="true"
+    >
+      {/* Stage 1 (72%): upper-right to center hairline fracture */}
+      <path
+        d="M46 0h2v4h-2V0zm-2 4h2v4h-2V4zm-2 4h2v3h-2V8zm-3 3h3v2h-3v-2zm-3 2h3v2h-3v-2z"
+        fill={stage === 'cracked-1' ? '#FFB020' : '#FF4757'}
+        opacity={stage === 'cracked-1' ? 0.85 : 0.92}
+      />
+
+      {/* Stage 2 (48%): secondary bottom-left fracture + cross fissure */}
+      {(stage === 'cracked-2' || stage === 'shattered') && (
+        <>
+          <path
+            d="M12 32h2v-4h-2v4zm2-4h2v-3h-2v3zm2-3h3v-2h-3v2zm3-2h3v-3h-3v3zm3-3h4v-2h-4v2zm4-2h3v-3h-3v3z"
+            fill="#FF4757"
+            opacity={0.92}
+          />
+          <path
+            d="M32 14h4v2h-4v-2zm4 2h3v2h-3v-2zm3 2h4v2h-4v-2zm4 2h3v3h-3v-3zm-9-8h2v3h-2v-3z"
+            fill="#FFB020"
+            opacity={0.8}
+          />
+        </>
+      )}
+
+      {/* Stage 3 (0% shattered): full shattered diagonal cross + dead pixel gaps */}
+      {stage === 'shattered' && (
+        <>
+          <path
+            d="M4 0h3v3H4V0zm3 3h3v3H7V3zm3 3h4v2h-4V6zm4 2h3v3h-3V8zm3 3h4v2h-4v-2zm4 2h3v3h-3v-3zm3 3h4v2h-4v-2zm16-6h4v2h-4v-2zm4 2h3v3h-3v-3zm3 3h4v2h-4v-2zm4 2h4v3h-4v-3zm-20 4h3v4h-3v-4zm3 4h3v4h-3v-4z"
+            fill="#FF2E44"
+            opacity={0.95}
+          />
+          <rect x="28" y="13" width="6" height="4" fill="#040509" opacity={0.85} />
+          <rect x="18" y="6" width="3" height="2" fill="#FFFFFF" opacity={0.45} />
+          <rect x="44" y="22" width="3" height="2" fill="#FFFFFF" opacity={0.45} />
+        </>
+      )}
+    </svg>
+  );
+}

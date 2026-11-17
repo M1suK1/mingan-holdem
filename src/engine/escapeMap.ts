@@ -54,6 +54,7 @@ export interface EscapeMapProgress {
   highestUnlockedIndex: number;
   clearedIndices: number[];
   revealedWallIndices: number[];
+  seenIntroNodes: number[];
   equippedCheatSkills: string[];
   equippedSkills: string[];
   pendingTransition: EscapeTransition | null;
@@ -253,6 +254,7 @@ export function createInitialEscapeProgress(): EscapeMapProgress {
     highestUnlockedIndex: 0,
     clearedIndices: [],
     revealedWallIndices: [],
+    seenIntroNodes: [],
     equippedCheatSkills: [...DEFAULT_CHEAT_SKILLS],
     equippedSkills: [],
     pendingTransition: null,
@@ -288,6 +290,20 @@ export function markEscapeWallRevealed(
   return {
     ...progress,
     revealedWallIndices: [...progress.revealedWallIndices, nodeIndex].sort((a, b) => a - b),
+  };
+}
+
+export function markEscapeIntroSeen(
+  progress: EscapeMapProgress,
+  nodeIndex: number
+): EscapeMapProgress {
+  const node = ESCAPE_ROUTE_NODES[nodeIndex];
+  if (!node || node.isExit) return progress;
+  const current = progress.seenIntroNodes ?? [];
+  if (current.includes(nodeIndex)) return progress;
+  return {
+    ...progress,
+    seenIntroNodes: [...current, nodeIndex].sort((a, b) => a - b),
   };
 }
 
@@ -372,6 +388,17 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
       ).sort((a, b) => a - b)
     : [];
 
+  const seenIntroNodes = Array.isArray(obj.seenIntroNodes)
+    ? Array.from(
+        new Set(
+          obj.seenIntroNodes.filter(
+            (n): n is number =>
+              typeof n === 'number' && Number.isInteger(n) && n >= 0 && n < MAX_NODE_INDEX
+          )
+        )
+      ).sort((a, b) => a - b)
+    : [];
+
   const rawSupport = Array.isArray(obj.equippedSkills)
     ? Array.from(
         new Set(obj.equippedSkills.filter((s): s is string => typeof s === 'string' && s.length > 0))
@@ -426,6 +453,7 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
     highestUnlockedIndex,
     clearedIndices,
     revealedWallIndices,
+    seenIntroNodes,
     equippedCheatSkills,
     equippedSkills,
     pendingTransition,

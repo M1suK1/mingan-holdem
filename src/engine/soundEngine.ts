@@ -22,7 +22,10 @@ export type SoundCue =
   | 'charge-tick'
   | 'wall-hit'
   | 'blade-slash'
-  | 'fire-burn';
+  | 'fire-burn'
+  | 'rewind-crack'
+  | 'rewind-shatter'
+  | 'alarm-siren';
 
 export interface SoundSettings {
   enabled: boolean;
@@ -493,6 +496,80 @@ export function playSound(cue: SoundCue, opts?: { progress?: number }): boolean 
         type: 'sawtooth',
         gain: 0.18,
         filterHz: 520,
+      });
+      return true;
+
+    case 'rewind-crack':
+      // Brittle crystal-digital fracture + warning chime drop
+      playNoiseSnap(ctx, out, { duration: 0.06, centerHz: 2800, q: 2.2, gain: 0.2 });
+      playTone(ctx, out, {
+        duration: 0.11,
+        freqStart: 1480,
+        freqEnd: 620,
+        type: 'triangle',
+        gain: 0.18,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.045,
+        duration: 0.12,
+        freqStart: 420,
+        freqEnd: 185,
+        type: 'sawtooth',
+        gain: 0.15,
+        filterHz: 1100,
+      });
+      return true;
+
+    case 'rewind-shatter':
+      // Full anchor glass-circuit shatter + sub-channel power collapse
+      playNoiseSnap(ctx, out, { duration: 0.14, centerHz: 3600, q: 1.5, gain: 0.28 });
+      playNoiseSnap(ctx, out, { startOffset: 0.09, duration: 0.16, centerHz: 1750, q: 1.3, gain: 0.22 });
+      playTone(ctx, out, {
+        duration: 0.26,
+        freqStart: 1240,
+        freqEnd: 110,
+        type: 'sawtooth',
+        gain: 0.24,
+        filterHz: 1600,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.06,
+        duration: 0.32,
+        freqStart: 240,
+        freqEnd: 48,
+        type: 'square',
+        gain: 0.16,
+        filterHz: 680,
+      });
+      return true;
+
+    case 'alarm-siren':
+      // Dual-pulse high-priority cyber security breach siren
+      playTone(ctx, out, {
+        duration: 0.16,
+        freqStart: 880,
+        freqEnd: 1320,
+        type: 'square',
+        gain: 0.16,
+        filterHz: 2600,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.18,
+        duration: 0.16,
+        freqStart: 1320,
+        freqEnd: 780,
+        type: 'sawtooth',
+        gain: 0.15,
+        filterHz: 2400,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.36,
+        duration: 0.18,
+        freqStart: 920,
+        freqEnd: 1380,
+        type: 'square',
+        gain: 0.15,
+        filterHz: 2600,
       });
       return true;
 
