@@ -177,6 +177,10 @@ describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能'
     assert.equal(afterStoryTrap.confirmedTrapIndices?.includes(1), true);
     assert.ok(afterStoryTrap.lastAction?.label.includes('灼心·火符'));
 
+    // Next round resets confirmedTrapIndices so old TRAP! marks do not leak into newly randomized traps
+    const nextStoryRound = startNextHand(afterStoryTrap);
+    assert.deepEqual(nextStoryRound.confirmedTrapIndices, []);
+
     const autoBase = createInitialState({
       opponentSignatureSkill: 'gate-minefield',
       gateTrapMode: 'normal',

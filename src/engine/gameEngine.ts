@@ -607,8 +607,7 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
     opponentSignatureSkill: prev.opponentSignatureSkill,
     aiSpecialCheatSkill: prev.aiSpecialCheatSkill,
     gateTrapMode: prev.gateTrapMode,
-    confirmedTrapIndices:
-      prev.gateTrapMode === 'story' ? [...(prev.confirmedTrapIndices ?? [])] : undefined,
+    confirmedTrapIndices: undefined,
     pastHands: nextPastHands.slice(-12),
   });
 }

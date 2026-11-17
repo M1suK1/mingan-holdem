@@ -2733,8 +2733,12 @@ export function App() {
     pushToast('info', '已进入自由牌桌', '可使用快速重开、好友联机与自由换人功能');
   }, [isP2pSessionActive, disconnectP2p, state.config, character, pushToast]);
 
-  const handleTimeRewind = () => {
+  const handleTimeRewind = (forceFromCmd = false) => {
     if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
+    if (!forceFromCmd && latestStateRef.current.players.human.chips > 0) {
+      pushToast('warn', '时间锚点未激活', '仅在己方算力归零时可发动 ECHO-0 时间回溯');
+      return;
+    }
     if (sec00GuideActiveRef.current) {
       startSec00Tutorial(true);
       playSound('skill');
@@ -3085,6 +3089,16 @@ export function App() {
         handleResetEscapeRoute();
         setActiveModal({ type: 'none' });
         appendCmdLog('success', '[OK] 已重置逃亡路线、暗墙显形与牌桌状态');
+        return;
+      }
+      case 'rewind': {
+        if (activeEscapeNodeRef.current === null || isP2pSessionActive) {
+          appendCmdLog('error', '[ERR] 当前处于自由/联机牌桌，仅剧情牌桌可调用时间回溯（可用 goto 4 进入 SEC-04）');
+          return;
+        }
+        setActiveModal({ type: 'none' });
+        handleTimeRewind(true);
+        appendCmdLog('success', '[OK] 已调用 ECHO-0 时间回溯');
         return;
       }
       case 'resetprofile': {
@@ -3644,7 +3658,13 @@ export function App() {
                 id="hud-btn-rewind"
                 type="button"
                 className="lc-stack-btn pink"
-                onClick={handleTimeRewind}
+                disabled={human.chips > 0}
+                onClick={() => handleTimeRewind()}
+                title={
+                  human.chips > 0
+                    ? '仅在己方算力归零时可发动 ECHO-0 时间回溯'
+                    : '算力已归零，点击发动 ECHO-0 时间回溯'
+                }
                 aria-label="发动女主 ECHO-0 的时间回溯"
               >
                 <span className="lc-btn-inline">
@@ -3652,7 +3672,11 @@ export function App() {
                   时间回溯
                 </span>
                 <span className="lc-stack-sub">
-                  {rewindStepCount > 0 ? `ECHO-0 · 锚点 x${rewindStepCount}` : 'ECHO-0 · 重置节点'}
+                  {human.chips > 0
+                    ? '算力归零可用'
+                    : rewindStepCount > 0
+                      ? `ECHO-0 · 锚点 x${rewindStepCount}`
+                      : 'ECHO-0 · 重置节点'}
                 </span>
               </button>
             </>
@@ -4079,6 +4103,7 @@ export function App() {
                   isScanTarget={canScanBoard}
                   isScannedClean={alreadyScannedBoard}
                   isBurningHit={burningCardVfx?.boardIndex === slot.index}
+                  isConfirmedTrap={Boolean(isConfirmedTrap)}
                   justActed={Boolean(
                     !isSwappingHidden &&
                       evt &&

@@ -15,6 +15,7 @@ export type ParsedDebugCommand =
   | { ok: true; cmd: 'skill'; skillId: string }
   | { ok: true; cmd: 'clearskills' }
   | { ok: true; cmd: 'reset' }
+  | { ok: true; cmd: 'rewind' }
   | { ok: true; cmd: 'resetprofile' }
   | { ok: true; cmd: 'clear' }
   | { ok: false; error: string };
@@ -35,6 +36,7 @@ export const DEBUG_CHEAT_COMMANDS: DebugCommandMeta[] = [
   { syntax: 'clearskills', quickCmd: 'clearskills', desc: '清空当前已装备的额外协议技能槽' },
   { syntax: 'reveal', quickCmd: 'reveal', desc: '开关透视模式（查看对手暗牌与未翻公共牌）' },
   { syntax: 'lose', quickCmd: 'lose', desc: '将己方算力清 0（用于测试战败与重试状态）' },
+  { syntax: 'rewind (别名: 回溯)', quickCmd: 'rewind', desc: '调用剧情牌桌女主时间回溯按钮（返回行动前并保留火符红叉）' },
   { syntax: 'reset', quickCmd: 'reset', desc: '重置逃亡路线进度与已显形暗墙' },
   { syntax: 'resetprofile (别名: wipe)', quickCmd: 'resetprofile', desc: '彻底重置玩家档案（路线/暗墙/实体/技能/教程）' },
   { syntax: 'clear', quickCmd: 'clear', desc: '清空 CMD 控制台输出历史' },
@@ -77,6 +79,10 @@ export function parseDebugCommand(rawInput: string): ParsedDebugCommand {
     }
     case 'reset':
       return { ok: true, cmd: 'reset' };
+    case 'rewind':
+    case '回溯':
+    case '时间回溯':
+      return { ok: true, cmd: 'rewind' };
     case 'resetprofile':
     case 'wipe':
     case 'clearprofile':

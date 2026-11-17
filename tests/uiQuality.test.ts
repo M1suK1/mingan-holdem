@@ -95,6 +95,7 @@ describe('UI quality gates: zero emoji, zero external alerts, unique descriptive
     assert.ok(stackBlock.includes('id="hud-btn-settings"'));
     assert.ok(storyBranch.includes('id="hud-btn-escape-map"'));
     assert.ok(storyBranch.includes('id="hud-btn-rewind"'));
+    assert.ok(storyBranch.includes('disabled={human.chips > 0}'));
     assert.equal(storyBranch.includes('id="hud-btn-quick-restart"'), false);
     assert.equal(storyBranch.includes('id="hud-btn-p2p"'), false);
     assert.equal(storyBranch.includes('id="hud-btn-switch-char"'), false);

@@ -23,6 +23,7 @@ interface CyberCard3DProps {
   isScanTarget?: boolean;
   isScannedClean?: boolean;
   isBurningHit?: boolean;
+  isConfirmedTrap?: boolean;
   actionHint?: string;
   onClick?: () => void;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
@@ -53,6 +54,7 @@ export function CyberCard3D({
   isScanTarget = false,
   isScannedClean = false,
   isBurningHit = false,
+  isConfirmedTrap = false,
   actionHint,
   onClick,
   onDragStart,
@@ -192,7 +194,8 @@ export function CyberCard3D({
         </div>
 
         {/* Encrypted Firewall Card Back */}
-        <div className="px-card-face px-card-back">
+        <div className={`px-card-face px-card-back ${isConfirmedTrap ? 'is-confirmed-trap' : ''}`}>
+          {isConfirmedTrap && <div className="px-card-trap-cross" aria-hidden="true" />}
           <div className="px-back-grid-icon" aria-hidden="true">
             <span />
           </div>

@@ -31,6 +31,8 @@ describe('debugCmd: 黑域调试终端指令解析与作弊效果', () => {
     assert.deepEqual(parseDebugCommand('resetprofile'), { ok: true, cmd: 'resetprofile' });
     assert.deepEqual(parseDebugCommand('wipe'), { ok: true, cmd: 'resetprofile' });
     assert.deepEqual(parseDebugCommand('clearprofile'), { ok: true, cmd: 'resetprofile' });
+    assert.deepEqual(parseDebugCommand('rewind'), { ok: true, cmd: 'rewind' });
+    assert.deepEqual(parseDebugCommand('回溯'), { ok: true, cmd: 'rewind' });
 
     const badGoto = parseDebugCommand('goto 99');
     assert.equal(badGoto.ok, false);
