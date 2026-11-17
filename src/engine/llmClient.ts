@@ -217,9 +217,11 @@ export function serializeStateForLlm(state: GameState): string {
     const reasonLabel =
       p.reason === 'scan-caught'
         ? '扫描抓获篡改'
-        : p.reason === 'fold'
-          ? '对手弃牌'
-          : '摊牌比牌';
+        : p.reason === 'mikiri-counter'
+          ? '见切·燕返反杀'
+          : p.reason === 'fold'
+            ? '对手弃牌'
+            : '摊牌比牌';
     const catTxt =
       p.aiHandCategory && p.humanHandCategory
         ? ` | 牌型:我方[${p.aiHandCategory}] vs 玩家[${p.humanHandCategory}]`
@@ -1005,7 +1007,9 @@ export function enumerateLegalActionHints(state: GameState): string[] {
           ? ['plus-one', 'minus-one', 'flip-suit', 'null-erase']
           : state.aiSpecialCheatSkill === 'pink-double'
             ? ['plus-one', 'minus-one', 'flip-suit', 'pink-double']
-            : ['plus-one', 'minus-one', 'flip-suit'];
+            : state.aiSpecialCheatSkill === 'mikiri-counter'
+              ? ['plus-one', 'minus-one', 'flip-suit', 'mikiri-counter']
+              : ['plus-one', 'minus-one', 'flip-suit'];
     const availableSkills = candidateSkills.filter((s) => !ai.sealedSkills.includes(s));
     if (openHandIdx.length > 0 && availableSkills.length > 0 && ai.chips >= 40) {
       hints.push(

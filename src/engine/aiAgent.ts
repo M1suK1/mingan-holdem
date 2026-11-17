@@ -421,6 +421,40 @@ function pickSpecialPinkDoubleAction(
   return bestAct && (bestGain >= 50 || bestPinkTotal >= 4) ? bestAct : null;
 }
 
+function pickSpecialMikiriCounterAction(
+  state: GameState,
+  actorId: PlayerId
+): GameAction | null {
+  if (actorId !== 'ai' || state.aiSpecialCheatSkill !== 'mikiri-counter') return null;
+  if (state.usedHackThisTurn || getBetDiff(state, actorId) > 0) return null;
+
+  const actor = state.players[actorId];
+  if (actor.chips < 180) return null;
+
+  // At most 1 active counter-trap per hand across hand + board
+  const alreadyArmed =
+    actor.hand.some((hc) => hc.card.isCounterTrap) ||
+    state.board.some((b) => b.swappedBy === actorId && b.card.isCounterTrap);
+  if (alreadyArmed) return null;
+
+  for (let idx = 0; idx < actor.hand.length; idx += 1) {
+    const hc = actor.hand[idx];
+    if (
+      hc.visibility !== 'open' ||
+      hc.card.isBlank ||
+      hc.card.isCounterTrap ||
+      (hc.tamperedBy && hc.tamperedBy.length > 0)
+    ) {
+      continue;
+    }
+    const act: GameAction = { type: 'hack', handIndex: idx, skill: 'mikiri-counter' };
+    if (isActionLegal(state, act)) {
+      return act;
+    }
+  }
+  return null;
+}
+
 function pickBestSwappableHandIndex(
   state: GameState,
   actorId: PlayerId,
@@ -755,6 +789,20 @@ export class LocalAiAgent implements OpponentAgent {
             '让我理一下这手粉嘟嘟的牌面节奏。',
             telemetry,
             'smile'
+          ),
+        };
+      }
+
+      const mikiriAct = pickSpecialMikiriCounterAction(state, this.playerId);
+      if (mikiriAct && roll < 0.55) {
+        return {
+          action: mikiriAct,
+          dialogue: buildDialogue(
+            speaker,
+            'idle',
+            '稍微纳刀调整一下手头的牌序。',
+            telemetry,
+            'calm'
           ),
         };
       }

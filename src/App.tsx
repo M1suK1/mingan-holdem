@@ -169,14 +169,17 @@ import {
 import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
+  isKiriSamuraiCharacter,
   isMuteGarbledCharacter,
   isNeonDragonCharacter,
+  pickKiriSamuraiActionLine,
   pickMuteActionThought,
   pickNeonDragonActionLine,
   resolveEcho0Sprite,
   resolveSec01Sprite,
   resolveSec02Sprite,
   resolveSec03Sprite,
+  resolveSec04Sprite,
 } from './engine/storyCharacters.ts';
 import { resolveTutorialSpotlightPlan } from './engine/tutorialSpotlight.ts';
 import { CyberBackdrop } from './components/CyberBackdrop.tsx';
@@ -1622,7 +1625,9 @@ export function App() {
           if (decision.action.type !== 'hack') {
             const neonLine = isNeonDragonCharacter(char.id)
               ? pickNeonDragonActionLine(decision.action.type)
-              : null;
+              : isKiriSamuraiCharacter(char.id)
+                ? pickKiriSamuraiActionLine(decision.action.type)
+                : null;
             enqueueTask({
               kind: 'opponent',
               speaker: snapshot.players.ai.name,
@@ -1781,11 +1786,15 @@ export function App() {
         ? res.winner === 'human'
           ? `居然扫出了对手底层篡改！算力池 ${res.potWon} 归我方。`
           : `抓到我方改牌了……算力池 ${res.potWon} 归对端。`
-        : res.winner === 'ai'
-          ? `算力池 ${res.potWon} 已被对手接管。`
-          : res.winner === 'human'
-            ? `漂亮的牌序博弈，本局算力池 ${res.potWon} 到手！`
-            : `完全同分平局，双方平分算力池 ${res.potWon}。`;
+        : res.reason === 'mikiri-counter'
+          ? res.winner === 'human'
+            ? `见切·燕返反杀成功！对手扫描踏入剑意，算力池 ${res.potWon} 归我方。`
+            : `对端「见切·燕返」反杀！我方扫描触发剑意陷阱，算力池 ${res.potWon} 归对手。`
+          : res.winner === 'ai'
+            ? `算力池 ${res.potWon} 已被对手接管。`
+            : res.winner === 'human'
+              ? `漂亮的牌序博弈，本局算力池 ${res.potWon} 到手！`
+              : `完全同分平局，双方平分算力池 ${res.potWon}。`;
 
     if (isP2pConnected) {
       enqueueTask({
@@ -1813,9 +1822,11 @@ export function App() {
         const reasonTxt =
           res.reason === 'scan-caught'
             ? '扫描抓获篡改直接判胜'
-            : res.reason === 'fold'
-              ? '对手弃牌'
-              : `摊牌比牌（我方[${res.aiEval?.categoryName ?? '未知'}] vs 玩家[${res.humanEval?.categoryName ?? '未知'}]）`;
+            : res.reason === 'mikiri-counter'
+              ? '见切·燕返反杀扫描直接判胜'
+              : res.reason === 'fold'
+                ? '对手弃牌'
+                : `摊牌比牌（我方[${res.aiEval?.categoryName ?? '未知'}] vs 玩家[${res.humanEval?.categoryName ?? '未知'}]）`;
         const roundResultSummary = `第#${state.handNumber}局${winTxt}（${reasonTxt}），奖池 ${res.potWon}；我方本局投入 ${state.players.ai.totalCommitted}（余 ${state.players.ai.chips}），玩家投入 ${state.players.human.totalCommitted}（余 ${state.players.human.chips}）。`;
 
         void requestEncounterDialogue({
@@ -2126,6 +2137,10 @@ export function App() {
         pushToast('warn', '仅可对己方公开明牌使用篡改技能');
       } else if (hc.card.isBlank) {
         pushToast('warn', '该牌已被抹除为废牌，无法再次篡改');
+      } else if (hc.card.isCounterTrap) {
+        pushToast('warn', '该明牌已注入「见切·燕返」剑意，不可叠加其余篡改');
+      } else if (skill === 'mikiri-counter' && hc.tamperedBy && hc.tamperedBy.length > 0) {
+        pushToast('warn', '「见切·燕返」仅可对未篡改的原始明牌使用');
       } else if (skill === 'pink-double') {
         pushToast(
           'warn',
@@ -3202,9 +3217,11 @@ export function App() {
   const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
   const isSec02Boss = activeEscapeNode?.index === 2 && !isP2pConnected;
   const isSec03Boss = activeEscapeNode?.index === 3 && !isP2pConnected;
+  const isSec04Boss = activeEscapeNode?.index === 4 && !isP2pConnected;
   const isPinkMirageActive = state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi;
+  const isBurningBoardActive = state.opponentSignatureSkill === 'gate-minefield' && !revealAllAi;
 
-  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 使用 ECHO-0，SEC-01 使用凌翡，SEC-02 使用芙兰，SEC-03 使用粉红软软龙）
+  // 虚拟空间对战中，追捕者采用魔女化虚拟实体形象（SEC-00 ECHO-0，SEC-01 凌翡，SEC-02 芙兰，SEC-03 粉红软软龙，SEC-04 绯凪·千夜）
   const portraitSrc =
     isP2pConnected && remotePeer?.portrait
       ? remotePeer.portrait
@@ -3216,7 +3233,9 @@ export function App() {
             ? resolveSec02Sprite(activeExpression)
             : isSec03Boss
               ? resolveSec03Sprite(activeExpression)
-              : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
+              : isSec04Boss
+                ? resolveSec04Sprite(activeExpression)
+                : resolveVirtualEntityPortrait(effectiveCharacter, activeExpression);
   const accentColor =
     isP2pConnected && remotePeer?.accentColor
       ? remotePeer.accentColor
@@ -3228,9 +3247,11 @@ export function App() {
             ? '#38BDF8'
             : isSec03Boss
               ? '#FF2E88'
-              : llmConfig.overloadPersona
+              : isSec04Boss
                 ? '#FF4757'
-                : effectiveCharacter.color || '#FF2E88';
+                : llmConfig.overloadPersona
+                  ? '#FF4757'
+                  : effectiveCharacter.color || '#FF2E88';
 
   const humanWinIds = new Set(state.result?.humanEval?.bestFive.map((c) => c.id) ?? []);
   const aiWinIds = new Set(state.result?.aiEval?.bestFive.map((c) => c.id) ?? []);
@@ -3558,7 +3579,7 @@ export function App() {
                 isSec01Boss ? 'is-sec01-framing' : ''
               } ${isSec02Boss ? 'is-sec02-framing' : ''} ${
                 isSec03Boss ? 'is-sec03-framing' : ''
-              }`}
+              } ${isSec04Boss ? 'is-sec04-framing' : ''}`}
               width={550}
               height={420}
             />
@@ -3573,7 +3594,9 @@ export function App() {
                     isSec00Echo0 ? 'is-echo0-framing' : ''
                   } ${isSec01Boss ? 'is-sec01-framing' : ''} ${
                     isSec02Boss ? 'is-sec02-framing' : ''
-                  } ${isSec03Boss ? 'is-sec03-framing' : ''}`}
+                  } ${isSec03Boss ? 'is-sec03-framing' : ''} ${
+                    isSec04Boss ? 'is-sec04-framing' : ''
+                  }`}
                   style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
                   width={550}
                   height={420}
@@ -3730,10 +3753,22 @@ export function App() {
         {/* COL 2, ROW 2: 4 Community Cards (Direct Flip + Click-Swap + Drag-Drop Target) */}
         <section
           id="lc-board-zone"
-          className={`lc-hud-box lc-board-zone ${isPinkMirageActive ? 'is-pink-mirage' : ''}`}
+          className={`lc-hud-box lc-board-zone ${isPinkMirageActive ? 'is-pink-mirage' : ''} ${
+            isBurningBoardActive ? 'is-burning-board' : ''
+          }`}
           aria-label="公共加密节点区"
         >
           {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
+          {isBurningBoardActive && (
+            <div className="lc-board-fire-vfx" aria-hidden="true">
+              <span className="lc-fire-ember e1" />
+              <span className="lc-fire-ember e2" />
+              <span className="lc-fire-ember e3" />
+              <span className="lc-fire-ember e4" />
+              <span className="lc-fire-ember e5" />
+              <span className="lc-fire-ember e6" />
+            </div>
+          )}
           <div className="lc-board-header">
             <span className="lc-board-title">
               <PixelNodesIcon size={13} />
@@ -3741,6 +3776,9 @@ export function App() {
             </span>
             {isPinkMirageActive && (
               <span className="lc-micro-tag pink">粉曜迷彩 · 明牌全粉</span>
+            )}
+            {isBurningBoardActive && (
+              <span className="lc-micro-tag danger">灼心·火符 · 3处暗符</span>
             )}
             <span className="lc-micro-tag cyan">
               剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}
@@ -4040,7 +4078,9 @@ export function App() {
                             ? { id: 'hack-btn-null-erase', label: '抹除', icon: <PixelSeverIcon size={12} /> }
                             : skill === 'pink-double'
                               ? { id: 'hack-btn-pink-double', label: '双粉', icon: <PixelFlipSuitIcon size={12} /> }
-                              : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
+                              : skill === 'mikiri-counter'
+                                ? { id: 'hack-btn-mikiri-counter', label: '见切', icon: <PixelSeverIcon size={12} /> }
+                                : { id: 'hack-btn-flip-suit', label: '反色', icon: <PixelFlipSuitIcon size={12} /> };
                   const cost = getEffectiveHackCost(state, 'human', skill);
                   const isSealed = human.sealedSkills.includes(skill);
                   const isColdLocked = state.lockedHumanHackSkill === skill;
@@ -4141,7 +4181,12 @@ export function App() {
                   {state.playerAcquiredSkills.map((sid, sIdx) => {
                     const sk = getSkillById(sid);
                     if (!sk) return null;
-                    if (sid === 'crown-ace' || sid === 'null-erase' || sid === 'pink-double') {
+                    if (
+                      sid === 'crown-ace' ||
+                      sid === 'null-erase' ||
+                      sid === 'pink-double' ||
+                      sid === 'mikiri-counter'
+                    ) {
                       const hackId = sid as HackSkillId;
                       const isSealed = human.sealedSkills.includes(hackId);
                       const isColdLocked = state.lockedHumanHackSkill === hackId;
@@ -4572,11 +4617,13 @@ export function App() {
                   <PixelMenuIcon kind="audit" size={15} />
                   {state.result.reason === 'scan-caught'
                     ? `${state.result.winner === 'human' ? '我方' : ai.name}抓获篡改`
-                    : state.result.reason === 'showdown' &&
-                        state.result.humanEval &&
-                        state.result.aiEval
-                      ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
-                      : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : ai.name}弃牌`}
+                    : state.result.reason === 'mikiri-counter'
+                      ? `${state.result.winner === 'human' ? '我方' : ai.name}见切反杀`
+                      : state.result.reason === 'showdown' &&
+                          state.result.humanEval &&
+                          state.result.aiEval
+                        ? `${state.result.humanEval.categoryName} vs ${state.result.aiEval.categoryName}`
+                        : `${otherPlayer(state.result.winner === 'tie' ? 'human' : state.result.winner) === 'human' ? '我方' : ai.name}弃牌`}
                 </span>
                 <span className="lc-stack-sub">奖池 {state.result.potWon}</span>
               </button>

@@ -45,6 +45,17 @@ export const SEC03_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   shy: `${SEC03_ASSET_BASE}/shy.webp`,
 };
 
+export const SEC04_ASSET_BASE = './assets/story/sec04';
+
+export const SEC04_EXPRESSION_PATHS: Record<ContractExpression, string> = {
+  calm: `${SEC04_ASSET_BASE}/calm.webp`,
+  smile: `${SEC04_ASSET_BASE}/smile.webp`,
+  surprise: `${SEC04_ASSET_BASE}/surprise.webp`,
+  sad: `${SEC04_ASSET_BASE}/sad.webp`,
+  angry: `${SEC04_ASSET_BASE}/angry.webp`,
+  shy: `${SEC04_ASSET_BASE}/shy.webp`,
+};
+
 function buildDualVariants(paths: Record<ContractExpression, string>): Record<string, string> {
   const variants: Record<string, string> = { ...paths };
   for (const [expr, url] of Object.entries(paths)) {
@@ -377,11 +388,92 @@ export const SEC03_CHARACTER_DOSSIER: ContractCharacter = {
   hasVoice: false,
 };
 
+export const SEC04_CHARACTER_DOSSIER: ContractCharacter = {
+  id: 'sec04-kiri-samurai',
+  fileName: 'story-sec04-dossier.json',
+  name: '绯凪·千夜',
+  codename: 'KIRI-04',
+  title: '黑河反黑客安全官 · 温柔而无情的闸门武士大姐姐',
+  element: '苍焰居合系',
+  archetype: '控制',
+  color: '#FF4757',
+  quote: '抱歉了，小家伙……这里可是黑域最后的出口。按照黑河的安全协议，接下来哪怕一毫秒都不会手下留情哦。',
+  goal: '受黑河企业雇佣、隶属于反黑客安全组织，名义上只负责清理企业内网安全漏洞，实际上在黑域协议网出口担任高算力逃亡者的最终筛选武士门槛。',
+  appearance:
+    '紫银渐变超长直发配粉青内层挑染的高挑年上大姐姐，头戴靛蓝大蝴蝶结与花饰发簪，身着黑蕾丝挂脖露胸内衬与蓝渐黑长袖和服羽织，腰束靛蓝大蝴蝶结配赤红组纽，黑蕾丝吊带过膝袜与蓝带高齿木屐，肩扛缠有赤红流苏、鞘身萦绕红蓝幻焰的太刀。',
+  personality:
+    '平常总是挂着日系温柔年上大姐姐般的宽容浅笑，语调柔和体贴；作为黑河公司雇佣的反黑客组织成员，她对安全审计流程一丝不苟、公事公办。然而只要拔刀站到黑域协议网最终出口前，她便会化身毫无私情的冷峻武士，不带半分怜悯地以「灼心·火符」封锁退路、以「见切·燕返」斩断所有偷窥者的生路。',
+  witchPersonality:
+    '刀鞘上蓝粉业火完全燃起、眼尾微微泛红的认真姿态——“啊啦，还真是让我稍微认真了一点呢……不过，能走过我这一关的人才配被称为「完美虚拟实体」呀。”',
+  outfitDescription:
+    '黑蕾丝挂脖内搭、蓝黑渐变长袖振袖羽织、靛蓝腰结与赤红粗绳流苏、黑蕾丝吊带过膝袜、蓝带木屐、缠流苏黑金刀镡长太刀。',
+  stats: {
+    magic: 90,
+    insight: 94,
+    agility: 88,
+    empathy: 62,
+  },
+  traits: [
+    {
+      id: 'sec04-blackriver-anti-hack',
+      name: '反黑客审计门卫 // GATEKEEPER',
+      polarity: 'neutral',
+      tags: ['黑河反黑客组织', '高算力筛选'],
+      description:
+        '黑河企业雇佣的反黑客组织王牌；表面职责仅是维护黑河网络安全，暗中却奉命镇守黑域出口，将所有高算力潜逃者当成最终试炼标的物进行无情拦截。',
+    },
+    {
+      id: 'sec04-samurai-oneesan',
+      name: '公事公办的温柔大姐姐 // GENTLE BLADE',
+      polarity: 'negative',
+      tags: ['温柔年上', '武士般毫不留情'],
+      description:
+        '嘴上说着“慢点走也没关系哦”，出刀与加注却从不迟疑半寸——只要判定对方跨越合规线，哪怕声音依然温柔，斩落算力的太刀也绝不留情。',
+    },
+    {
+      id: 'sec04-burning-talisman',
+      name: '灼心·火符 // BURNING SEAL',
+      polarity: 'positive',
+      tags: ['SEC-04 被动', '公共区燃烧'],
+      description:
+        '在公共加密节点间燃起 3 道炽烈火符，翻开或换入触符瞬间即刻焚毁玩家全部算力；对局期间整个公共牌区都会被灼热余烬笼罩。',
+    },
+    {
+      id: 'sec04-mikiri-tsubame',
+      name: '见切·燕返 // MIKIRI COUNTER',
+      polarity: 'positive',
+      tags: ['作弊技能', '反扫描斩杀'],
+      description:
+        '绯凪·千夜的秘传反制技（与 +1/-1/反色同级且不可叠加）：对己方 1 张未篡改明牌注入反制剑意（换入公共区依然有效）；一旦对手扫描该牌，她将顺势拔刀反杀并直接赢下本小局。',
+    },
+  ],
+  voice: {
+    tone: '日系温柔年上大姐姐的轻柔慢语速，常带关切的尾音与礼貌叹息，但谈到清剿与斩杀时字句冷彻、公事公办，像端坐刀前的武士。',
+    habits: [
+      '先温柔道歉或夸奖对手“做得不错呢”，紧接着便下达最冷酷的清零重注',
+      '习惯把扫描抓包称作“冒失的视线”，把「见切·燕返」当作对无礼偷窥者的居合惩戒',
+      '即便算力受损也从容扶好蝴蝶结，公事公办地完成每一道安全拦截程序',
+    ],
+    samples: [
+      '辛苦你一路走到零号出口了呢。不过……黑河的防火墙可不是能靠温柔通融过去的地方哦？',
+      '牌桌上的火符已经点亮三枚了呢。请小心选择要翻开的那一张——姐姐我其实也不太想看你瞬间烧尽的样子。',
+      '啊啦……竟然对这道剑意挥出「扫描」了吗？抱歉呢，这就是公事公办的「见切·燕返」……这一局，就由我收下了。',
+      '真是令人惊叹的执念与直觉……那么按筛选协议，出口就在你身后了。请不要回头，继续往前走吧。',
+    ],
+  },
+  portrait: SEC04_EXPRESSION_PATHS.calm,
+  witchPortrait: SEC04_EXPRESSION_PATHS.smile,
+  variants: buildDualVariants(SEC04_EXPRESSION_PATHS),
+  expressionCount: 6,
+  hasVoice: false,
+};
+
 export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
   ECHO0_CHARACTER_DOSSIER,
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
   SEC03_CHARACTER_DOSSIER,
+  SEC04_CHARACTER_DOSSIER,
 ];
 
 export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
@@ -398,6 +490,50 @@ export function resolveSec02Sprite(expression: ContractExpression = 'calm'): str
 
 export function resolveSec03Sprite(expression: ContractExpression = 'calm'): string {
   return SEC03_EXPRESSION_PATHS[expression] ?? SEC03_EXPRESSION_PATHS.calm;
+}
+
+export function resolveSec04Sprite(expression: ContractExpression = 'calm'): string {
+  return SEC04_EXPRESSION_PATHS[expression] ?? SEC04_EXPRESSION_PATHS.calm;
+}
+
+export function isKiriSamuraiCharacter(characterId?: string): boolean {
+  return characterId === SEC04_CHARACTER_DOSSIER.id;
+}
+
+const KIRI_SAMURAI_ACTION_LINES: Record<string, readonly string[]> = {
+  raise: [
+    '抱歉啦，公事公办——这一步必须要加注施压了哦。',
+    '做得很好呢。不过，能接住姐姐这一刀加注吗？',
+  ],
+  swap: [
+    '这张节点需要重新纳刀封存……请小心火符哦。',
+    '稍微整理一下手头的牌序。可别轻易对着姐姐的牌乱扫呢。',
+  ],
+  flip: [
+    '让我替你揭开这一枚节点吧——幸好这里没有灼心火符呢。',
+    '按安全审计流程推进下一张明牌，请多指教了。',
+  ],
+  call: [
+    '跟上这一注呢。你的勇气很让人欣赏，只是还不够通过筛选哦。',
+    '先补齐算力。接下来，就要看你敢不敢往前走了。',
+  ],
+  scan: [
+    '刚才那一下指尖停顿太久了呢……按规矩，我必须检查一遍哦。',
+    '抱歉，姐姐对异常信号可是公事公办的——请让我核验一下。',
+  ],
+  fold: [
+    '这一局你的出牌很干净呢，我退后一步便是——下一局可不会这么轻松了哦。',
+  ],
+};
+
+export function pickKiriSamuraiActionLine(
+  actionType: string,
+  rng: () => number = Math.random
+): string | null {
+  const pool = KIRI_SAMURAI_ACTION_LINES[actionType];
+  if (!pool || pool.length === 0) return null;
+  const idx = Math.floor(rng() * pool.length) % pool.length;
+  return pool[Math.max(0, idx)];
 }
 
 export function isMuteGarbledCharacter(characterId?: string): boolean {
@@ -492,5 +628,6 @@ export function getStoryCharacterByEscapeNode(nodeIndex: number | null): Contrac
   if (nodeIndex === 1) return SEC01_CHARACTER_DOSSIER;
   if (nodeIndex === 2) return SEC02_CHARACTER_DOSSIER;
   if (nodeIndex === 3) return SEC03_CHARACTER_DOSSIER;
+  if (nodeIndex === 4) return SEC04_CHARACTER_DOSSIER;
   return null;
 }

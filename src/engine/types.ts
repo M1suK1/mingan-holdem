@@ -17,6 +17,8 @@ export interface Card {
   isBlank?: boolean;
   /** True when enhanced by pink-double cheat skill so this Pink card counts as 2 Pink cards for Flush evaluation */
   isDoublePink?: boolean;
+  /** True when armed with mikiri-counter trap: if opponent scans this card, owner wins the hand immediately */
+  isCounterTrap?: boolean;
 }
 
 export type PlayerId = 'human' | 'ai';
@@ -27,7 +29,8 @@ export type HackSkillId =
   | 'flip-suit'
   | 'crown-ace'
   | 'null-erase'
-  | 'pink-double';
+  | 'pink-double'
+  | 'mikiri-counter';
 
 export type OpponentSignatureSkillId =
   | 'siphon-cache'
@@ -235,7 +238,7 @@ export interface ActionLogEntry {
 
 export interface ShowdownResult {
   winner: PlayerId | 'tie';
-  reason: 'fold' | 'showdown' | 'scan-caught';
+  reason: 'fold' | 'showdown' | 'scan-caught' | 'mikiri-counter';
   potWon: number;
   humanEval?: HandEvaluation;
   aiEval?: HandEvaluation;
@@ -246,7 +249,7 @@ export interface ShowdownResult {
 export interface HandRoundSummary {
   handNumber: number;
   winner: PlayerId | 'tie';
-  reason: 'fold' | 'showdown' | 'scan-caught';
+  reason: 'fold' | 'showdown' | 'scan-caught' | 'mikiri-counter';
   potWon: number;
   committedByHuman: number;
   committedByAi: number;
@@ -283,7 +286,7 @@ export interface GameState {
   peekedBoardIndices: number[];
   frozenBoardIndices: number[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double' | 'mikiri-counter';
   lockedHumanHackSkill?: HackSkillId;
   lockedAiHackSkill?: HackSkillId;
   siphonUsedThisHand?: { human: boolean; ai: boolean };

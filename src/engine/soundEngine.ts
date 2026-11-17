@@ -98,6 +98,7 @@ export function actionToSoundCue(
     case 'hack':
       return 'hack';
     case 'scan':
+      if (action.label?.includes('见切·燕返')) return 'blade-slash';
       return action.caught ? 'scan-caught' : 'scan-clean';
     case 'use-skill':
       return action.label?.includes('富兰克林之死') ? 'blade-slash' : 'skill';

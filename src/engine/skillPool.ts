@@ -143,7 +143,8 @@ export function getSkillGroup(skillId: string): SkillGroup {
     skillId === 'crown-ace' ||
     skillId === 'parity-spoof' ||
     skillId === 'null-erase' ||
-    skillId === 'pink-double'
+    skillId === 'pink-double' ||
+    skillId === 'mikiri-counter'
   ) {
     return 'cheat';
   }
@@ -222,6 +223,17 @@ export const SKILL_POOL_REGISTRY: SkillPoolEntry[] = [
     targetMode: 'human-open-hand',
     implemented: true,
     tags: ['作弊技能', '双粉同花'],
+  },
+  {
+    id: 'mikiri-counter',
+    name: '见切·燕返',
+    category: 'hack',
+    skillGroup: 'cheat',
+    summary: '与 +1 / -1 / 反色同级作弊技（不可与其他篡改叠加）：预支 55 算力对己方 1 张未篡改明牌施放反制剑意（换入公共区依然有效）；若对手扫描此牌，直接反杀赢得本小局底池。',
+    costHint: 55,
+    targetMode: 'human-open-hand',
+    implemented: true,
+    tags: ['作弊技能', '反扫描斩杀'],
   },
   {
     id: 'siphon-cache',
