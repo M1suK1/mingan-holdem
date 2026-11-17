@@ -1060,6 +1060,14 @@ button:disabled {
   transition: width 30ms linear;
 }
 
+.lc-hold-fill.is-rewind-fill {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 46, 136, 0.34),
+    rgba(255, 71, 87, 0.62)
+  );
+}
+
 .lc-hold-btn > span {
   position: relative;
   z-index: 1;
@@ -1583,6 +1591,27 @@ button:disabled {
   border-color: var(--neon-danger);
   color: #ffb2ba;
   background: rgba(255, 71, 87, 0.14);
+}
+
+.lc-stack-btn.pink.is-tap-locked:not(.is-holding) {
+  border-color: rgba(255, 46, 136, 0.42);
+  color: rgba(232, 240, 255, 0.72);
+  background: rgba(6, 9, 17, 0.88);
+}
+
+.lc-stack-btn.pink.is-tap-locked:not(.is-holding)::before {
+  background: rgba(255, 46, 136, 0.45);
+}
+
+.lc-stack-btn.pink.is-tap-locked:hover:not(:disabled) {
+  border-color: var(--neon-pink);
+  color: var(--text-main);
+}
+
+.lc-stack-btn.is-holding {
+  border-color: #ffffff;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(255, 46, 136, 0.48);
 }
 
 .lc-stack-sub {

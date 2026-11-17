@@ -146,6 +146,12 @@ import {
   applyDebugWinHand,
   parseDebugCommand,
 } from './engine/debugCmd.ts';
+import {
+  REWIND_HOLD_DURATION_MS,
+  computeRewindHoldProgress,
+  getRewindButtonMeta,
+  resolveRewindTapAction,
+} from './engine/rewindHold.ts';
 import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
 import {
   ESCAPE_ROUTE_NODES,
@@ -500,6 +506,12 @@ export function App() {
   const lastHandledBurnIdRef = useRef<string | null>(null);
   const storyRewindStackRef = useRef<GameState[]>([]);
   const [rewindStepCount, setRewindStepCount] = useState(0);
+  const [rewindHoldProgress, setRewindHoldProgress] = useState(0);
+  const rewindHoldIntervalRef = useRef<number | null>(null);
+  const rewindHoldStartMsRef = useRef<number | null>(null);
+  const rewindHoldLastElapsedRef = useRef<number>(0);
+  const rewindHoldTriggeredRef = useRef<boolean>(false);
+  const rewindChargeStepRef = useRef<number>(-1);
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
@@ -1390,6 +1402,10 @@ export function App() {
       if (thoughtSpotlightTimerRef.current !== null) {
         window.clearTimeout(thoughtSpotlightTimerRef.current);
         thoughtSpotlightTimerRef.current = null;
+      }
+      if (rewindHoldIntervalRef.current !== null) {
+        window.clearInterval(rewindHoldIntervalRef.current);
+        rewindHoldIntervalRef.current = null;
       }
       for (const id of timersRef.current) {
         window.clearTimeout(id);
@@ -2547,8 +2563,14 @@ export function App() {
     setHistoryOffset(0);
     setSelectedHandIndex(null);
     setDraggedHandIndex(null);
+    setDragOverBoardIndex(null);
     setShowRaiseTiers(false);
+    setScanMode(false);
     setPendingSkillTargetId(null);
+    setSwapFlight(null);
+    setScanVfx(null);
+    setBurningCardVfx(null);
+    setIsAiThinking(false);
     setVfxTestMode('auto');
     setRoundLossFlicker(false);
     setAiRoundLossFlicker(false);
@@ -2557,10 +2579,19 @@ export function App() {
     setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
+    lastHandledScanIdRef.current = null;
+    lastHandledBurnIdRef.current = null;
     lastSlashedHandRef.current = null;
     pendingBundledChatRef.current = null;
     storyRewindStackRef.current = [];
     setRewindStepCount(0);
+    if (rewindHoldIntervalRef.current !== null) {
+      window.clearInterval(rewindHoldIntervalRef.current);
+      rewindHoldIntervalRef.current = null;
+    }
+    rewindHoldStartMsRef.current = null;
+    rewindChargeStepRef.current = -1;
+    setRewindHoldProgress(0);
     const freeCharSkills = activeEscNode
       ? undefined
       : getStorySkillsForCharacter(targetChar.id);
@@ -2736,7 +2767,11 @@ export function App() {
   const handleTimeRewind = (forceFromCmd = false) => {
     if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
     if (!forceFromCmd && latestStateRef.current.players.human.chips > 0) {
-      pushToast('warn', '时间锚点未激活', '仅在己方算力归零时可发动 ECHO-0 时间回溯');
+      pushToast(
+        'warn',
+        '时间锚点未激活',
+        '仅在己方算力归零时可点按回溯上一步；长按 0.8s 可随时重开整场对局'
+      );
       return;
     }
     if (sec00GuideActiveRef.current) {
@@ -2809,6 +2844,100 @@ export function App() {
       playSound('skill');
       pushToast('info', 'ECHO-0 · 时间回溯', '已将当前剧情节点时间线重置回初盘');
     }
+  };
+
+  const cancelHoldStoryRewind = () => {
+    if (rewindHoldStartMsRef.current !== null) {
+      rewindHoldLastElapsedRef.current = Date.now() - rewindHoldStartMsRef.current;
+      rewindHoldStartMsRef.current = null;
+    }
+    if (rewindHoldIntervalRef.current !== null) {
+      window.clearInterval(rewindHoldIntervalRef.current);
+      rewindHoldIntervalRef.current = null;
+    }
+    rewindChargeStepRef.current = -1;
+    setRewindHoldProgress(0);
+  };
+
+  const handleStoryLongPressRestart = () => {
+    if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
+    const wasSec00 = sec00GuideActiveRef.current;
+    performFullReset();
+    playSound('skill');
+    pushToast(
+      'info',
+      'ECHO-0 · 重开对局',
+      wasSec00
+        ? '已彻底重置 SEC-00 教学整场对局'
+        : '已彻底重置当前剧情对局至初始算力与首轮'
+    );
+    if (!wasSec00) {
+      enqueueTask({
+        kind: 'opponent',
+        speaker: '零回响 // ECHO-0',
+        msgKind: 'thought',
+        text: '（整条时间线已彻底归零重开。这一次，从第一手算力分配开始重新布局。）',
+      });
+    }
+  };
+
+  const startHoldStoryRewind = () => {
+    if (
+      activeEscapeNodeRef.current === null ||
+      isP2pSessionActive ||
+      rewindHoldIntervalRef.current !== null
+    ) {
+      return;
+    }
+    const startMs = Date.now();
+    rewindHoldStartMsRef.current = startMs;
+    rewindHoldLastElapsedRef.current = 0;
+    rewindHoldTriggeredRef.current = false;
+    rewindChargeStepRef.current = -1;
+    rewindHoldIntervalRef.current = window.setInterval(() => {
+      const elapsed = Date.now() - startMs;
+      if (elapsed < 120) return;
+      const { progress, completed } = computeRewindHoldProgress(
+        elapsed,
+        REWIND_HOLD_DURATION_MS
+      );
+      if (rewindChargeStepRef.current < 0) {
+        rewindChargeStepRef.current = 0;
+        playSound('charge-tick', { progress: 4 });
+      }
+      setRewindHoldProgress(progress);
+      const step = Math.floor(progress / 20);
+      if (step > rewindChargeStepRef.current && !completed) {
+        rewindChargeStepRef.current = step;
+        playSound('charge-tick', { progress });
+      }
+      if (completed) {
+        if (rewindHoldIntervalRef.current !== null) {
+          window.clearInterval(rewindHoldIntervalRef.current);
+          rewindHoldIntervalRef.current = null;
+        }
+        rewindHoldStartMsRef.current = null;
+        rewindHoldLastElapsedRef.current = 0;
+        rewindChargeStepRef.current = -1;
+        rewindHoldTriggeredRef.current = true;
+        setRewindHoldProgress(0);
+        handleStoryLongPressRestart();
+      }
+    }, 24);
+  };
+
+  const handleRewindButtonClick = () => {
+    const holdTriggered = rewindHoldTriggeredRef.current;
+    const holdElapsedMs = rewindHoldLastElapsedRef.current;
+    rewindHoldTriggeredRef.current = false;
+    rewindHoldLastElapsedRef.current = 0;
+    const resolution = resolveRewindTapAction({
+      humanChips: latestStateRef.current.players.human.chips,
+      holdTriggered,
+      holdElapsedMs,
+    });
+    if (resolution === 'ignore') return;
+    handleTimeRewind(false);
   };
 
   const handleRevealEscapeWall = useCallback((nodeIndex: number) => {
@@ -3395,6 +3524,11 @@ export function App() {
   const maxRaises = getMaxRaisesAllowed(state);
   const revealAllAi = isShowdown || state.config.revealOpponentHidden;
   const evt = state.lastAction;
+  const rewindButtonMeta = getRewindButtonMeta({
+    humanChips: human.chips,
+    rewindStepCount,
+    holdProgress: rewindHoldProgress,
+  });
 
   // Damage & Defeat VFX State (Strictly isolated between Opponent and Player!)
   const visibleAiChips = getVisiblePlayerChips(state, 'ai', 'human');
@@ -3657,27 +3791,45 @@ export function App() {
               <button
                 id="hud-btn-rewind"
                 type="button"
-                className="lc-stack-btn pink"
-                disabled={human.chips > 0}
-                onClick={() => handleTimeRewind()}
-                title={
-                  human.chips > 0
-                    ? '仅在己方算力归零时可发动 ECHO-0 时间回溯'
-                    : '算力已归零，点击发动 ECHO-0 时间回溯'
-                }
-                aria-label="发动女主 ECHO-0 的时间回溯"
+                className={`lc-stack-btn pink lc-hold-btn ${
+                  !rewindButtonMeta.tapEnabled ? 'is-tap-locked' : ''
+                } ${rewindButtonMeta.isHolding ? 'is-holding' : ''}`}
+                data-tap-locked={human.chips > 0 ? 'true' : 'false'}
+                onPointerDown={(e) => {
+                  if (e.pointerType === 'mouse' && e.button !== 0) return;
+                  startHoldStoryRewind();
+                }}
+                onPointerUp={cancelHoldStoryRewind}
+                onPointerLeave={cancelHoldStoryRewind}
+                onPointerCancel={cancelHoldStoryRewind}
+                onContextMenu={(e) => e.preventDefault()}
+                onKeyDown={(e) => {
+                  if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                    e.preventDefault();
+                    startHoldStoryRewind();
+                  }
+                }}
+                onKeyUp={(e) => {
+                  if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    cancelHoldStoryRewind();
+                    handleRewindButtonClick();
+                  }
+                }}
+                onClick={handleRewindButtonClick}
+                title={rewindButtonMeta.title}
+                aria-label="发动女主 ECHO-0 的时间回溯（点按归零后回溯，长按重开整场对局）"
               >
+                <div
+                  className="lc-hold-fill is-rewind-fill"
+                  style={{ width: `${rewindHoldProgress}%` }}
+                  aria-hidden="true"
+                />
                 <span className="lc-btn-inline">
                   <PixelSyncIcon size={15} />
-                  时间回溯
+                  {rewindButtonMeta.mainLabel}
                 </span>
-                <span className="lc-stack-sub">
-                  {human.chips > 0
-                    ? '算力归零可用'
-                    : rewindStepCount > 0
-                      ? `ECHO-0 · 锚点 x${rewindStepCount}`
-                      : 'ECHO-0 · 重置节点'}
-                </span>
+                <span className="lc-stack-sub">{rewindButtonMeta.subLabel}</span>
               </button>
             </>
           ) : (
