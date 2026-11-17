@@ -505,10 +505,30 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     const wbRes = worldbookContext('绯凪·千夜 反黑客组织 灼心·火符', builtinWorldbook(), 4000);
     assert.ok(wbRes.text.includes('反黑客') || wbRes.text.includes('绯凪·千夜'));
 
-    // Triggering a gate-minefield trap (1 random slot per hand) deducts 100 compute and reports「灼心·火符」
+    // Triggering a gate-minefield trap in story mode (3 traps) zeroes compute; normal mode (1 trap) deducts 100
+    const storyTrapAuto = createInitialState({
+      opponentName: '绯凪·千夜',
+      opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'story',
+    });
+    assert.equal(storyTrapAuto.trappedBoardIndices?.length, 3);
+
+    const storyTrapState = createInitialState({
+      opponentName: '绯凪·千夜',
+      chips: { human: 1000, ai: 1000 },
+      opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'story',
+      trappedBoardIndices: [0, 1, 2],
+    });
+    const afterStoryTrap = applyAction({ ...storyTrapState, currentTurn: 'human' }, { type: 'flip', boardIndex: 1 });
+    assert.equal(afterStoryTrap.phase, 'showdown');
+    assert.equal(afterStoryTrap.players.human.chips, 0);
+    assert.ok(afterStoryTrap.lastAction?.label.includes('灼心·火符'));
+
     const autoTrapState = createInitialState({
       opponentName: '绯凪·千夜',
       opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'normal',
     });
     assert.equal(autoTrapState.trappedBoardIndices?.length, 1);
 
@@ -516,6 +536,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
       opponentName: '绯凪·千夜',
       chips: { human: 1000, ai: 1000 },
       opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'normal',
       trappedBoardIndices: [2],
     });
     const beforeChips = trapState.players.human.chips;

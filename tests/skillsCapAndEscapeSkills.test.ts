@@ -157,15 +157,36 @@ describe('skillsCapAndEscapeSkills: 3槽上限替换与逃亡章节专属技能'
     assert.equal(afterFlip.shroudUsedThisHand, true);
   });
 
-  it('triggers gate-minefield trap (1 random slot) deducting 100 compute while conserving chips', () => {
+  it('triggers gate-minefield trap: story mode (3 slots -> 0 compute) vs normal mode (1 slot -> -100 compute)', () => {
+    const storyAuto = createInitialState({
+      opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'story',
+    });
+    assert.equal(storyAuto.trappedBoardIndices?.length, 3);
+
+    const storyBase = createInitialState({
+      chips: { human: 500, ai: 500 },
+      opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'story',
+      trappedBoardIndices: [0, 1, 2],
+    });
+    const afterStoryTrap = applyAction({ ...storyBase, currentTurn: 'human' }, { type: 'flip', boardIndex: 1 });
+    assert.equal(afterStoryTrap.phase, 'showdown');
+    assert.equal(afterStoryTrap.players.human.chips, 0);
+    assert.equal(afterStoryTrap.triggeredTrapIndex, 1);
+    assert.equal(afterStoryTrap.confirmedTrapIndices?.includes(1), true);
+    assert.ok(afterStoryTrap.lastAction?.label.includes('灼心·火符'));
+
     const autoBase = createInitialState({
       opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'normal',
     });
     assert.equal(autoBase.trappedBoardIndices?.length, 1);
 
     const base = createInitialState({
       chips: { human: 500, ai: 500 },
       opponentSignatureSkill: 'gate-minefield',
+      gateTrapMode: 'normal',
       trappedBoardIndices: [1],
     });
     const humanTurn = { ...base, currentTurn: 'human' as const };

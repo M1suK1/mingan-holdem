@@ -42,6 +42,7 @@ import {
   getVisiblePlayerChips,
   isActionLegal,
   otherPlayer,
+  pickDefaultTrappedBoardIndices,
   startNextHand,
 } from './engine/gameEngine.ts';
 import { evaluateVisibleHandSummary } from './engine/evaluator.ts';
@@ -169,6 +170,7 @@ import {
 import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
+  getStorySkillsForCharacter,
   isKiriSamuraiCharacter,
   isMuteGarbledCharacter,
   isNeonDragonCharacter,
@@ -450,6 +452,7 @@ export function App() {
       opponentName: initNode.opponentName,
       opponentSignatureSkill: initNode.signatureSkillId,
       aiSpecialCheatSkill: initNode.specialCheatSkillId,
+      gateTrapMode: 'story',
       playerCheatSkills: initEsc.equippedCheatSkills,
       playerAcquiredSkills: initEsc.equippedSkills,
     });
@@ -1725,10 +1728,13 @@ export function App() {
     lastHandledBurnIdRef.current = evt.id;
     const activeId = evt.id;
     setBurningCardVfx({ id: activeId, boardIndex: evt.boardIndex });
+    const isStoryLethalBurn = state.gateTrapMode === 'story';
     pushToast(
       'error',
       '灼心·火符触发！',
-      `公共节点 #${evt.boardIndex + 1} 燃起火符，损失 ${evt.amount ?? 100} 点算力`
+      isStoryLethalBurn
+        ? `公共节点 #${evt.boardIndex + 1} 燃起灼心火符，算力瞬间清空归零！（可使用左下「时间回溯」）`
+        : `公共节点 #${evt.boardIndex + 1} 燃起火符，损失 ${evt.amount ?? 100} 点算力`
     );
     const timer = window.setTimeout(() => {
       setBurningCardVfx((curr) => (curr?.id === activeId ? null : curr));
@@ -2555,12 +2561,20 @@ export function App() {
     pendingBundledChatRef.current = null;
     storyRewindStackRef.current = [];
     setRewindStepCount(0);
+    const freeCharSkills = activeEscNode
+      ? undefined
+      : getStorySkillsForCharacter(targetChar.id);
     const freshState = createInitialState({
       config: cfg,
       chips: resolvedChips,
       opponentName: resolvedOpponentName,
-      opponentSignatureSkill: activeEscNode?.signatureSkillId,
-      aiSpecialCheatSkill: activeEscNode?.specialCheatSkillId,
+      opponentSignatureSkill: activeEscNode
+        ? activeEscNode.signatureSkillId
+        : freeCharSkills?.signatureSkillId,
+      aiSpecialCheatSkill: activeEscNode
+        ? activeEscNode.specialCheatSkillId
+        : freeCharSkills?.specialCheatSkillId,
+      gateTrapMode: activeEscNode ? 'story' : 'normal',
       playerCheatSkills: isP2pConnected
         ? DEFAULT_CHEAT_SKILLS
         : activeEscNode
@@ -2757,13 +2771,23 @@ export function App() {
     if (stack.length > 0) {
       const nextStack = [...stack];
       const snapshot = nextStack.pop()!;
+      const mergedConfirmedTraps = Array.from(
+        new Set([
+          ...(snapshot.confirmedTrapIndices ?? []),
+          ...(latestStateRef.current.confirmedTrapIndices ?? []),
+        ])
+      ).sort((a, b) => a - b);
+      const restoredState: GameState = {
+        ...snapshot,
+        confirmedTrapIndices: mergedConfirmedTraps,
+      };
       storyRewindStackRef.current = nextStack;
       setRewindStepCount(nextStack.length);
       lastHandledShowdownHandRef.current = 0;
-      lastSoundActionIdRef.current = snapshot.lastAction?.id ?? null;
-      lastHandledScanIdRef.current = snapshot.lastAction?.id ?? null;
-      lastHandledBurnIdRef.current = snapshot.lastAction?.id ?? null;
-      setState(snapshot);
+      lastSoundActionIdRef.current = restoredState.lastAction?.id ?? null;
+      lastHandledScanIdRef.current = restoredState.lastAction?.id ?? null;
+      lastHandledBurnIdRef.current = restoredState.lastAction?.id ?? null;
+      setState(restoredState);
       playSound('skill');
       pushToast(
         'info',
@@ -3120,16 +3144,26 @@ export function App() {
     try {
       const nextChar = await loadContractCharacterByFile(fileName);
       const suggestedStyle = deriveAiStyleFromCharacter(nextChar);
+      const nextSkills = getStorySkillsForCharacter(nextChar.id);
       setSec00GuideActive(false);
       sec00GuideActiveRef.current = false;
       setSec00IntroIndex(null);
       setActiveEscapeNodeIndex(null);
+      activeEscapeNodeRef.current = null;
       setViewMode('arena');
       setCharacter(nextChar);
       setActiveExpression('smile');
       setState((prev) => ({
         ...prev,
         config: { ...prev.config, aiStyle: suggestedStyle },
+        opponentSignatureSkill: nextSkills.signatureSkillId,
+        aiSpecialCheatSkill: nextSkills.specialCheatSkillId,
+        gateTrapMode: 'normal',
+        trappedBoardIndices:
+          nextSkills.signatureSkillId === 'gate-minefield'
+            ? pickDefaultTrappedBoardIndices(1)
+            : undefined,
+        confirmedTrapIndices: [],
         players: {
           ...prev.players,
           ai: { ...prev.players.ai, name: nextChar.name },
@@ -3364,10 +3398,10 @@ export function App() {
       (human.chips > 0 && human.chips <= state.config.startingChips * 0.3));
 
   const isSec00Echo0 = activeEscapeNode?.index === 0 && !isP2pConnected;
-  const isSec01Boss = activeEscapeNode?.index === 1 && !isP2pConnected;
-  const isSec02Boss = activeEscapeNode?.index === 2 && !isP2pConnected;
-  const isSec03Boss = activeEscapeNode?.index === 3 && !isP2pConnected;
-  const isSec04Boss = activeEscapeNode?.index === 4 && !isP2pConnected;
+  const isSec01Boss = !isP2pConnected && effectiveCharacter.id === 'sec01-jade-heiress';
+  const isSec02Boss = !isP2pConnected && effectiveCharacter.id === 'sec02-mute-hunter';
+  const isSec03Boss = !isP2pConnected && effectiveCharacter.id === 'sec03-neon-dragon';
+  const isSec04Boss = !isP2pConnected && effectiveCharacter.id === 'sec04-kiri-samurai';
   const isPinkMirageActive = state.opponentSignatureSkill === 'pink-mirage' && !revealAllAi;
   const isBurningBoardActive = state.opponentSignatureSkill === 'gate-minefield' && !revealAllAi;
 
@@ -3965,7 +3999,9 @@ export function App() {
               <span className="lc-micro-tag pink">粉曜迷彩 · 明牌全粉</span>
             )}
             {isBurningBoardActive && (
-              <span className="lc-micro-tag danger">灼心·火符 · 1处暗符</span>
+              <span className="lc-micro-tag danger">
+                灼心·火符 · {state.gateTrapMode === 'story' ? '3处暗符' : '1处暗符'}
+              </span>
             )}
             <span className="lc-micro-tag cyan">
               剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}

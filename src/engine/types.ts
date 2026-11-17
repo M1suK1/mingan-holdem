@@ -291,6 +291,7 @@ export interface GameState {
   lockedAiHackSkill?: HackSkillId;
   siphonUsedThisHand?: { human: boolean; ai: boolean };
   shroudUsedThisHand?: boolean;
+  gateTrapMode?: 'story' | 'normal';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   triggeredTrapIndex?: number;

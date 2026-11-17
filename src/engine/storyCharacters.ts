@@ -1,5 +1,5 @@
 import type { ContractCharacter } from './contractCards.ts';
-import type { ContractExpression } from './types.ts';
+import type { ContractExpression, OpponentSignatureSkillId } from './types.ts';
 
 export const ECHO0_ASSET_BASE = './assets/story/echo0';
 
@@ -436,7 +436,7 @@ export const SEC04_CHARACTER_DOSSIER: ContractCharacter = {
       polarity: 'positive',
       tags: ['SEC-04 被动', '公共区燃烧'],
       description:
-        '每轮在公共暗牌间随机藏匿 1 道灼心火符（双方均不可见），玩家翻开或换入触符时即刻燃起火符灼烧损失 100 点算力；对局期间整个公共牌区都会被灼热余烬笼罩。',
+        '剧情模式下在公共暗牌间潜藏 3 道灼心火符，触符即刻灼毁算力归零（可用时间回溯规避）；自由牌桌正常难度下每轮随机藏匿 1 道火符（双方均不可见），触符灼烧损失 100 算力。',
     },
     {
       id: 'sec04-mikiri-tsubame',
@@ -630,4 +630,23 @@ export function getStoryCharacterByEscapeNode(nodeIndex: number | null): Contrac
   if (nodeIndex === 3) return SEC03_CHARACTER_DOSSIER;
   if (nodeIndex === 4) return SEC04_CHARACTER_DOSSIER;
   return null;
+}
+
+export function getStorySkillsForCharacter(characterId?: string): {
+  signatureSkillId?: OpponentSignatureSkillId;
+  specialCheatSkillId?: 'crown-ace' | 'null-erase' | 'pink-double' | 'mikiri-counter';
+} {
+  if (characterId === SEC01_CHARACTER_DOSSIER.id) {
+    return { signatureSkillId: 'siphon-cache', specialCheatSkillId: 'crown-ace' };
+  }
+  if (characterId === SEC02_CHARACTER_DOSSIER.id) {
+    return { signatureSkillId: 'cold-freq-lock', specialCheatSkillId: 'null-erase' };
+  }
+  if (characterId === SEC03_CHARACTER_DOSSIER.id) {
+    return { signatureSkillId: 'pink-mirage', specialCheatSkillId: 'pink-double' };
+  }
+  if (characterId === SEC04_CHARACTER_DOSSIER.id) {
+    return { signatureSkillId: 'gate-minefield', specialCheatSkillId: 'mikiri-counter' };
+  }
+  return {};
 }

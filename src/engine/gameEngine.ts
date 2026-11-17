@@ -374,6 +374,7 @@ export interface CreateStateOptions {
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
   aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double' | 'mikiri-counter';
+  gateTrapMode?: 'story' | 'normal';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
@@ -397,8 +398,16 @@ function pickRandomHackToLock(
   return candidates[Math.floor(rng() * candidates.length) % candidates.length];
 }
 
-function pickDefaultTrappedBoardIndices(rng: () => number = Math.random): number[] {
-  return [Math.floor(rng() * 4) % 4];
+export function pickDefaultTrappedBoardIndices(
+  count: 1 | 3 = 1,
+  rng: () => number = Math.random
+): number[] {
+  const pool = [0, 1, 2, 3];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count).sort((a, b) => a - b);
 }
 
 export function createInitialState(options: CreateStateOptions = {}): GameState {
@@ -481,11 +490,12 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     sigSkill === 'cold-freq-lock'
       ? pickRandomHackToLock(human.sealedSkills, rngFn, options.playerCheatSkills)
       : undefined;
+  const gateTrapMode = options.gateTrapMode ?? 'normal';
   const trappedBoardIndices =
     options.trappedBoardIndices !== undefined
       ? [...options.trappedBoardIndices]
       : sigSkill === 'gate-minefield'
-        ? pickDefaultTrappedBoardIndices(rngFn)
+        ? pickDefaultTrappedBoardIndices(gateTrapMode === 'story' ? 3 : 1, rngFn)
         : undefined;
 
   const initialState: GameState = {
@@ -517,6 +527,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     lockedAiHackSkill: undefined,
     siphonUsedThisHand: { human: false, ai: false },
     shroudUsedThisHand: false,
+    gateTrapMode,
     trappedBoardIndices,
     confirmedTrapIndices: [...(options.confirmedTrapIndices ?? [])],
     triggeredTrapIndex: undefined,
@@ -595,6 +606,9 @@ export function startNextHand(prev: GameState, newConfig?: Partial<GameConfig>):
     playerAcquiredSkills: [...(prev.playerAcquiredSkills ?? [])].slice(0, MAX_EXTRA_SKILLS),
     opponentSignatureSkill: prev.opponentSignatureSkill,
     aiSpecialCheatSkill: prev.aiSpecialCheatSkill,
+    gateTrapMode: prev.gateTrapMode,
+    confirmedTrapIndices:
+      prev.gateTrapMode === 'story' ? [...(prev.confirmedTrapIndices ?? [])] : undefined,
     pastHands: nextPastHands.slice(-12),
   });
 }
@@ -961,6 +975,55 @@ function autoRunoutToShowdown(state: GameState, actor: PlayerId): GameState {
   return settled;
 }
 
+function triggerGateTrapLoss(next: GameState, boardIndex: number): GameState {
+  const human = next.players.human;
+  const ai = next.players.ai;
+  next.board[boardIndex].isOpen = true;
+  next.board[boardIndex].source = 'flipped';
+  if (next.hackEscrowPot > 0) {
+    next.pot += next.hackEscrowPot;
+    next.hackEscrowPot = 0;
+  }
+  human.hiddenHackEscrow = 0;
+  ai.hiddenHackEscrow = 0;
+
+  const seizedChips = human.chips + next.pot;
+  ai.chips += seizedChips;
+  human.chips = 0;
+  next.pot = 0;
+  next.justCalledThisTurn = false;
+  next.phase = 'showdown';
+  next.triggeredTrapIndex = boardIndex;
+  next.confirmedTrapIndices = Array.from(
+    new Set([...(next.confirmedTrapIndices ?? []), boardIndex])
+  ).sort((a, b) => a - b);
+
+  next.result = {
+    winner: 'ai',
+    reason: 'showdown',
+    potWon: seizedChips,
+    payouts: { human: 0, ai: seizedChips },
+  };
+  const summary = `触发「灼心·火符」陷阱（公共节点 #${boardIndex + 1}）：算力瞬间灼毁归零！`;
+  next.lastAction = {
+    id: makeEventId(),
+    type: 'showdown',
+    actor: 'ai',
+    boardIndex,
+    amount: seizedChips,
+    label: summary,
+  };
+  next.actionHistory.push({
+    id: makeEventId(),
+    handNumber: next.handNumber,
+    actor: 'system',
+    phase: 'showdown',
+    summary,
+    timestamp: Date.now(),
+  });
+  return next;
+}
+
 function applyBurningTalismanHit(next: GameState, boardIndex: number): number {
   const burnLoss = Math.min(100, next.players.human.chips);
   next.players.human.chips -= burnLoss;
@@ -977,6 +1040,9 @@ function performFlip(state: GameState, actorId: PlayerId, boardIndex: number): G
   const next = cloneState(state);
   const triggeredFire =
     actorId === 'human' && Boolean(next.trappedBoardIndices?.includes(boardIndex));
+  if (triggeredFire && (next.gateTrapMode ?? 'normal') === 'story') {
+    return triggerGateTrapLoss(next, boardIndex);
+  }
   const burnLoss = triggeredFire ? applyBurningTalismanHit(next, boardIndex) : 0;
   const slot = next.board[boardIndex];
   slot.isOpen = true;
@@ -1067,6 +1133,11 @@ function performSwap(
   boardIndex: number
 ): GameState {
   const next = cloneState(state);
+  const triggeredFire =
+    actorId === 'human' && Boolean(next.trappedBoardIndices?.includes(boardIndex));
+  if (triggeredFire && (next.gateTrapMode ?? 'normal') === 'story') {
+    return triggerGateTrapLoss(next, boardIndex);
+  }
   const actor = next.players[actorId];
   const fee = getNextSwapFee(next, actorId);
 
@@ -1078,8 +1149,6 @@ function performSwap(
   next.usedHackThisTurn = false;
   next.usedScanThisTurn = false;
 
-  const triggeredFire =
-    actorId === 'human' && Boolean(next.trappedBoardIndices?.includes(boardIndex));
   const burnLoss = triggeredFire ? applyBurningTalismanHit(next, boardIndex) : 0;
 
   const discardedHc = actor.hand[handIndex];
