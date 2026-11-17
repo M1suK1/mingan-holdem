@@ -81,4 +81,28 @@ describe('UI quality gates: zero emoji, zero external alerts, unique descriptive
       }
     }
   });
+
+  it('separates story table buttons (settings, escape map, rewind) from free table buttons (settings, quick restart, p2p, switch char)', async () => {
+    const appSrc = await fs.readFile(path.join(process.cwd(), 'src', 'App.tsx'), 'utf8');
+    const stackBlockMatch = appSrc.match(
+      /className=\{`lc-left-action-stack[\s\S]*?<\/div>\s*\{\/\* COL 2, ROW 1/
+    );
+    assert.ok(stackBlockMatch, 'Could not locate lc-left-action-stack block in App.tsx');
+    const stackBlock = stackBlockMatch[0];
+    const [storyBranch, freeBranch] = stackBlock.split(') : (');
+    assert.ok(storyBranch && freeBranch, 'Expected isStoryTable ternary branch in lc-left-action-stack');
+
+    assert.ok(stackBlock.includes('id="hud-btn-settings"'));
+    assert.ok(storyBranch.includes('id="hud-btn-escape-map"'));
+    assert.ok(storyBranch.includes('id="hud-btn-rewind"'));
+    assert.equal(storyBranch.includes('id="hud-btn-quick-restart"'), false);
+    assert.equal(storyBranch.includes('id="hud-btn-p2p"'), false);
+    assert.equal(storyBranch.includes('id="hud-btn-switch-char"'), false);
+
+    assert.ok(freeBranch.includes('id="hud-btn-quick-restart"'));
+    assert.ok(freeBranch.includes('id="hud-btn-p2p"'));
+    assert.ok(freeBranch.includes('id="hud-btn-switch-char"'));
+    assert.equal(freeBranch.includes('id="hud-btn-escape-map"'), false);
+    assert.equal(freeBranch.includes('id="hud-btn-rewind"'), false);
+  });
 });

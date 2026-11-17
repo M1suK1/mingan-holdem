@@ -16,6 +16,7 @@ interface EscapeRouteMapViewProps {
   onCompleteTransition: () => void;
   onRevealWall: (nodeIndex: number) => void;
   onReturnToArena: () => void;
+  onEnterFreeTable?: () => void;
   onResetRoute: () => void;
   onOpenCmd: () => void;
 }
@@ -57,6 +58,7 @@ export default function EscapeRouteMapView({
   onCompleteTransition,
   onRevealWall,
   onReturnToArena,
+  onEnterFreeTable,
   onResetRoute,
   onOpenCmd,
 }: EscapeRouteMapViewProps) {
@@ -233,6 +235,14 @@ export default function EscapeRouteMapView({
             onClick={onResetRoute}
           >
             重置逃亡路线
+          </button>
+          <button
+            id="escape-btn-free-table"
+            type="button"
+            className="lc-escape-btn"
+            onClick={() => (onEnterFreeTable ?? onReturnToArena)()}
+          >
+            自由牌桌
           </button>
           <button
             id="escape-btn-back-arena"
@@ -672,7 +682,7 @@ export default function EscapeRouteMapView({
                 id="escape-btn-victory-arena"
                 type="button"
                 className="lc-escape-cta"
-                onClick={onReturnToArena}
+                onClick={() => (onEnterFreeTable ?? onReturnToArena)()}
               >
                 返回自由牌桌
               </button>

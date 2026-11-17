@@ -580,6 +580,10 @@ button:disabled {
   gap: 5px;
 }
 
+.lc-left-action-stack.is-story-table {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
 /* =========================================================================
    5. Col 2: Enlarged Opponent Window + Board + Hand
    ========================================================================= */
@@ -3618,6 +3622,11 @@ button:disabled {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     height: auto;
     gap: 5px;
+  }
+
+  .lc-left-action-stack.is-story-table {
+    grid-template-rows: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .lc-left-action-stack .lc-stack-btn {

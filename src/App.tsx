@@ -225,12 +225,25 @@ const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceMo
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
-  keyName: 'tutorial' | 'cmd' | 'p2p' | 'contracts' | 'llm' | 'preset-wb' | 'rules' | 'audit' | 'tuning';
+  keyName:
+    | 'tutorial'
+    | 'escape-map'
+    | 'free-table'
+    | 'cmd'
+    | 'p2p'
+    | 'contracts'
+    | 'llm'
+    | 'preset-wb'
+    | 'rules'
+    | 'audit'
+    | 'tuning';
   label: string;
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
   { id: 'menu-tutorial', keyName: 'tutorial', label: '重玩新手教学 (ECHO-0)', note: '重开 SEC-00 匿名终端单轮连贯教学与规则聚光引导', icon: 'rules' },
+  { id: 'menu-escape-map', keyName: 'escape-map', label: '逃亡路线图 (剧情)', note: '打开黑域逃亡路线图并接入剧情关卡牌桌', icon: 'rules' },
+  { id: 'menu-free-table', keyName: 'free-table', label: '切换自由牌桌', note: '退出剧情关卡进入自由对战/联机牌桌', icon: 'contracts' },
   { id: 'menu-cmd', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
   { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
   { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
@@ -482,6 +495,8 @@ export function App() {
   const holdIntervalRef = useRef<number | null>(null);
   const lastHandledScanIdRef = useRef<string | null>(null);
   const lastHandledBurnIdRef = useRef<string | null>(null);
+  const storyRewindStackRef = useRef<GameState[]>([]);
+  const [rewindStepCount, setRewindStepCount] = useState(0);
 
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => loadSavedLlmConfig());
   const [llmLogs, setLlmLogs] = useState<LlmCallLog[]>([]);
@@ -533,8 +548,9 @@ export function App() {
 
   const activeEscapeNode =
     activeEscapeNodeIndex !== null ? ESCAPE_ROUTE_NODES[activeEscapeNodeIndex] ?? null : null;
+  const isStoryTable = activeEscapeNode !== null && !isP2pConnected;
   const activeStoryCharacter =
-    activeEscapeNode && !isP2pConnected
+    isStoryTable
       ? getStoryCharacterByEscapeNode(activeEscapeNode.index)
       : null;
   const effectiveCharacter = activeStoryCharacter ?? character;
@@ -1974,7 +1990,7 @@ export function App() {
         pushToast(
           'error',
           '算力归零 · 当前节点突围受阻',
-          '点击右侧「算力归零！重开」或返回逃亡路线图重新挑战'
+          '点击左下「时间回溯」、右侧重开或返回逃亡路线图重新挑战'
         );
         return;
       }
@@ -2042,6 +2058,14 @@ export function App() {
         bundledSpeech: willBundle ? buffered : undefined,
       });
       return;
+    }
+
+    if (activeEscapeNodeRef.current !== null && !isP2pSessionActive) {
+      storyRewindStackRef.current = [
+        ...storyRewindStackRef.current.slice(-11),
+        structuredClone(latestStateRef.current),
+      ];
+      setRewindStepCount(storyRewindStackRef.current.length);
     }
 
     const nextState = applyAction(latestStateRef.current, action);
@@ -2185,6 +2209,13 @@ export function App() {
         );
       }
       return;
+    }
+    if (activeEscapeNodeRef.current !== null && !isP2pSessionActive) {
+      storyRewindStackRef.current = [
+        ...storyRewindStackRef.current.slice(-11),
+        structuredClone(latestStateRef.current),
+      ];
+      setRewindStepCount(storyRewindStackRef.current.length);
     }
     setState((prev) => applyAction(prev, action));
     pushToast('info', '黑客协议注入成功', '改变结果仅己方可见，且可继续交换或行动');
@@ -2522,6 +2553,8 @@ export function App() {
     lastSoundActionIdRef.current = null;
     lastSlashedHandRef.current = null;
     pendingBundledChatRef.current = null;
+    storyRewindStackRef.current = [];
+    setRewindStepCount(0);
     const freshState = createInitialState({
       config: cfg,
       chips: resolvedChips,
@@ -2623,6 +2656,8 @@ export function App() {
     setThoughtSpotlightActive(false);
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
+    storyRewindStackRef.current = [];
+    setRewindStepCount(0);
     setViewMode('arena');
     setState(createSec00TutorialState());
     setMessages([]);
@@ -2662,6 +2697,91 @@ export function App() {
   const handleCompleteEscapeTransition = useCallback(() => {
     setEscapeProgress((prev) => completeEscapeTransition(prev));
   }, []);
+
+  const handleEnterFreeTable = useCallback(() => {
+    if (isP2pSessionActive) {
+      disconnectP2p();
+    }
+    setSec00GuideActive(false);
+    sec00GuideActiveRef.current = false;
+    setSec00IntroIndex(null);
+    setActiveEscapeNodeIndex(null);
+    activeEscapeNodeRef.current = null;
+    setActiveModal({ type: 'none' });
+    setViewMode('arena');
+    performFullReset(
+      { ...state.config, aiStyle: deriveAiStyleFromCharacter(character) },
+      undefined,
+      undefined,
+      undefined,
+      character.name
+    );
+    pushToast('info', '已进入自由牌桌', '可使用快速重开、好友联机与自由换人功能');
+  }, [isP2pSessionActive, disconnectP2p, state.config, character, pushToast]);
+
+  const handleTimeRewind = () => {
+    if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
+    if (sec00GuideActiveRef.current) {
+      startSec00Tutorial(true);
+      playSound('skill');
+      pushToast('info', 'ECHO-0 · 时间回溯', '已将 SEC-00 教学时间线回溯至初盘');
+      return;
+    }
+
+    for (const id of timersRef.current) {
+      window.clearTimeout(id);
+    }
+    timersRef.current = [];
+    queueRef.current = [];
+    inFlightTaskRef.current = null;
+    resetEpochRef.current += 1;
+    isAnimatingRef.current = false;
+    escapeClearQueuedForMatchRef.current = false;
+    setQueuedCount(0);
+    setFloatingBubble(null);
+    setCrushingActive(false);
+    setSwapFlight(null);
+    setScanVfx(null);
+    setBurningCardVfx(null);
+    setSelectedHandIndex(null);
+    setDraggedHandIndex(null);
+    setDragOverBoardIndex(null);
+    setShowRaiseTiers(false);
+    setScanMode(false);
+    setPendingSkillTargetId(null);
+    setRoundLossFlicker(false);
+    setAiRoundLossFlicker(false);
+    setIsAiThinking(false);
+
+    const stack = storyRewindStackRef.current;
+    if (stack.length > 0) {
+      const nextStack = [...stack];
+      const snapshot = nextStack.pop()!;
+      storyRewindStackRef.current = nextStack;
+      setRewindStepCount(nextStack.length);
+      lastHandledShowdownHandRef.current = 0;
+      lastSoundActionIdRef.current = snapshot.lastAction?.id ?? null;
+      lastHandledScanIdRef.current = snapshot.lastAction?.id ?? null;
+      lastHandledBurnIdRef.current = snapshot.lastAction?.id ?? null;
+      setState(snapshot);
+      playSound('skill');
+      pushToast(
+        'info',
+        'ECHO-0 · 时间回溯',
+        `时间锚点已回滚至上一次行动前（剩余可用锚点 ${nextStack.length}）`
+      );
+      enqueueTask({
+        kind: 'opponent',
+        speaker: '零回响 // ECHO-0',
+        msgKind: 'thought',
+        text: '（时间锚点回溯完成。……别浪费我好不容易截停的这一秒，重新看清牌桌再出手。）',
+      });
+    } else {
+      performFullReset();
+      playSound('skill');
+      pushToast('info', 'ECHO-0 · 时间回溯', '已将当前剧情节点时间线重置回初盘');
+    }
+  };
 
   const handleRevealEscapeWall = useCallback((nodeIndex: number) => {
     setEscapeProgress((prev) => markEscapeWallRevealed(prev, nodeIndex));
@@ -3409,6 +3529,7 @@ export function App() {
             onCompleteTransition={handleCompleteEscapeTransition}
             onRevealWall={handleRevealEscapeWall}
             onReturnToArena={() => setViewMode('arena')}
+            onEnterFreeTable={handleEnterFreeTable}
             onResetRoute={handleResetEscapeRoute}
             onOpenCmd={() => setActiveModal({ type: 'cmd' })}
           />
@@ -3445,8 +3566,12 @@ export function App() {
           />
         </aside>
 
-        {/* COL 1, ROW 3: Bottom-Left 3-Button System Stack */}
-        <div className="lc-left-action-stack" role="group" aria-label="系统快捷控制栏">
+        {/* COL 1, ROW 3: Bottom-Left System Stack (Story Table vs Free Table separation) */}
+        <div
+          className={`lc-left-action-stack ${isStoryTable ? 'is-story-table' : ''}`}
+          role="group"
+          aria-label="系统快捷控制栏"
+        >
           <button
             id="hud-btn-settings"
             type="button"
@@ -3461,57 +3586,89 @@ export function App() {
             <span className="lc-stack-sub">系统菜单</span>
           </button>
 
-          <button
-            id="hud-btn-quick-restart"
-            type="button"
-            className="lc-stack-btn amber"
-            onClick={() => performFullReset()}
-          >
-            <span className="lc-btn-inline">
-              <PixelRestartIcon size={15} />
-              快速重开
-            </span>
-            <span className="lc-stack-sub">重置牌桌</span>
-          </button>
+          {isStoryTable ? (
+            <>
+              <button
+                id="hud-btn-escape-map"
+                type="button"
+                className="lc-stack-btn"
+                onClick={() => setViewMode('escape-map')}
+                aria-label="切换至黑域逃亡路线关卡图"
+              >
+                <span className="lc-btn-inline">
+                  <PixelNodesIcon size={15} />
+                  路线图
+                </span>
+                <span className="lc-stack-sub">
+                  {activeEscapeNode
+                    ? `${activeEscapeNode.code} · ${escapeProgress.clearedIndices.length}/5`
+                    : `进度 ${escapeProgress.clearedIndices.length}/5`}
+                </span>
+              </button>
 
-          <button
-            id="hud-btn-escape-map"
-            type="button"
-            className="lc-stack-btn"
-            onClick={() => setViewMode('escape-map')}
-            aria-label="切换至黑域逃亡路线关卡图"
-          >
-            <span className="lc-btn-inline">
-              <PixelNodesIcon size={15} />
-              路线图
-            </span>
-            <span className="lc-stack-sub">
-              {activeEscapeNode
-                ? `${activeEscapeNode.code} · ${escapeProgress.clearedIndices.length}/5`
-                : `进度 ${escapeProgress.clearedIndices.length}/5`}
-            </span>
-          </button>
+              <button
+                id="hud-btn-rewind"
+                type="button"
+                className="lc-stack-btn pink"
+                onClick={handleTimeRewind}
+                aria-label="发动女主 ECHO-0 的时间回溯"
+              >
+                <span className="lc-btn-inline">
+                  <PixelSyncIcon size={15} />
+                  时间回溯
+                </span>
+                <span className="lc-stack-sub">
+                  {rewindStepCount > 0 ? `ECHO-0 · 锚点 x${rewindStepCount}` : 'ECHO-0 · 重置节点'}
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                id="hud-btn-quick-restart"
+                type="button"
+                className="lc-stack-btn amber"
+                onClick={() => performFullReset()}
+              >
+                <span className="lc-btn-inline">
+                  <PixelRestartIcon size={15} />
+                  快速重开
+                </span>
+                <span className="lc-stack-sub">重置牌桌</span>
+              </button>
 
-          <button
-            id="hud-btn-switch-char"
-            type="button"
-            className="lc-stack-btn pink"
-            onClick={() => {
-              if (isP2pConnected) {
-                setActiveModal({ type: 'p2p' });
-              } else {
-                void handleQuickSwitchOpponent();
-              }
-            }}
-          >
-            <span className="lc-btn-inline">
-              <PixelSwitchUserIcon size={15} />
-              {isP2pConnected ? '联机大厅' : '换人'}
-            </span>
-            <span className="lc-stack-sub">
-              {isP2pConnected ? '管理连接' : '切换对手'}
-            </span>
-          </button>
+              <button
+                id="hud-btn-p2p"
+                type="button"
+                className="lc-stack-btn"
+                onClick={() => setActiveModal({ type: 'p2p' })}
+                aria-label="打开好友联机对战大厅"
+              >
+                <span className="lc-btn-inline">
+                  <PixelBroadcastIcon size={15} />
+                  {isP2pConnected ? '联机大厅' : '联机'}
+                </span>
+                <span className="lc-stack-sub">
+                  {isP2pConnected ? '管理连接' : '好友对战'}
+                </span>
+              </button>
+
+              <button
+                id="hud-btn-switch-char"
+                type="button"
+                className="lc-stack-btn pink"
+                disabled={isP2pConnected}
+                onClick={() => void handleQuickSwitchOpponent()}
+                title={isP2pConnected ? '联机对战中无法切换 AI 对手' : '随机切换其他契约追捕者'}
+              >
+                <span className="lc-btn-inline">
+                  <PixelSwitchUserIcon size={15} />
+                  换人
+                </span>
+                <span className="lc-stack-sub">切换对手</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* COL 2, ROW 1: Enlarged Opponent Window + Layered Vertical Data Streams + Docked 3 Cards */}
@@ -5022,6 +5179,10 @@ export function App() {
                   onMouseEnter={() => setActiveMenuId(item.id)}
                   onClick={() => {
                     if (item.keyName === 'tutorial') startSec00Tutorial(true);
+                    else if (item.keyName === 'escape-map') {
+                      setActiveModal({ type: 'none' });
+                      setViewMode('escape-map');
+                    } else if (item.keyName === 'free-table') handleEnterFreeTable();
                     else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
                     else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
                     else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
