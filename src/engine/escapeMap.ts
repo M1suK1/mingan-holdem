@@ -34,7 +34,7 @@ export interface EscapeRouteNode {
   signatureSkillId?: OpponentSignatureSkillId;
   signatureSkillName?: string;
   signatureSkillDesc?: string;
-  specialCheatSkillId?: 'crown-ace' | 'null-erase' | 'pink-double';
+  specialCheatSkillId?: 'crown-ace' | 'null-erase' | 'pink-double' | 'mikiri-counter';
   specialCheatSkillName?: string;
   specialCheatSkillDesc?: string;
   rewardSkillChoices?: string[];
@@ -200,15 +200,18 @@ export const ESCAPE_ROUTE_NODES: EscapeRouteNode[] = [
     code: 'SEC-04',
     title: '零号离线闸门',
     sector: '边缘断连口 // 终极截杀防线',
-    opponentName: '断壁·铁御',
-    opponentSubtitle: '闸门守望者 · 高算力高压镇守',
+    opponentName: '绯凪·千夜',
+    opponentSubtitle: '黑河反黑客安全官 · 灼心·火符 + 见切·燕返',
     opponentChips: 1000,
     difficulty: 'master',
     accentColor: '#ff4757',
     signatureSkillId: 'gate-minefield',
-    signatureSkillName: '闸门雷区',
-    signatureSkillDesc: '公共暗牌中潜藏 3 处算力清零陷阱，翻开或换入踩雷将立刻触发熔断。',
-    rewardSkillChoices: ['parity-spoof', 'mirror-checksum'],
+    signatureSkillName: '灼心·火符',
+    signatureSkillDesc: '公共暗牌中潜藏 3 道灼心火符，翻开或换入触符将立刻焚毁算力归零。',
+    specialCheatSkillId: 'mikiri-counter',
+    specialCheatSkillName: '见切·燕返',
+    specialCheatSkillDesc: '与 +1/-1/反色同级的作弊技：对己方 1 张未篡改明牌施放反制剑意（换入公共区依然有效），若对手扫描此牌则本小局自己直接获胜。',
+    rewardSkillChoices: ['mikiri-counter', 'parity-spoof', 'mirror-checksum'],
     pos: { x: 736, y: 272 },
     escapePath: [
       { x: 736, y: 272 },

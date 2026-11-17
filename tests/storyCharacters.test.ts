@@ -6,9 +6,11 @@ import {
   SEC01_CHARACTER_DOSSIER,
   SEC02_CHARACTER_DOSSIER,
   SEC03_CHARACTER_DOSSIER,
+  SEC04_CHARACTER_DOSSIER,
   SEC01_EXPRESSION_PATHS,
   SEC02_EXPRESSION_PATHS,
   SEC03_EXPRESSION_PATHS,
+  SEC04_EXPRESSION_PATHS,
   STORY_CHARACTER_DOSSIERS,
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
@@ -17,6 +19,7 @@ import {
   resolveSec01Sprite,
   resolveSec02Sprite,
   resolveSec03Sprite,
+  resolveSec04Sprite,
 } from '../src/engine/storyCharacters.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
@@ -464,5 +467,139 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.equal(afterAiScan.result?.reason, 'scan-caught');
     assert.equal(afterAiScan.result?.winner, 'ai');
     assert.ok(afterAiScan.players.human.sealedSkills.includes('pink-double'));
+  });
+
+  it('replaces SEC-04 with 「绯凪·千夜 // KIRI-04」, renames gate-minefield to 灼心·火符, and includes samurai big-sister lore', () => {
+    assert.equal(SEC04_CHARACTER_DOSSIER.name, '绯凪·千夜');
+    assert.equal(SEC04_CHARACTER_DOSSIER.codename, 'KIRI-04');
+    assert.equal(SEC04_CHARACTER_DOSSIER.expressionCount, 6);
+    assert.ok(SEC04_CHARACTER_DOSSIER.personality.includes('黑河'));
+    assert.ok(SEC04_CHARACTER_DOSSIER.personality.includes('反黑客'));
+    assert.ok(SEC04_CHARACTER_DOSSIER.personality.includes('武士'));
+    assert.ok(
+      SEC04_CHARACTER_DOSSIER.personality.includes('大姐姐') ||
+        SEC04_CHARACTER_DOSSIER.title.includes('大姐姐')
+    );
+    assert.ok((SEC04_CHARACTER_DOSSIER.voice?.samples.length ?? 0) >= 4);
+
+    for (const expr of CONTRACT_EXPRESSIONS) {
+      assert.equal(resolveSec04Sprite(expr), `./assets/story/sec04/${expr}.webp`);
+      assert.equal(
+        SEC04_CHARACTER_DOSSIER.variants[`witchform:${expr}`],
+        SEC04_EXPRESSION_PATHS[expr]
+      );
+      assert.equal(
+        SEC04_CHARACTER_DOSSIER.variants[`custom:${expr}`],
+        SEC04_EXPRESSION_PATHS[expr]
+      );
+    }
+
+    assert.equal(getStoryCharacterByEscapeNode(4)?.id, SEC04_CHARACTER_DOSSIER.id);
+    const sec04 = ESCAPE_ROUTE_NODES[4];
+    assert.equal(sec04.opponentName, '绯凪·千夜');
+    assert.equal(sec04.signatureSkillId, 'gate-minefield');
+    assert.equal(sec04.signatureSkillName, '灼心·火符');
+    assert.equal(sec04.specialCheatSkillId, 'mikiri-counter');
+    assert.equal(sec04.specialCheatSkillName, '见切·燕返');
+
+    const wbRes = worldbookContext('绯凪·千夜 反黑客组织 灼心·火符', builtinWorldbook(), 4000);
+    assert.ok(wbRes.text.includes('反黑客') || wbRes.text.includes('绯凪·千夜'));
+
+    // Triggering a gate-minefield trap reports「灼心·火符」
+    const trapState = createInitialState({
+      opponentName: '绯凪·千夜',
+      opponentSignatureSkill: 'gate-minefield',
+      trappedBoardIndices: [0, 1, 2],
+    });
+    const afterTrap = applyAction({ ...trapState, currentTurn: 'human' }, { type: 'flip', boardIndex: 0 });
+    assert.equal(afterTrap.phase, 'showdown');
+    assert.ok(afterTrap.lastAction?.label.includes('灼心·火符'));
+  });
+
+  it('executes mikiri-counter (见切·燕返) without stacking, follows swapped cards onto board, and wins round immediately when opponent scans it', () => {
+    const sk = getSkillById('mikiri-counter');
+    assert.ok(sk);
+    assert.equal(getSkillGroup('mikiri-counter'), 'cheat');
+
+    const full = createDeck();
+    const pick = (rank: number, suit: 'B' | 'P', copy: 0 | 1 = 0) =>
+      full.find((c) => c.rank === rank && c.suit === suit && (c.copy ?? 0) === copy)!;
+
+    let state = createInitialState({
+      opponentName: '绯凪·千夜',
+      chips: { human: 1000, ai: 1000 },
+      opponentSignatureSkill: 'gate-minefield',
+      aiSpecialCheatSkill: 'mikiri-counter',
+      playerCheatSkills: ['plus-one', 'minus-one', 'mikiri-counter'],
+      trappedBoardIndices: [],
+      deckOverride: [
+        pick(10, 'B', 0), pick(9, 'P', 0), pick(4, 'B', 0),
+        pick(3, 'P', 0), pick(12, 'B', 0), pick(5, 'B', 0),
+        pick(7, 'B', 0), pick(8, 'P', 0), pick(11, 'B', 0), pick(6, 'P', 0),
+      ],
+    });
+
+    // Cannot stack mikiri-counter on an already-tampered card, nor tamper a mikiri-counter card
+    state = { ...state, currentTurn: 'human' };
+    state = applyAction(state, { type: 'hack', handIndex: 0, skill: 'plus-one' });
+    assert.equal(isActionLegal(state, { type: 'hack', handIndex: 0, skill: 'mikiri-counter' }), false);
+
+    // Hand off to AI; AI places mikiri-counter on AI hand[0]
+    state = applyAction(state, { type: 'flip', boardIndex: 0 });
+    assert.equal(state.currentTurn, 'ai');
+    const aiMikiri = { type: 'hack' as const, handIndex: 0, skill: 'mikiri-counter' as const };
+    assert.equal(isActionLegal(state, aiMikiri), true);
+
+    const afterAiMikiri = applyAction(state, aiMikiri);
+    assert.equal(afterAiMikiri.players.ai.hand[0].card.isCounterTrap, true);
+    assert.deepEqual(afterAiMikiri.players.ai.hand[0].tamperedBy, ['mikiri-counter']);
+    assert.equal(
+      formatTamperLabel(
+        afterAiMikiri.players.ai.hand[0].card,
+        afterAiMikiri.players.ai.hand[0].originalCard
+      ),
+      '见切:反制'
+    );
+    // Cannot stack another cheat skill on AI hand[0] in a later turn
+    assert.equal(
+      getVisibleHandCard(afterAiMikiri.players.ai.hand[0], 'human', 'ai', false).isCounterTrap,
+      undefined
+    );
+
+    // Human flips board[1], AI flip board[2] -> check non-stacking on next turn
+    const hFlip = applyAction(applyAction(afterAiMikiri, { type: 'flip', boardIndex: 1 }), {
+      type: 'flip',
+      boardIndex: 2,
+    });
+    // Wait: hFlip is AI's turn now? Let's trace: afterAiMikiri was AI's turn -> AI flipped 1 -> human's turn -> human flipped 2 -> AI's turn
+    assert.equal(hFlip.currentTurn, 'ai');
+    assert.equal(isActionLegal(hFlip, { type: 'hack', handIndex: 0, skill: 'plus-one' }), false);
+
+    // Branch A: Human scans AI hand[0] directly -> mikiri-counter triggers, AI wins the hand immediately!
+    const humanTurnForHandScan = applyAction(hFlip, { type: 'flip', boardIndex: 3 });
+    assert.equal(humanTurnForHandScan.currentTurn, 'human');
+    const handCounterWin = applyAction(humanTurnForHandScan, {
+      type: 'scan',
+      targetKind: 'hand',
+      targetIndex: 0,
+    });
+    assert.equal(handCounterWin.phase, 'showdown');
+    assert.equal(handCounterWin.result?.reason, 'mikiri-counter');
+    assert.equal(handCounterWin.result?.winner, 'ai');
+    assert.ok(handCounterWin.players.ai.chips > 1000);
+
+    // Branch B: AI swaps mikiri-counter card onto hidden board[3] -> human scans board[3] -> AI still wins!
+    const afterSwapBoard = applyAction(hFlip, { type: 'swap', handIndex: 0, boardIndex: 3 });
+    assert.equal(afterSwapBoard.board[3].card.isCounterTrap, true);
+    assert.equal(getVisibleBoardCard(afterSwapBoard.board[3], 'human', false).isCounterTrap, undefined);
+    assert.equal(afterSwapBoard.currentTurn, 'human');
+    const boardCounterWin = applyAction(afterSwapBoard, {
+      type: 'scan',
+      targetKind: 'board',
+      targetIndex: 3,
+    });
+    assert.equal(boardCounterWin.phase, 'showdown');
+    assert.equal(boardCounterWin.result?.reason, 'mikiri-counter');
+    assert.equal(boardCounterWin.result?.winner, 'ai');
   });
 });

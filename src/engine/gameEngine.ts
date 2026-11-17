@@ -55,7 +55,8 @@ export function isCardTamperedFromOriginal(card: Card, originalCard?: Card): boo
     card.rank !== originalCard.rank ||
     card.suit !== originalCard.suit ||
     Boolean(card.isBlank) !== Boolean(originalCard.isBlank) ||
-    Boolean(card.isDoublePink) !== Boolean(originalCard.isDoublePink)
+    Boolean(card.isDoublePink) !== Boolean(originalCard.isDoublePink) ||
+    Boolean(card.isCounterTrap) !== Boolean(originalCard.isCounterTrap)
   );
 }
 
@@ -81,6 +82,7 @@ export function getDisplayCardForTable(
 
 export function formatTamperLabel(card: Card, originalCard?: Card): string | undefined {
   if (!originalCard || !isCardTamperedFromOriginal(card, originalCard)) return undefined;
+  if (card.isCounterTrap && !originalCard.isCounterTrap) return '见切:反制';
   return `原:${formatSuitLabel(originalCard.suit)}${formatRank(originalCard.rank)}`;
 }
 
@@ -185,6 +187,8 @@ export function getHackSkillCost(state: Pick<GameState, 'config'>, skill: HackSk
     case 'null-erase':
       return 50;
     case 'pink-double':
+      return 55;
+    case 'mikiri-counter':
       return 55;
   }
 }
@@ -369,7 +373,7 @@ export interface CreateStateOptions {
   playerCheatSkills?: string[];
   playerAcquiredSkills?: string[];
   opponentSignatureSkill?: OpponentSignatureSkillId;
-  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double';
+  aiSpecialCheatSkill?: 'crown-ace' | 'null-erase' | 'pink-double' | 'mikiri-counter';
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   pastHands?: HandRoundSummary[];
@@ -684,18 +688,25 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
           equippedCheat.includes(action.skill) ||
           ((action.skill === 'crown-ace' ||
             action.skill === 'null-erase' ||
-            action.skill === 'pink-double') &&
+            action.skill === 'pink-double' ||
+            action.skill === 'mikiri-counter') &&
             Boolean(state.playerAcquiredSkills?.includes(action.skill)));
         if (!allowed) return false;
       } else {
         if (action.skill === 'crown-ace' && state.aiSpecialCheatSkill !== 'crown-ace') return false;
         if (action.skill === 'null-erase' && state.aiSpecialCheatSkill !== 'null-erase') return false;
         if (action.skill === 'pink-double' && state.aiSpecialCheatSkill !== 'pink-double') return false;
+        if (action.skill === 'mikiri-counter' && state.aiSpecialCheatSkill !== 'mikiri-counter') return false;
       }
       const cost = getEffectiveHackCost(state, actorId, action.skill);
       if (actor.chips < cost) return false;
       const hCard = actor.hand[action.handIndex];
       if (!hCard || hCard.visibility !== 'open' || hCard.card.isBlank) return false;
+      // 见切·燕返与其余篡改技能不可叠加在同一张牌上
+      if (hCard.card.isCounterTrap) return false;
+      if (action.skill === 'mikiri-counter' && hCard.tamperedBy && hCard.tamperedBy.length > 0) {
+        return false;
+      }
       if ((action.skill === 'plus-one' || action.skill === 'crown-ace') && hCard.card.rank >= 14) {
         return false;
       }
@@ -720,7 +731,7 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
           return !actor.ghostShield && actor.chips >= 40;
         case 'parity-spoof': {
           const hc = actor.hand[idx];
-          return Boolean(hc && hc.visibility === 'open' && actor.chips >= 55);
+          return Boolean(hc && hc.visibility === 'open' && !hc.card.isCounterTrap && actor.chips >= 55);
         }
         case 'phantom-swap': {
           const hc = actor.hand[idx];
@@ -985,7 +996,7 @@ function triggerGateTrapLoss(next: GameState, boardIndex: number): GameState {
     potWon: seizedChips,
     payouts: { human: 0, ai: seizedChips },
   };
-  const summary = `触发「闸门雷区」陷阱（公共节点 #${boardIndex + 1}）：算力瞬间熔断归零！`;
+  const summary = `触发「灼心·火符」陷阱（公共节点 #${boardIndex + 1}）：算力瞬间灼毁归零！`;
   next.lastAction = {
     id: makeEventId(),
     type: 'showdown',
@@ -1215,6 +1226,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       nextCard.isBlank = true;
     } else if (action.skill === 'pink-double') {
       nextCard.isDoublePink = true;
+    } else if (action.skill === 'mikiri-counter') {
+      nextCard.isCounterTrap = true;
     } else {
       nextCard.suit = nextCard.suit === 'B' ? 'P' : 'B';
     }
@@ -1232,7 +1245,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
               ? '信息抹除(废牌)'
               : action.skill === 'pink-double'
                 ? '双粉映象(x2粉)'
-                : '反转花色';
+                : action.skill === 'mikiri-counter'
+                  ? '见切·燕返'
+                  : '反转花色';
     const summary = `${actorLabel} 预支 ${cost} 算力注入黑客协议（${skillName} · 仅己方可见）`;
 
     next.lastAction = {
@@ -1267,10 +1282,13 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     next.scannedKeys.push(`${actorId}:${action.targetKind}:${action.targetIndex}`);
 
     let tampered = false;
+    let counterTrapTriggered = false;
     let tamperedSkills: HackSkillId[] = [];
     if (action.targetKind === 'hand') {
       const targetHc = opp.hand[action.targetIndex];
-      if (
+      if (targetHc?.card.isCounterTrap) {
+        counterTrapTriggered = true;
+      } else if (
         targetHc?.originalCard &&
         targetHc.tamperedBy &&
         targetHc.tamperedBy.length > 0 &&
@@ -1281,7 +1299,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       }
     } else {
       const slot = next.board[action.targetIndex];
-      if (
+      if (slot?.card.isCounterTrap) {
+        counterTrapTriggered = true;
+      } else if (
         slot?.originalCard &&
         slot.tamperedBy &&
         slot.tamperedBy.length > 0 &&
@@ -1290,6 +1310,48 @@ export function applyAction(state: GameState, action: GameAction): GameState {
         tampered = true;
         tamperedSkills = [...slot.tamperedBy];
       }
+    }
+
+    if (counterTrapTriggered) {
+      if (next.hackEscrowPot > 0) {
+        next.pot += next.hackEscrowPot;
+        next.hackEscrowPot = 0;
+      }
+      next.players.human.hiddenHackEscrow = 0;
+      next.players.ai.hiddenHackEscrow = 0;
+      opp.chips += next.pot;
+      next.phase = 'showdown';
+      next.justCalledThisTurn = false;
+      next.result = {
+        winner: oppId,
+        reason: 'mikiri-counter',
+        potWon: next.pot,
+        payouts: {
+          human: oppId === 'human' ? next.pot : 0,
+          ai: oppId === 'ai' ? next.pot : 0,
+        },
+      };
+      const oppLabel = oppId === 'human' ? '我方' : next.players.ai.name;
+      const summary = `${actorLabel} 扫描命中 ${oppLabel} 的「见切·燕返」剑意！${oppLabel} 顺势拔刀反杀，直接赢下本小局并夺取奖池 ${next.pot}`;
+      next.lastAction = {
+        id: makeEventId(),
+        type: 'scan',
+        actor: actorId,
+        targetKind: action.targetKind,
+        targetIndex: action.targetIndex,
+        amount: cost,
+        caught: true,
+        label: summary,
+      };
+      next.actionHistory.push({
+        id: makeEventId(),
+        handNumber: next.handNumber,
+        actor: actorId,
+        phase: 'showdown',
+        summary,
+        timestamp: Date.now(),
+      });
+      return next;
     }
 
     if (tampered && opp.ghostShield) {
@@ -1467,7 +1529,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
                 ? '抹除'
                 : locked === 'pink-double'
                   ? '双粉'
-                  : '反色';
+                  : locked === 'mikiri-counter'
+                    ? '见切'
+                    : '反色';
       summary = locked
         ? `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：已挥刃切断对端本手 [${lockedLabel}] 作弊链路`
         : `${actorLabel} 激活「富兰克林之死」（投入 ${cost}）：对端作弊链路已全被封锁`;

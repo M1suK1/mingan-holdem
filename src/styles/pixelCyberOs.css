@@ -4830,6 +4830,11 @@ button:disabled {
   object-position: 45% 7%;
 }
 
+.lc-opp-portrait-img.is-sec04-framing {
+  object-fit: cover;
+  object-position: 47% 7%;
+}
+
 .lc-hack-btn.is-cold-cut,
 .lc-acquired-skill-chip.is-cold-cut {
   position: relative;
@@ -5033,5 +5038,133 @@ button:disabled {
   100% {
     transform: translate3d(2%, -3%, 0) scale(1.05);
     opacity: 0.74;
+  }
+}
+
+/* =========================================================================
+   21. SEC-04 Burning Board VFX (灼心·火符公共牌区燃烧特效)
+   ========================================================================= */
+.lc-board-zone.is-burning-board {
+  overflow: hidden;
+  border-color: rgba(255, 71, 87, 0.82);
+  --hud-corner: #ff6b35;
+  box-shadow:
+    inset 0 -22px 34px rgba(255, 69, 0, 0.24),
+    inset 0 0 22px rgba(255, 46, 136, 0.14),
+    0 0 20px rgba(255, 71, 87, 0.22);
+  animation: lcBoardBurnBorder 2.4s ease-in-out infinite alternate;
+}
+
+.lc-board-zone.is-burning-board .lc-board-header,
+.lc-board-zone.is-burning-board .lc-cards-row {
+  position: relative;
+  z-index: 3;
+}
+
+.lc-board-fire-vfx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.lc-board-fire-vfx::before,
+.lc-board-fire-vfx::after {
+  content: '';
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -14px;
+  pointer-events: none;
+}
+
+.lc-board-fire-vfx::before {
+  height: 58%;
+  background:
+    radial-gradient(ellipse 26% 65% at 15% 100%, rgba(255, 71, 87, 0.5), transparent 72%),
+    radial-gradient(ellipse 30% 72% at 48% 100%, rgba(255, 118, 40, 0.45), transparent 70%),
+    radial-gradient(ellipse 26% 62% at 83% 100%, rgba(255, 46, 136, 0.42), transparent 72%);
+  filter: blur(8px);
+  animation: lcBoardFlameRiseA 2.2s ease-in-out infinite alternate;
+}
+
+.lc-board-fire-vfx::after {
+  height: 44%;
+  background:
+    radial-gradient(ellipse 20% 70% at 30% 100%, rgba(255, 176, 32, 0.42), transparent 70%),
+    radial-gradient(ellipse 24% 75% at 68% 100%, rgba(255, 71, 87, 0.44), transparent 72%);
+  filter: blur(6px);
+  animation: lcBoardFlameRiseB 1.75s ease-in-out infinite alternate;
+}
+
+.lc-fire-ember {
+  position: absolute;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: #ffb020;
+  box-shadow: 0 0 8px #ff4757, 0 0 12px rgba(255, 176, 32, 0.85);
+  animation: lcFireEmberAscend 2.4s linear infinite;
+}
+
+.lc-fire-ember.e1 { left: 10%; animation-delay: 0s; animation-duration: 2.1s; }
+.lc-fire-ember.e2 { left: 26%; animation-delay: -0.7s; animation-duration: 2.5s; background: #ff4757; }
+.lc-fire-ember.e3 { left: 42%; animation-delay: -1.3s; animation-duration: 1.9s; }
+.lc-fire-ember.e4 { left: 58%; animation-delay: -0.4s; animation-duration: 2.3s; background: #ff2e88; }
+.lc-fire-ember.e5 { left: 74%; animation-delay: -1.6s; animation-duration: 2.0s; }
+.lc-fire-ember.e6 { left: 89%; animation-delay: -0.9s; animation-duration: 2.6s; background: #ff4757; }
+
+@keyframes lcBoardBurnBorder {
+  0% {
+    box-shadow:
+      inset 0 -18px 28px rgba(255, 69, 0, 0.2),
+      0 0 16px rgba(255, 71, 87, 0.18);
+  }
+  100% {
+    box-shadow:
+      inset 0 -26px 38px rgba(255, 71, 87, 0.34),
+      0 0 24px rgba(255, 118, 40, 0.3);
+  }
+}
+
+@keyframes lcBoardFlameRiseA {
+  0% {
+    transform: translateY(4px) scaleX(0.98);
+    opacity: 0.72;
+  }
+  100% {
+    transform: translateY(-6px) scaleX(1.04);
+    opacity: 1;
+  }
+}
+
+@keyframes lcBoardFlameRiseB {
+  0% {
+    transform: translateY(-4px) scaleX(1.03);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translateY(3px) scaleX(0.96);
+    opacity: 0.95;
+  }
+}
+
+@keyframes lcFireEmberAscend {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.95;
+  }
+  70% {
+    transform: translate3d(8px, -78px, 0) scale(0.8);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate3d(-6px, -124px, 0) scale(0.35);
+    opacity: 0;
   }
 }
