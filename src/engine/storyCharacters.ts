@@ -710,3 +710,168 @@ export function getStorySkillsForCharacter(characterId?: string): {
   }
   return {};
 }
+
+export interface PreMatchSkillIntro {
+  id: string;
+  name: string;
+  category: '主动压制' | '被动压制' | '区域机制' | '专属作弊技';
+  triggerOrCost: string;
+  summary: string;
+  counterTip: string;
+}
+
+export interface PreMatchOpponentBriefing {
+  nodeIndex: 1 | 2 | 3 | 4;
+  nodeCode: string;
+  nodeTitle: string;
+  name: string;
+  codename: string;
+  domainTitle: string;
+  accentColor: string;
+  portraitSrc: string;
+  quote: string;
+  appearance: string;
+  personality: string;
+  skills: PreMatchSkillIntro[];
+}
+
+export const PRE_MATCH_OPPONENT_BRIEFINGS: Record<1 | 2 | 3 | 4, PreMatchOpponentBriefing> = {
+  1: {
+    nodeIndex: 1,
+    nodeCode: 'SEC-01',
+    nodeTitle: '底层排水巷道',
+    name: SEC01_CHARACTER_DOSSIER.name,
+    codename: SEC01_CHARACTER_DOSSIER.codename,
+    domainTitle: SEC01_CHARACTER_DOSSIER.title,
+    accentColor: SEC01_CHARACTER_DOSSIER.color,
+    portraitSrc: SEC01_EXPRESSION_PATHS.calm,
+    quote: SEC01_CHARACTER_DOSSIER.quote,
+    appearance: SEC01_CHARACTER_DOSSIER.appearance,
+    personality:
+      '整个黑域人人都躲在匿名代号后，唯独她嚣张到直接挂出「凌翡」真名实名上网，极度狂傲且爱面子。习惯靠显赫背景令同桌对手主动放水退避；一旦真正被人当面击败或拆穿作弊，就会瞬间炸毛破防却仍死不认输。',
+    skills: [
+      {
+        id: 'sec01-siphon',
+        name: '算力虹吸 // SIPHON TAX',
+        category: '被动压制',
+        triggerOrCost: '每小局她首次主动加注成功时自动触发',
+        summary: '强行向同桌对象收取“入场茶水费”，每次触发额外从玩家算力池吸走 25 点算力并入己方筹码。',
+        counterTip: '控制跟注节奏，避免在她顺风连加的轮次长期拉锯消耗。',
+      },
+      {
+        id: 'sec01-crown-ace',
+        name: '钦定王牌 // CROWN ACE',
+        category: '专属作弊技',
+        triggerOrCost: '预支 60 算力（同手可跨回合使用，每回合限 1 次）',
+        summary: '与 +1/-1/反色同级的特权改牌技，可直接将自己手中 1 张非 A 明牌暗中篡改为同花色 A（摊牌前对端不可见）。',
+        counterTip: '留意她频繁微调手牌并强压底池的动作，看准破绽用「协议扫描」直接抓包判胜。',
+      },
+    ],
+  },
+  2: {
+    nodeIndex: 2,
+    nodeCode: 'SEC-02',
+    nodeTitle: '中继审计网关',
+    name: SEC02_CHARACTER_DOSSIER.name,
+    codename: SEC02_CHARACTER_DOSSIER.codename,
+    domainTitle: '失声双刃猎手 · 审计网关截杀者',
+    accentColor: SEC02_CHARACTER_DOSSIER.color,
+    portraitSrc: SEC02_EXPRESSION_PATHS.calm,
+    quote: '「[VOCAL_ERR] ▓▓ 0x4F▒ NULL ╳╳ // ...」',
+    appearance: SEC02_CHARACTER_DOSSIER.appearance,
+    personality:
+      '声带完全损坏的危险追捕者，对外聊天终端永远只能吐出破碎的十六进制方块乱码；然而大脑深处的思维却像一只嗅到算力血腥味就彻底发狂的猎犬，偏执、嗜咬，对切割猎物的作弊线路有着近乎痴狂的执念。',
+    skills: [
+      {
+        id: 'sec02-franklin',
+        name: '富兰克林之死 // BLADE CUT',
+        category: '主动压制',
+        triggerOrCost: '每小局开局时挥动双刃自动劈砍一次',
+        summary: '强行沿斜角斩断玩家已装备作弊技能中的 1 项链路，使该作弊技在本小局内彻底锁死瘫痪，无法发动。',
+        counterTip: '切勿把所有赢法赌在单一作弊技上；多利用未被切断的其他改牌或公共牌换位取胜。',
+      },
+      {
+        id: 'sec02-null-erase',
+        name: '信息抹除 // NULL ERASE',
+        category: '专属作弊技',
+        triggerOrCost: '预支 50 算力 · 嚼碎手中 1 张公开明牌',
+        summary: '将手牌彻底抹除成无效「NULL」废牌（外观看似正常且仅己方知情），不计入任何牌型，她还会狡猾地把 NULL 牌换入公共区污染公共牌。',
+        counterTip: '一旦看到她反常地主动把看似高点数的手牌丢进公共区，可果断对其执行扫描抓包！',
+      },
+    ],
+  },
+  3: {
+    nodeIndex: 3,
+    nodeCode: 'SEC-03',
+    nodeTitle: '霓虹频谱暗道',
+    name: SEC03_CHARACTER_DOSSIER.name,
+    codename: SEC03_CHARACTER_DOSSIER.codename,
+    domainTitle: '频谱迷雾龙娘 · 失焦挑衅者',
+    accentColor: SEC03_CHARACTER_DOSSIER.color,
+    portraitSrc: SEC03_EXPRESSION_PATHS.calm,
+    quote: '哟，这身替壳看着挺顺眼嘛——别老盯着牌面发呆，先接住满桌粉雾再说！',
+    appearance:
+      '粉青双色挑染长双马尾的龙娘虚拟体，头顶一对浅褐小龙角与尖耳，拖着粉红鳞片配青蓝腹甲的大号龙尾；身穿白色吊带露脐背心与敞开黑粉棒球皮夹克、黑色皮带百褶短裙、白色过膝长袜与粉黑厚底运动鞋，单手拎着发光数据平板。',
+    personality:
+      '重度脸盲、说话大大咧咧且毫无社交距离感的假小子型对手。对局时话多自来熟、爱起哄贴近打乱对手注意力，让人完全摸不透她是真糊涂还是在装傻设局；一旦打起花色心理战却极其狡猾难缠。',
+    skills: [
+      {
+        id: 'sec03-pink-mirage',
+        name: '粉曜迷彩 // ALL-PINK MIRAGE',
+        category: '区域机制',
+        triggerOrCost: '入局即生效 · 摊牌前持续覆盖全场明牌',
+        summary: '将场上所有未摊牌的公开明牌（含手牌与公共区换入牌）全部染成粉色幻象，彻底隐藏真实的黑/粉花色分布，直到终局摊牌才恢复原色。',
+        counterTip: '时刻牢记「两对 > 同花」原则！别被满桌粉色同花假象诈退，优先以私有暗牌为基准稳扎稳打。',
+      },
+      {
+        id: 'sec03-pink-double',
+        name: '双粉映象 // DOUBLE PINK',
+        category: '专属作弊技',
+        triggerOrCost: '对己方手中 1 张真实粉色明牌施放',
+        summary: '暗中令指定真实粉色明牌在终局核算时计作「两张粉色牌」用于凑齐粉色同花（不产生对子加权，摊牌前不可见）。',
+        counterTip: '若她死死攥住特定明牌不肯换出却狂押同花，可精准扫描她手上保留最久的牌抓获暗改。',
+      },
+    ],
+  },
+  4: {
+    nodeIndex: 4,
+    nodeCode: 'SEC-04',
+    nodeTitle: '零号离线闸门',
+    name: SEC04_CHARACTER_DOSSIER.name,
+    codename: SEC04_CHARACTER_DOSSIER.codename,
+    domainTitle: '零号出口最终守关人 · 苍焰居合武士',
+    accentColor: SEC04_CHARACTER_DOSSIER.color,
+    portraitSrc: SEC04_EXPRESSION_PATHS.calm,
+    quote: '抱歉了，小家伙……这里可是零号出口闸门。按安全协议，接下来哪怕一毫秒都不会手下留情哦。',
+    appearance: SEC04_CHARACTER_DOSSIER.appearance,
+    personality:
+      '言谈举止温柔体贴、总挂着宽容浅笑的年上武士大姐姐，甚至会贴心安慰落入下风的挑战者；但在零号闸门面前她信奉绝对冰冷的守门职责，出刀与重注毫不犹豫、公事公办地不留半分余地。',
+    skills: [
+      {
+        id: 'sec04-burning-talisman',
+        name: '灼心·火符 // BURNING SEAL',
+        category: '区域机制',
+        triggerOrCost: '每小局在公共暗槽随机潜藏 3 道火符',
+        summary: '翻牌或明暗换牌一旦触及潜伏火符的公共暗槽，玩家当前算力会瞬间灼烧归零！触符后可用左下角「时间回溯」撤回并永久标红该陷阱槽。',
+        counterTip: '踩雷不要慌张直接弃局，立即点按「时间回溯」避开红叉陷阱槽；注意连续回溯可能磨损锚点。',
+      },
+      {
+        id: 'sec04-mikiri-tsubame',
+        name: '见切·燕返 // MIKIRI COUNTER',
+        category: '专属作弊技',
+        triggerOrCost: '不可叠加 · 注入剑意标记并随换牌生效',
+        summary: '对己方未篡改明牌注入隐秘反制剑意（就算被换入公共区依然有效）。一旦对手贸然对该牌发动「协议扫描」，她会拔刀居合反杀并直接赢下本小局！',
+        counterTip: '极端危险！严禁对她盲目乱扫正常明牌，除非明确抓到改牌异常，否则优先凭牌型正面博弈。',
+      },
+    ],
+  },
+};
+
+export function getPreMatchOpponentBriefing(
+  nodeIndex: number | null | undefined
+): PreMatchOpponentBriefing | null {
+  if (nodeIndex === 1 || nodeIndex === 2 || nodeIndex === 3 || nodeIndex === 4) {
+    return PRE_MATCH_OPPONENT_BRIEFINGS[nodeIndex];
+  }
+  return null;
+}

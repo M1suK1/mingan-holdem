@@ -16,6 +16,7 @@ import {
   SEC04_EXPRESSION_PATHS,
   STORY_CHARACTER_DOSSIERS,
   formatMuteGarbledText,
+  getPreMatchOpponentBriefing,
   getStoryCharacterByEscapeNode,
   isMuteGarbledCharacter,
   pickMuteActionThought,
@@ -1132,5 +1133,62 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.ok(appSrc.includes("if (finishedKind === 'sec04-epilogue')"));
     assert.ok(appSrc.includes("'sec04-epilogue': SEC04_EPILOGUE_VN_SCRIPT"));
     assert.equal(appSrc.includes('Sec04VictoryModal'), false);
+  });
+
+  it('provides pre-match dossier briefings (portrait, appearance, personality, special skills) for SEC-01~04, excludes ECHO-0, and hides real-world identity except Ling Fei', async () => {
+    assert.equal(getPreMatchOpponentBriefing(0), null);
+    assert.equal(getPreMatchOpponentBriefing(5), null);
+    assert.equal(getPreMatchOpponentBriefing(null), null);
+
+    const b1 = getPreMatchOpponentBriefing(1);
+    const b2 = getPreMatchOpponentBriefing(2);
+    const b3 = getPreMatchOpponentBriefing(3);
+    const b4 = getPreMatchOpponentBriefing(4);
+
+    assert.ok(b1 && b2 && b3 && b4);
+    for (const b of [b1, b2, b3, b4]) {
+      assert.ok(b.portraitSrc.endsWith('.webp'));
+      assert.ok(b.appearance.length > 20);
+      assert.ok(b.personality.length > 20);
+      assert.equal(b.skills.length, 2);
+      for (const sk of b.skills) {
+        assert.ok(sk.name.length > 0 && sk.summary.length > 10 && sk.counterTip.length > 8);
+      }
+    }
+
+    // SEC-01 Ling Fei intentionally uses her real identity online
+    assert.ok(b1.domainTitle.includes('实名上网'));
+    assert.ok(b1.skills.some((s) => s.name.includes('算力虹吸')));
+    assert.ok(b1.skills.some((s) => s.name.includes('钦定王牌')));
+
+    // SEC-02 Fulan omits real-world orphan / Black River recruitment background
+    const b2Text = `${b2.domainTitle} ${b2.appearance} ${b2.personality} ${b2.skills.map((s) => `${s.name} ${s.summary}`).join(' ')}`;
+    assert.equal(b2Text.includes('孤儿'), false);
+    assert.equal(b2Text.includes('雨夜'), false);
+    assert.equal(b2Text.includes('黑河'), false);
+    assert.ok(b2.skills.some((s) => s.name.includes('富兰克林之死')));
+    assert.ok(b2.skills.some((s) => s.name.includes('信息抹除')));
+
+    // SEC-03 Pink Dragon omits real-world colleague / Neon Heart / Lin Longxin identity
+    const b3Text = `${b3.domainTitle} ${b3.appearance} ${b3.personality} ${b3.skills.map((s) => `${s.name} ${s.summary}`).join(' ')}`;
+    assert.equal(b3Text.includes('霓虹心'), false);
+    assert.equal(b3Text.includes('同事'), false);
+    assert.equal(b3Text.includes('工牌'), false);
+    assert.equal(b3Text.includes('林龙心'), false);
+    assert.ok(b3.skills.some((s) => s.name.includes('粉曜迷彩')));
+    assert.ok(b3.skills.some((s) => s.name.includes('双粉映象')));
+
+    // SEC-04 KIRI-04 omits real-world corporate employer identity
+    const b4Text = `${b4.domainTitle} ${b4.appearance} ${b4.personality} ${b4.skills.map((s) => `${s.name} ${s.summary}`).join(' ')}`;
+    assert.equal(b4Text.includes('黑河'), false);
+    assert.equal(b4Text.includes('雇佣'), false);
+    assert.ok(b4.skills.some((s) => s.name.includes('灼心·火符')));
+    assert.ok(b4.skills.some((s) => s.name.includes('见切·燕返')));
+
+    // Verify App.tsx and OpponentBriefingModal wiring
+    const appSrc = await fs.readFile(path.join(process.cwd(), 'src', 'App.tsx'), 'utf8');
+    assert.ok(appSrc.includes('OpponentBriefingModal'));
+    assert.ok(appSrc.includes("type: 'opponent-briefing'"));
+    assert.ok(appSrc.includes('id="hud-btn-opponent-briefing"'));
   });
 });

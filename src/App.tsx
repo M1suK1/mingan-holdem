@@ -131,12 +131,20 @@ import {
   type P2pTransport,
 } from './engine/p2pTransport.ts';
 import {
+  BGM_TRACK_META,
   actionToSoundCue,
+  loadBgmSettings,
   loadSoundSettings,
   playSound,
+  previewBgmScene,
+  resolveBgmScene,
+  saveBgmSettings,
   saveSoundSettings,
+  setBgmScene,
   showdownToSoundCue,
+  stopBgm,
   unlockAudioContext,
+  type BgmSettings,
   type SoundSettings,
 } from './engine/soundEngine.ts';
 import {
@@ -213,6 +221,7 @@ import {
 } from './engine/vfxPresets.ts';
 import {
   formatMuteGarbledText,
+  getPreMatchOpponentBriefing,
   getStoryCharacterByEscapeNode,
   getStorySkillsForCharacter,
   isKiriSamuraiCharacter,
@@ -273,6 +282,7 @@ const TerminalLoginView = lazy(() => import('./components/TerminalLoginView.tsx'
 const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
 const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
 const VisualNovelStoryModal = lazy(() => import('./components/VisualNovelStoryModal.tsx'));
+const OpponentBriefingModal = lazy(() => import('./components/OpponentBriefingModal.tsx'));
 
 type SettingsCategoryKey = 'mode' | 'p2p-role' | 'ai-rules' | 'audio-debug';
 
@@ -410,7 +420,8 @@ type ActiveModal =
   | { type: 'protocol'; tab: 'rules' | 'suits' | 'audit' }
   | { type: 'tuning' }
   | { type: 'confirm-reset' }
-  | { type: 'confirm-desktop-reset' };
+  | { type: 'confirm-desktop-reset' }
+  | { type: 'opponent-briefing'; nodeIndex: 1 | 2 | 3 | 4; isMidMatch: boolean };
 
 interface ChatItem {
   id: string;
@@ -780,6 +791,7 @@ export function App() {
   const mobileChatOpenRef = useRef(mobileChatOpen);
   mobileChatOpenRef.current = mobileChatOpen;
   const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => loadSoundSettings());
+  const [bgmSettings, setBgmSettings] = useState<BgmSettings>(() => loadBgmSettings());
 
   const [toasts, setToasts] = useState<CyberToast[]>([]);
   const [cmdLogs, setCmdLogs] = useState<DebugCmdLogEntry[]>([
@@ -1819,6 +1831,7 @@ export function App() {
       state.phase === 'showdown' ||
       state.currentTurn !== 'ai' ||
       activeVnStory !== null ||
+      activeModal.type === 'opponent-briefing' ||
       sec04BerserkIntroPending
     ) {
       return;
@@ -1992,6 +2005,7 @@ export function App() {
     sec00GuideActive,
     sec00IntroIndex,
     activeVnStory,
+    activeModal.type,
     sec04BerserkIntroPending,
     isP2pSessionActive,
     enqueueTask,
@@ -2053,6 +2067,7 @@ export function App() {
   useEffect(() => {
     const locked = state.lockedHumanHackSkill;
     if (!locked || state.phase === 'showdown') return;
+    if (activeVnStory !== null || activeModal.type === 'opponent-briefing') return;
     const key = `${state.handNumber}:${locked}`;
     if (lastSlashedHandRef.current === key) return;
     lastSlashedHandRef.current = key;
@@ -2068,7 +2083,15 @@ export function App() {
       setSlashBurstKey((curr) => (curr === key ? null : curr));
     }, 950);
     return () => window.clearTimeout(timer);
-  }, [state.handNumber, state.lockedHumanHackSkill, state.phase, state.players.ai.name, pushToast]);
+  }, [
+    state.handNumber,
+    state.lockedHumanHackSkill,
+    state.phase,
+    state.players.ai.name,
+    activeVnStory,
+    activeModal.type,
+    pushToast,
+  ]);
 
   // Scan action laser sweep VFX + toast feedback (Triggers for BOTH Player & Opponent!)
   useEffect(() => {
@@ -3419,6 +3442,13 @@ export function App() {
         kind: introKind,
         index: 0,
       });
+    } else if (getPreMatchOpponentBriefing(nodeIndex)) {
+      playSound('popup-alert');
+      setActiveModal({
+        type: 'opponent-briefing',
+        nodeIndex: nodeIndex as 1 | 2 | 3 | 4,
+        isMidMatch: false,
+      });
     } else {
       triggerTableEntrance();
     }
@@ -3807,41 +3837,45 @@ export function App() {
     if (finishedKind === 'sec01-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 1));
       setActiveExpression('calm');
-      triggerTableEntrance();
       enqueueTask({
         kind: 'human',
         text: '「废话真多……后面的人快追上来了，不管你是哪路黑帮，这一局我必须赢！」',
       });
+      playSound('popup-alert');
+      setActiveModal({ type: 'opponent-briefing', nodeIndex: 1, isMidMatch: false });
       return;
     }
     if (finishedKind === 'sec02-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 2));
       setActiveExpression('angry');
-      triggerTableEntrance();
       enqueueTask({
         kind: 'human',
         text: '「哪怕少了一项作弊技、对面还是传闻里那种算力猎手——这一次也绝不能再输在自己的心魔上！这一局我接下了！」',
       });
+      playSound('popup-alert');
+      setActiveModal({ type: 'opponent-briefing', nodeIndex: 2, isMidMatch: false });
       return;
     }
     if (finishedKind === 'sec03-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 3));
       setActiveExpression('smile');
-      triggerTableEntrance();
       enqueueTask({
         kind: 'human',
         text: '「……彻底认错人了吧喂！！可链接已经被她单方面焊死了，眼下只能先硬着头皮撑过这一局再想办法脱身！」',
       });
+      playSound('popup-alert');
+      setActiveModal({ type: 'opponent-briefing', nodeIndex: 3, isMidMatch: false });
       return;
     }
     if (finishedKind === 'sec04-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 4));
       setActiveExpression('calm');
-      triggerTableEntrance();
       enqueueTask({
         kind: 'human',
         text: '「痛觉已经屏蔽了……出口就在她身后，只要赢下这一局，就能彻底离开这里！」',
       });
+      playSound('popup-alert');
+      setActiveModal({ type: 'opponent-briefing', nodeIndex: 4, isMidMatch: false });
       return;
     }
     if (finishedKind === 'sec04-berserk') {
@@ -4085,8 +4119,8 @@ export function App() {
         escapeProgressRef.current = jumped;
         setActiveEscapeNodeIndex(idx);
         activeEscapeNodeRef.current = idx;
-        setActiveModal({ type: 'none' });
         if (idx === 0) {
+          setActiveModal({ type: 'none' });
           startSec00Tutorial(true);
         } else {
           setSec00GuideActive(false);
@@ -4100,7 +4134,17 @@ export function App() {
             { human: state.config.startingChips, ai: node.opponentChips },
             node.opponentName
           );
-          triggerTableEntrance();
+          if (getPreMatchOpponentBriefing(idx)) {
+            playSound('popup-alert');
+            setActiveModal({
+              type: 'opponent-briefing',
+              nodeIndex: idx as 1 | 2 | 3 | 4,
+              isMidMatch: false,
+            });
+          } else {
+            setActiveModal({ type: 'none' });
+            triggerTableEntrance();
+          }
         }
         appendCmdLog('success', `[OK] 已传送至 ${node.code} · ${node.title}`);
         return;
@@ -4718,6 +4762,26 @@ export function App() {
 
   const isSec04BerserkBurn =
     activeEscapeNode?.index === 4 && !isP2pConnected && Boolean(state.sec04Berserk) && !state.sec04Escaped;
+
+  const currentBgmScene = resolveBgmScene({
+    viewMode,
+    activeVnKind: activeVnStory?.kind ?? null,
+    activeEscapeNodeIndex: activeEscapeNode?.index ?? null,
+    sec04ClimaxPhase,
+    isBossBerserk: isSec04BerserkBurn,
+    isDangerCompute: isHumanLowCompute || isHumanBankrupt || isAiBankrupt,
+    isOfflineDisconnected: exitDisconnectActive,
+  });
+
+  useEffect(() => {
+    setBgmScene(currentBgmScene);
+  }, [currentBgmScene]);
+
+  useEffect(() => {
+    return () => {
+      stopBgm();
+    };
+  }, []);
   const isSec04ClimaxActive =
     sec04ClimaxPhase !== 'idle' && isShowdown && Boolean(state.sec04Escaped);
   const isSec04ChatFocus = isSec04ClimaxActive && sec04ClimaxPhase === 'thought';
@@ -4764,6 +4828,14 @@ export function App() {
               if (next.enabled) {
                 unlockAudioContext();
                 playSound('ui-click');
+              }
+            }}
+            bgmSettings={bgmSettings}
+            onUpdateBgmSettings={(next) => {
+              setBgmSettings(next);
+              saveBgmSettings(next);
+              if (next.enabled) {
+                unlockAudioContext();
               }
             }}
             onOpenSettingsTarget={(target) => {
@@ -5154,6 +5226,23 @@ export function App() {
                           CHEAT_PROFILE_META[effectiveStrategy.cheatProfile].label
                         }`}
               </span>
+              {activeEscapeNode && getPreMatchOpponentBriefing(activeEscapeNode.index) && !isP2pConnected && (
+                <button
+                  id="hud-btn-opponent-briefing"
+                  type="button"
+                  className="lc-cmd-chip-btn"
+                  onClick={() =>
+                    setActiveModal({
+                      type: 'opponent-briefing',
+                      nodeIndex: activeEscapeNode.index as 1 | 2 | 3 | 4,
+                      isMidMatch: true,
+                    })
+                  }
+                  title={`查阅 ${activeEscapeNode.opponentName} 的档案与特殊技能`}
+                >
+                  对手档案
+                </button>
+              )}
               {activeEscapeNode && INTRO_VN_BY_NODE[activeEscapeNode.index] && !isP2pConnected && (
                 <button
                   id={`hud-btn-sec0${activeEscapeNode.index}-replay-intro`}
@@ -6928,7 +7017,7 @@ export function App() {
                 </div>
               )}
 
-              {/* Sound FX Mute & Volume Control Strip (shown on root & audio-debug submenu) */}
+              {/* Sound FX & Procedural BGM Mute / Volume Control Strip */}
               {(currentSection === 'root' || currentSection === 'audio-debug') && (
                 <div className="lc-sound-strip">
                   <div className="lc-sound-row">
@@ -6978,6 +7067,59 @@ export function App() {
                     >
                       试听
                     </button>
+                  </div>
+
+                  <div className="lc-sound-row">
+                    <button
+                      id="settings-btn-bgm-toggle"
+                      type="button"
+                      className={`lc-vfx-chip ${bgmSettings.enabled ? 'active' : ''}`}
+                      onClick={() => {
+                        const next = { ...bgmSettings, enabled: !bgmSettings.enabled };
+                        setBgmSettings(next);
+                        saveBgmSettings(next);
+                        if (next.enabled) {
+                          unlockAudioContext();
+                          setBgmScene(currentBgmScene);
+                        }
+                      }}
+                    >
+                      {bgmSettings.enabled ? '音乐：开启' : '音乐：已静音'}
+                    </button>
+                    <label htmlFor="settings-input-bgm-volume" className="lc-sound-label">
+                      BGM {Math.round(bgmSettings.volume * 100)}%
+                    </label>
+                    <input
+                      id="settings-input-bgm-volume"
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      className="lc-sound-slider"
+                      disabled={!bgmSettings.enabled}
+                      value={Math.round(bgmSettings.volume * 100)}
+                      onChange={(e) => {
+                        const next = { ...bgmSettings, volume: Number(e.target.value) / 100 };
+                        setBgmSettings(next);
+                        saveBgmSettings(next);
+                      }}
+                    />
+                    <button
+                      id="settings-btn-bgm-preview"
+                      type="button"
+                      className="lc-vfx-chip"
+                      disabled={!bgmSettings.enabled}
+                      onClick={() => {
+                        unlockAudioContext();
+                        previewBgmScene(currentBgmScene);
+                      }}
+                    >
+                      重播
+                    </button>
+                  </div>
+
+                  <div className="lc-bgm-now-playing">
+                    音轨：{BGM_TRACK_META[currentBgmScene].title} · {BGM_TRACK_META[currentBgmScene].subtitle}
                   </div>
                 </div>
               )}
@@ -7347,6 +7489,27 @@ export function App() {
             onClose={() => setActiveModal({ type: 'none' })}
           />
         )}
+
+        {activeModal.type === 'opponent-briefing' &&
+          (() => {
+            const briefing = getPreMatchOpponentBriefing(activeModal.nodeIndex);
+            if (!briefing) return null;
+            return (
+              <OpponentBriefingModal
+                briefing={briefing}
+                isMidMatch={activeModal.isMidMatch}
+                onStartMatch={() => {
+                  const wasMidMatch = activeModal.isMidMatch;
+                  setActiveModal({ type: 'none' });
+                  unlockAudioContext();
+                  playSound('ui-click');
+                  if (!wasMidMatch) {
+                    triggerTableEntrance();
+                  }
+                }}
+              />
+            );
+          })()}
       </Suspense>
 
       {activeModal.type === 'confirm-reset' && (

@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { playSound, unlockAudioContext, type SoundSettings } from '../engine/soundEngine.ts';
+import {
+  DEFAULT_BGM_SETTINGS,
+  playSound,
+  unlockAudioContext,
+  type BgmSettings,
+  type SoundSettings,
+} from '../engine/soundEngine.ts';
 import {
   DESKTOP_GRID_METRICS,
   cellKey,
@@ -159,6 +165,8 @@ export const HATRED_BOOK_ESCAPE_ENTRY = {
 interface WindowsDesktopViewProps {
   soundSettings: SoundSettings;
   onUpdateSoundSettings: (next: SoundSettings) => void;
+  bgmSettings?: BgmSettings;
+  onUpdateBgmSettings?: (next: BgmSettings) => void;
   onOpenSettingsTarget: (target: DesktopSettingsTarget) => void;
   onEnterFreeTable?: () => void;
   onResetSaveFromDesktop: () => void;
@@ -212,6 +220,8 @@ function buildInitialCells(
 export function WindowsDesktopView({
   soundSettings,
   onUpdateSoundSettings,
+  bgmSettings = DEFAULT_BGM_SETTINGS,
+  onUpdateBgmSettings,
   onOpenSettingsTarget,
   onEnterFreeTable,
   onResetSaveFromDesktop,
@@ -1316,39 +1326,75 @@ export function WindowsDesktopView({
               <div className="px-start-menu-body">
                 <div className="px-start-menu-header">系统设置 // SETTINGS</div>
 
-                {/* Inline Sound Control */}
+                {/* Inline Sound & BGM Control */}
                 <div className="px-start-sound-box">
-                  <button
-                    id="start-menu-btn-sound-toggle"
-                    type="button"
-                    className={`px-start-sound-toggle ${soundSettings.enabled ? 'is-on' : ''}`}
-                    onClick={() => {
-                      const next = { ...soundSettings, enabled: !soundSettings.enabled };
-                      onUpdateSoundSettings(next);
-                    }}
-                  >
-                    <PixelVolumeIcon size={14} muted={!soundSettings.enabled} />
-                    <span>{soundSettings.enabled ? '音效开启' : '已静音'}</span>
-                  </button>
-                  <label htmlFor="start-menu-input-sound-volume" className="px-start-sound-val">
-                    {Math.round(soundSettings.volume * 100)}%
-                  </label>
-                  <input
-                    id="start-menu-input-sound-volume"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    className="lc-sound-slider"
-                    disabled={!soundSettings.enabled}
-                    value={Math.round(soundSettings.volume * 100)}
-                    onChange={(e) => {
-                      onUpdateSoundSettings({
-                        ...soundSettings,
-                        volume: Number(e.target.value) / 100,
-                      });
-                    }}
-                  />
+                  <div className="px-start-sound-row">
+                    <button
+                      id="start-menu-btn-sound-toggle"
+                      type="button"
+                      className={`px-start-sound-toggle ${soundSettings.enabled ? 'is-on' : ''}`}
+                      onClick={() => {
+                        const next = { ...soundSettings, enabled: !soundSettings.enabled };
+                        onUpdateSoundSettings(next);
+                      }}
+                    >
+                      <PixelVolumeIcon size={14} muted={!soundSettings.enabled} />
+                      <span>{soundSettings.enabled ? '音效开启' : '音效静音'}</span>
+                    </button>
+                    <label htmlFor="start-menu-input-sound-volume" className="px-start-sound-val">
+                      {Math.round(soundSettings.volume * 100)}%
+                    </label>
+                    <input
+                      id="start-menu-input-sound-volume"
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      className="lc-sound-slider"
+                      disabled={!soundSettings.enabled}
+                      value={Math.round(soundSettings.volume * 100)}
+                      onChange={(e) => {
+                        onUpdateSoundSettings({
+                          ...soundSettings,
+                          volume: Number(e.target.value) / 100,
+                        });
+                      }}
+                    />
+                  </div>
+                  {onUpdateBgmSettings && (
+                    <div className="px-start-sound-row">
+                      <button
+                        id="start-menu-btn-bgm-toggle"
+                        type="button"
+                        className={`px-start-sound-toggle ${bgmSettings.enabled ? 'is-on' : ''}`}
+                        onClick={() => {
+                          onUpdateBgmSettings({ ...bgmSettings, enabled: !bgmSettings.enabled });
+                        }}
+                      >
+                        <PixelVolumeIcon size={14} muted={!bgmSettings.enabled} />
+                        <span>{bgmSettings.enabled ? '音乐开启' : '音乐静音'}</span>
+                      </button>
+                      <label htmlFor="start-menu-input-bgm-volume" className="px-start-sound-val">
+                        {Math.round(bgmSettings.volume * 100)}%
+                      </label>
+                      <input
+                        id="start-menu-input-bgm-volume"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        className="lc-sound-slider"
+                        disabled={!bgmSettings.enabled}
+                        value={Math.round(bgmSettings.volume * 100)}
+                        onChange={(e) => {
+                          onUpdateBgmSettings({
+                            ...bgmSettings,
+                            volume: Number(e.target.value) / 100,
+                          });
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {onEnterFreeTable && (
@@ -1547,15 +1593,25 @@ export function WindowsDesktopView({
             type="button"
             className="px-tray-sound-btn"
             onClick={() => {
+              const anyAudioEnabled = soundSettings.enabled || bgmSettings.enabled;
+              const nextEnabled = !anyAudioEnabled;
               onUpdateSoundSettings({
                 ...soundSettings,
-                enabled: !soundSettings.enabled,
+                enabled: nextEnabled,
+              });
+              onUpdateBgmSettings?.({
+                ...bgmSettings,
+                enabled: nextEnabled,
               });
             }}
-            aria-label={soundSettings.enabled ? '静音系统音效' : '开启系统音效'}
-            title={soundSettings.enabled ? '音效开启（点击静音）' : '已静音（点击开启）'}
+            aria-label={soundSettings.enabled || bgmSettings.enabled ? '静音系统音画' : '开启系统音画'}
+            title={
+              soundSettings.enabled || bgmSettings.enabled
+                ? '系统音频开启（点击一键静音）'
+                : '系统音频已静音（点击开启）'
+            }
           >
-            <PixelVolumeIcon size={14} muted={!soundSettings.enabled} />
+            <PixelVolumeIcon size={14} muted={!soundSettings.enabled && !bgmSettings.enabled} />
           </button>
 
           <div

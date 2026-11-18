@@ -2351,6 +2351,15 @@ textarea {
   cursor: var(--cursor-pointer), pointer;
 }
 
+.lc-bgm-now-playing {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  text-align: center;
+  padding-top: 2px;
+}
+
 .lc-vfx-strip {
   width: 100%;
   padding-top: 10px;
@@ -8712,12 +8721,19 @@ textarea {
 
 .px-start-sound-box {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 8px;
   background: #06080f;
   border: 1px solid #2a3040;
   margin-bottom: 2px;
+}
+
+.px-start-sound-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .px-start-sound-toggle {
@@ -9524,12 +9540,224 @@ textarea {
   background: rgba(255, 46, 136, 0.45);
 }
 
+/* Pre-Match Opponent Briefing Dossier Modal (SEC-01 ~ SEC-04) */
+.lc-briefing-scrim {
+  z-index: 95;
+}
+
+.lc-briefing-window {
+  max-width: 920px;
+  max-height: 90vh;
+}
+
+.lc-briefing-body {
+  padding: 14px 16px;
+}
+
+.lc-briefing-grid {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.lc-briefing-portrait-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lc-briefing-stage {
+  height: 310px;
+}
+
+.lc-briefing-img {
+  max-height: 304px;
+}
+
+.lc-briefing-identity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(8, 12, 22, 0.92);
+  border: 1px solid color-mix(in srgb, var(--win-accent, #00f0ff) 45%, #273248);
+}
+
+.lc-briefing-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lc-briefing-name {
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.lc-briefing-code {
+  font-family: var(--font-pixel);
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--win-accent, #00f0ff) 70%, #ffffff);
+  color: var(--win-accent, #00f0ff);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.lc-briefing-domain-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffb8d9;
+}
+
+.lc-briefing-quote {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.lc-briefing-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lc-briefing-panel {
+  gap: 6px;
+}
+
+.lc-briefing-sec-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-pixel);
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  color: var(--neon-cyan);
+}
+
+.lc-briefing-sec-head.is-skill-head {
+  color: var(--neon-pink-300);
+}
+
+.lc-briefing-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--text-main);
+}
+
+.lc-briefing-skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lc-briefing-skill-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  background: rgba(6, 10, 19, 0.92);
+  border: 1px solid #2b3854;
+  border-left: 3px solid var(--win-accent, #00f0ff);
+}
+
+.lc-briefing-skill-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-briefing-skill-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.lc-briefing-skill-cat {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  padding: 2px 7px;
+  color: #7af7ff;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  background: rgba(0, 240, 255, 0.1);
+}
+
+.lc-briefing-skill-trigger {
+  font-size: 11px;
+  color: #ffd166;
+}
+
+.lc-briefing-skill-summary {
+  font-size: 12px;
+  line-height: 1.56;
+  color: #dbe6fb;
+}
+
+.lc-briefing-skill-tip {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #74f2ce;
+  border-top: 1px dashed rgba(116, 242, 206, 0.25);
+  padding-top: 4px;
+}
+
+.lc-briefing-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(7, 10, 18, 0.96);
+  border-top: 1px solid var(--px-border-bright);
+  flex-wrap: wrap;
+}
+
+.lc-briefing-footer-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.lc-briefing-cta {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 @media (max-width: 768px) {
-  .px-desktop-corner-popup {
+  .lc-desktop-corner-popup {
     left: 10px;
     right: 10px;
     bottom: 50px;
     width: auto;
+  }
+
+  .lc-briefing-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lc-briefing-stage {
+    height: 220px;
+  }
+
+  .lc-briefing-img {
+    max-height: 214px;
+  }
+
+  .lc-briefing-footer {
+    justify-content: center;
+  }
+
+  .lc-briefing-cta {
+    width: 100%;
+    justify-content: center;
   }
 }
 
