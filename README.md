@@ -23,9 +23,11 @@
 - **加注限制**：前/中/后翻牌圈单阶段加注上限与单次加注封顶依次为 `20 / 40 / 100`，另支持长按半池重注（突破单阶段常规封顶）。
 
 ### 3. 双模式牌桌与技能系统
+- **现实终端启动流（`MINGAN-OS 98` 桌面 -> `MINGAN_NET // TTY-01` 登录）**：
+  - 新档默认进入像素电脑桌面（回收站还原协议网入口、记事本《仇恨之书》、维心与开始菜单「自由对局」快捷入口），接入终端后支持 `/new`、`/continue`、`/save` 三槽存档与快速跳转。
 - **剧情突围模式（逃亡路线图 `SEC-00` ~ `SEC-04` -> `EXIT-RL`）**：
-  - 左侧控制栏提供「设置 / 路线图 / 时间回溯」。
-  - **时间回溯（ECHO-0）**：己方算力归零时可**点按**回退到上一次行动前并保留已触发的火符红叉标记；在任意算力下均可**长按约 0.8 秒**直接重开整场节点对局以解决死局。
+  - 左侧控制栏提供「设置 / 路线图」，并在玩家首次算力归零时解锁高光引导「时间回溯」。
+  - **时间回溯（ECHO-0）**：己方算力归零时可**点按**回退到上一次行动前（伴随红色算力数据流逆向回流特效，并保留已触发的火符红叉标记）；在任意算力下均可**长按约 0.8 秒**直接重开整场节点对局以解决死局。
   - 通关节点后可获取奖励技能；技能分为**作弊技（Cheat）**与**辅助技（Support）**两组，每组独立上限 3 槽，满槽后支持自主替换。
 - **自由牌桌模式**：
   - 左侧控制栏提供「设置 / 快速重开 / 联机 / 换人」。
@@ -36,25 +38,29 @@
 ## 技术栈与目录结构
 
 - **前端框架**：React 19 + TypeScript 5.9 + Vite 7（目标 `es2022`）
-- **测试体系**：Node 24 原生 `--experimental-strip-types --test`（25 套件 / 111 项测试）
+- **测试体系**：Node 24 原生 `--experimental-strip-types --test`（27 套件 / 137 项测试）
 - **音效引擎**：纯 Web Audio API 程序化合成（无外部音频文件依赖）
 - **联机架构**：WebRTC DataChannel（支持 SDP 压缩与消息分片）+ Cloudflare Workers & SQLite Durable Objects（`/api/p2p-ws`、`/api/p2p-signal`）
 
 ```text
 mingan-holdem/
-├── public/assets/story/       # SEC-00 ~ SEC-04 剧情角色立绘与表情素材 (WebP)
+├── docs/                      # 剧情剧本、桌面/终端启动器与 M0–M4 规划文档
+├── public/assets/story/       # 角色立绘与多表情差分素材 (WebP，含 SEC-00~04 与常服差分)
 ├── scripts/                   # Vite 本地开发插件 (p2p-signaling / night-sugar-cards)
 ├── src/
 │   ├── App.tsx                # 牌桌主控台、动画队列、剧情与自由模式调度
-│   ├── components/            # 像素窗口、3D 卡牌、路线图、设置/联机/调试终端等弹窗
+│   ├── components/            # 像素桌面、终端登录、卡牌牌桌、路线图、VN 对话框与系统弹窗
 │   ├── engine/
 │   │   ├── gameEngine.ts      # 规则状态机、防泄密可见性过滤、火符/见切结算
 │   │   ├── evaluator.ts       # 2 花色 3/5/7 张牌型评估器与蒙特卡洛胜率支撑
 │   │   ├── aiAgent.ts         # 本地 AI 策略矩阵与角色专属技能决策
 │   │   ├── skillPool.ts       # 15 项注册技能与作弊/辅助双 3 槽装备规则
-│   │   ├── escapeMap.ts       # 逃亡路线图 SEC-00~04 + EXIT-RL 与暗墙状态机
-│   │   ├── storyCharacters.ts # 女主 ECHO-0 与 SEC-01~04 Boss 档案及台词库
+│   │   ├── escapeMap.ts       # 逃亡路线图 SEC-00~04 + EXIT-RL、暗墙与回溯解锁状态机
+│   │   ├── desktopState.ts    # MINGAN-OS 98 桌面图标/回收站/M1 终局引导状态持久化
+│   │   ├── terminalLogin.ts   # TTY-01 终端指令解析、Tab 补全与 3 槽加密存档
+│   │   ├── storyCharacters.ts # 女主 ECHO-0 与各章节角色档案、常服/黑域立绘与台词库
 │   │   ├── sec00Tutorial.ts   # SEC-00 单轮聚光灯连贯剧情教学剧本
+│   │   ├── sec04Epilogue.ts   # SEC-04 战后断连尾声 VN 剧本
 │   │   ├── rewindHold.ts      # 时间回溯点按归零门槛与长按重开状态判定
 │   │   ├── p2pProtocol.ts     # 房主权威校验、防窥视数据清洗与客机镜像视角
 │   │   ├── p2pTransport.ts    # WebRTC 与 WebSocket 中继双传输层封装
@@ -63,7 +69,7 @@ mingan-holdem/
 │   │   └── debugCmd.ts        # 内置调试终端作弊码解析与状态改写
 │   └── styles/
 │       └── pixelCyberOs.css   # 赛博像素 OS 样式系统与响应式布局
-├── tests/                     # 覆盖引擎、AI、联机、剧情、音效与 UI 质量门禁的测试集
+├── tests/                     # 覆盖引擎、AI、联机、桌面/终端、剧情、音效与 UI 门禁的测试集
 ├── worker/index.mjs           # Cloudflare Worker + Durable Object (P2pRoomDO) 联机中继
 ├── vite.config.ts             # Vite 配置与 manualChunks 分包
 └── wrangler.jsonc             # Cloudflare Workers 部署配置
