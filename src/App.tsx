@@ -50,6 +50,7 @@ import {
   EXPRESSION_META,
   FALLBACK_CONTRACT_CHARACTER,
   deriveAiStyleFromCharacter,
+  resolveShowdownOpponentExpression,
   resolveVirtualEntityPortrait,
   type ContractCardSummary,
   type ContractCharacter,
@@ -183,6 +184,13 @@ import { SEC01_EPILOGUE_VN_SCRIPT } from './engine/sec01Epilogue.ts';
 import { SEC02_VN_SCRIPT } from './engine/sec02Intro.ts';
 import { SEC02_EPILOGUE_VN_SCRIPT } from './engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from './engine/sec03Intro.ts';
+import { SEC03_EPILOGUE_VN_SCRIPT } from './engine/sec03Epilogue.ts';
+import {
+  MOSAIC_FLICKER_SHARDS,
+  MOSAIC_FLOOD_SHARDS,
+  PORTRAIT_TEAR_SLICES,
+  seededUnit,
+} from './engine/vfxPresets.ts';
 import {
   formatMuteGarbledText,
   getStoryCharacterByEscapeNode,
@@ -275,11 +283,6 @@ const SETTINGS_MENU_ITEMS: Array<{
   { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '算力规模、换牌门票与AI风格', icon: 'tuning' },
 ];
 
-function seededUnit(seed: number): number {
-  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
-
 const FLOOD_DATA_STREAMS = Array.from({ length: 42 }, (_, i) => {
   const clusterBase = [3, 9, 14, 21, 28, 37, 46, 54, 62, 71, 79, 86, 93][i % 13];
   const leftPct = Math.max(0.5, Math.min(97.5, clusterBase + (seededUnit(i + 1) - 0.5) * 9.5));
@@ -304,49 +307,6 @@ const FLOOD_DATA_STREAMS = Array.from({ length: 42 }, (_, i) => {
           : variant === 2
             ? 'DROP_ALL  0x4F  PACKET_LOSS  10110110  LINK_SEVERED'
             : '01001110  SEGFAULT  0xFF00  STACK_CORRUPT  ABORT',
-  };
-});
-
-const PORTRAIT_TEAR_SLICES = [
-  { top: 0, bottom: 84, cls: 'slice-a' },
-  { top: 15, bottom: 71, cls: 'slice-b' },
-  { top: 28, bottom: 56, cls: 'slice-c' },
-  { top: 43, bottom: 40, cls: 'slice-d' },
-  { top: 59, bottom: 23, cls: 'slice-e' },
-  { top: 76, bottom: 0, cls: 'slice-f' },
-] as const;
-
-const MOSAIC_FLICKER_SHARDS = Array.from({ length: 52 }, (_, i) => {
-  const w = 3.5 + seededUnit(i + 301) * 22;
-  const h = 2.2 + seededUnit(i + 353) * 11;
-  const left = seededUnit(i + 401) * (100 - w * 0.6);
-  const top = seededUnit(i + 449) * (100 - h * 0.6);
-  const t = seededUnit(i + 503);
-  const tone = t < 0.28 ? 't1' : t < 0.56 ? 't2' : t < 0.84 ? 't3' : 't4';
-  return {
-    left: `${left.toFixed(1)}%`,
-    top: `${top.toFixed(1)}%`,
-    width: `${w.toFixed(1)}%`,
-    height: `${h.toFixed(1)}%`,
-    tone,
-  };
-});
-
-const MOSAIC_FLOOD_SHARDS = Array.from({ length: 68 }, (_, i) => {
-  const w = 5 + seededUnit(i + 601) * 26;
-  const h = 3.5 + seededUnit(i + 653) * 15;
-  const left = seededUnit(i + 701) * (100 - w * 0.5);
-  const top = seededUnit(i + 751) * (100 - h * 0.5);
-  const t = seededUnit(i + 809);
-  const tone = t < 0.26 ? 'pink' : t < 0.48 ? 'cyan' : t < 0.82 ? 'void' : 'red';
-  const delay = (seededUnit(i + 863) * 0.55).toFixed(2);
-  return {
-    left: `${left.toFixed(1)}%`,
-    top: `${top.toFixed(1)}%`,
-    width: `${w.toFixed(1)}%`,
-    height: `${h.toFixed(1)}%`,
-    tone,
-    delay: `${delay}s`,
   };
 });
 
@@ -382,7 +342,7 @@ type ActiveModal =
 
 interface ChatItem {
   id: string;
-  sender: 'opponent' | 'human';
+  sender: 'opponent' | 'human' | 'narrator';
   speaker: string;
   text: string;
   msgKind?: 'speech' | 'thought';
@@ -402,7 +362,8 @@ interface FloatingBubbleState {
 
 type QueuedChatTask =
   | { kind: 'opponent'; speaker: string; text: string; msgKind?: 'speech' | 'thought' }
-  | { kind: 'human'; text: string };
+  | { kind: 'human'; text: string }
+  | { kind: 'narrator'; speaker?: string; text: string };
 
 interface SwapFlightCard {
   rect: { left: number; top: number; width: number; height: number };
@@ -466,7 +427,8 @@ export function App() {
       | 'sec01-epilogue'
       | 'sec02-intro'
       | 'sec02-epilogue'
-      | 'sec03-intro';
+      | 'sec03-intro'
+      | 'sec03-epilogue';
     index: number;
   } | null>(() => {
     const initEsc = loadEscapeProgress();
@@ -1097,7 +1059,7 @@ export function App() {
   const buildChatHistorySnapshot = useCallback((): ChatMessage[] => {
     const settled: ChatMessage[] = messagesRef.current.map((m, idx) => ({
       id: m.id,
-      sender: m.sender,
+      sender: m.sender === 'narrator' ? 'system' : m.sender,
       speakerName: m.speaker,
       text: m.text,
       msgKind: m.msgKind,
@@ -1112,14 +1074,22 @@ export function App() {
             text: task.text,
             timestamp: settled.length + idx,
           }
-        : {
-            id: `${idPrefix}-o-${idx}`,
-            sender: 'opponent',
-            speakerName: task.speaker,
-            text: task.text,
-            msgKind: task.msgKind,
-            timestamp: settled.length + idx,
-          };
+        : task.kind === 'narrator'
+          ? {
+              id: `${idPrefix}-n-${idx}`,
+              sender: 'system',
+              speakerName: task.speaker ?? '旁白（战局播报）',
+              text: task.text,
+              timestamp: settled.length + idx,
+            }
+          : {
+              id: `${idPrefix}-o-${idx}`,
+              sender: 'opponent',
+              speakerName: task.speaker,
+              text: task.text,
+              msgKind: task.msgKind,
+              timestamp: settled.length + idx,
+            };
     const inFlight = inFlightTaskRef.current
       ? [toChatMsg(inFlightTaskRef.current, 'inflight', 0)]
       : [];
@@ -1161,9 +1131,9 @@ export function App() {
     return [
       {
         id: 'init-msg-1',
-        sender: 'opponent',
-        speaker: initNode.opponentName,
-        text: `已接入 ${initNode.code} · ${initNode.title}。亮出你的牌序吧。`,
+        sender: 'narrator',
+        speaker: '旁白（系统观测）',
+        text: `已接入 ${initNode.code} · ${initNode.title}。拦截目标 ${initNode.opponentName} 已就位。`,
         crushed: false,
       },
     ];
@@ -1378,10 +1348,11 @@ export function App() {
           processNextTask();
         }, 2950);
       } else {
-        const id = `ply-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const isNarrator = next.kind === 'narrator';
+        const id = `${isNarrator ? 'nar' : 'ply'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const willCrush = willOverflowStack();
 
-        const spawnHumanRise = (riseDy: number, crushPrev: boolean) => {
+        const spawnFeedRise = (riseDy: number, crushPrev: boolean) => {
           setCrushingActive(false);
           if (inFlightTaskRef.current === next) inFlightTaskRef.current = null;
           setMessages((prev) => {
@@ -1390,8 +1361,8 @@ export function App() {
               ...base,
               {
                 id,
-                sender: 'human',
-                speaker: '潜行黑客',
+                sender: isNarrator ? 'narrator' : 'human',
+                speaker: isNarrator ? (next.speaker ?? '旁白（战局播报）') : '潜行黑客',
                 text: next.text,
                 crushed: false,
                 anim: 'player-rising',
@@ -1409,11 +1380,11 @@ export function App() {
         if (willCrush) {
           setCrushingActive(true);
           scheduleTimeout(() => {
-            spawnHumanRise(48, true);
+            spawnFeedRise(48, true);
           }, 767);
         } else {
           const stackH = activeStackRef.current?.offsetHeight ?? 0;
-          spawnHumanRise(stackH + 48, false);
+          spawnFeedRise(stackH + 48, false);
         }
       }
     }, 30);
@@ -1429,7 +1400,10 @@ export function App() {
       ) {
         finalTask = { ...task, text: formatMuteGarbledText(task.text) };
       }
-      if (finalTask.kind === 'opponent' && !mobileChatOpenRef.current) {
+      if (
+        (finalTask.kind === 'opponent' || finalTask.kind === 'narrator') &&
+        !mobileChatOpenRef.current
+      ) {
         setUnreadMobileChat((c) => Math.min(99, c + 1));
       }
       queueRef.current.push(finalTask);
@@ -1915,8 +1889,10 @@ export function App() {
     lastHandledShowdownHandRef.current = state.handNumber;
 
     const res = state.result;
-    const expr: ContractExpression =
-      res.winner === 'ai' ? 'smile' : res.winner === 'human' ? 'sad' : 'surprise';
+    const expr: ContractExpression = resolveShowdownOpponentExpression(
+      res,
+      state.players.ai.totalCommitted
+    );
     setActiveExpression(expr);
 
     if (res.winner === 'ai') {
@@ -1945,8 +1921,8 @@ export function App() {
 
     if (isP2pConnected) {
       enqueueTask({
-        kind: 'opponent',
-        speaker: remotePeerRef.current?.name ?? character.name,
+        kind: 'narrator',
+        speaker: '旁白（战局播报）',
         text: line,
       });
       return;
@@ -1991,10 +1967,14 @@ export function App() {
         }).then((enc) => {
           if (enc.logEntry) setLlmLogs((p) => [enc.logEntry!, ...p].slice(0, 40));
           setActiveExpression(enc.expression);
-          enqueueOpponentSegments(speakerName, enc.fromLlm ? enc.segments : [{ kind: 'speech', text: line }]);
+          if (enc.fromLlm) {
+            enqueueOpponentSegments(speakerName, enc.segments);
+          } else {
+            enqueueTask({ kind: 'narrator', speaker: '旁白（战局播报）', text: line });
+          }
         });
       } else {
-        enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+        enqueueTask({ kind: 'narrator', speaker: '旁白（战局播报）', text: line });
         if (isMuteGarbledCharacter(latestCharRef.current.id)) {
           enqueueTask({
             kind: 'opponent',
@@ -2015,9 +1995,9 @@ export function App() {
     const isSec00Victory = activeEscapeNodeRef.current === 0 && state.players.ai.chips === 0;
     const isSec01Victory = activeEscapeNodeRef.current === 1 && state.players.ai.chips === 0;
     if (!sec00GuideActiveRef.current && !isSec00Victory && !isSec01Victory) {
-      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+      enqueueTask({ kind: 'narrator', speaker: '旁白（战局播报）', text: line });
     } else if (sec00GuideActiveRef.current && state.players.ai.chips > 0) {
-      enqueueTask({ kind: 'opponent', speaker: state.players.ai.name, text: line });
+      enqueueTask({ kind: 'narrator', speaker: '旁白（战局播报）', text: line });
     }
 
     // 整场算力归零：优先处理逃亡路线图节点循环，否则走原契约追捕流程
@@ -2071,6 +2051,20 @@ export function App() {
               const latest = latestStateRef.current;
               if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
               setActiveVnStory({ kind: 'sec02-epilogue', index: 0 });
+            }, 1150);
+            return;
+          }
+          if (clearedIdx === 3) {
+            setActiveExpression('sad');
+            pushToast(
+              'success',
+              `突破 ${clearedNode?.code ?? 'SEC-03'}：${clearedNode?.title ?? ''}`,
+              '正在接入战败结算与神经链路同步...'
+            );
+            scheduleTimeout(() => {
+              const latest = latestStateRef.current;
+              if (latest.phase !== 'showdown' || latest.players.ai.chips !== 0) return;
+              setActiveVnStory({ kind: 'sec03-epilogue', index: 0 });
             }, 1150);
             return;
           }
@@ -2776,19 +2770,44 @@ export function App() {
         },
       ]);
     } else {
-      setMessages([
-        {
-          id: `reset-${Date.now()}`,
-          sender: 'opponent',
-          speaker: resolvedOpponentName,
-          text: activeEscNode
-            ? activeStoryChar?.quote
-              ? `已接入 ${activeEscNode.code} · ${activeEscNode.title}。${activeStoryChar.quote}`
-              : `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`
-            : '黑域连接重构完毕。新的一轮追捕博弈开始了，请亮出你的牌序。',
-          crushed: false,
-        },
-      ]);
+      setMessages(
+        activeEscNode
+          ? activeStoryChar?.quote
+            ? [
+                {
+                  id: `reset-${Date.now()}-sys`,
+                  sender: 'narrator',
+                  speaker: '旁白（系统观测）',
+                  text: `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位。`,
+                  crushed: false,
+                },
+                {
+                  id: `reset-${Date.now()}-opp`,
+                  sender: 'opponent',
+                  speaker: resolvedOpponentName,
+                  text: activeStoryChar.quote,
+                  crushed: false,
+                },
+              ]
+            : [
+                {
+                  id: `reset-${Date.now()}`,
+                  sender: 'narrator',
+                  speaker: '旁白（系统观测）',
+                  text: `已接入 ${activeEscNode.code} · ${activeEscNode.title}。拦截目标 ${activeEscNode.opponentName} 已就位，击穿其算力即可向下一节点突围。`,
+                  crushed: false,
+                },
+              ]
+          : [
+              {
+                id: `reset-${Date.now()}`,
+                sender: 'narrator',
+                speaker: '旁白（系统观测）',
+                text: '黑域连接重构完毕。新的一轮追捕博弈已接入牌桌。',
+                crushed: false,
+              },
+            ]
+      );
     }
     return freshState;
   };
@@ -3194,7 +3213,7 @@ export function App() {
     setActiveVnStory(null);
     if (finishedKind === 'sec01-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 1));
-      setActiveExpression('angry');
+      setActiveExpression('calm');
       triggerTableEntrance();
       enqueueTask({
         kind: 'human',
@@ -3214,7 +3233,7 @@ export function App() {
     }
     if (finishedKind === 'sec03-intro') {
       setEscapeProgress((prev) => markEscapeIntroSeen(prev, 3));
-      setActiveExpression('angry');
+      setActiveExpression('smile');
       triggerTableEntrance();
       enqueueTask({
         kind: 'human',
@@ -3256,6 +3275,25 @@ export function App() {
         });
       } else {
         setEscapeProgress((prev) => markEscapeNodeCleared(prev, 2));
+        setViewMode('escape-map');
+      }
+      return;
+    }
+    if (finishedKind === 'sec03-epilogue') {
+      const sec03Node = ESCAPE_ROUTE_NODES[3];
+      enqueueTask({
+        kind: 'human',
+        text: '「头还是好痛……不管刚刚冒出来的到底是什么鬼东西，绝对不能让龙心也卷进来——前面就是 SEC-04 零号离线闸门了！」',
+      });
+      if (sec03Node?.rewardSkillChoices?.length) {
+        setPendingSkillClaim({
+          title: `击溃 ${sec03Node.opponentName} · 协议技能拆解`,
+          subtitle: `${sec03Node.code} ${sec03Node.title} 已突破！挑选 1 项技能（作弊槽上限 ${MAX_CHEAT_SKILLS} · 非作弊辅助槽上限 ${MAX_SUPPORT_SKILLS}，满额可替换）`,
+          choices: sec03Node.rewardSkillChoices,
+          clearedNodeIndex: 3,
+        });
+      } else {
+        setEscapeProgress((prev) => markEscapeNodeCleared(prev, 3));
         setViewMode('escape-map');
       }
       return;
@@ -5254,7 +5292,9 @@ export function App() {
                               ? msg.msgKind === 'thought'
                                 ? 'THOUGHT'
                                 : 'OPP'
-                              : 'YOU'}
+                              : msg.sender === 'narrator'
+                                ? 'NARRATOR'
+                                : 'YOU'}
                           </span>
                         </div>
                         <div>{msg.text}</div>
@@ -6016,6 +6056,7 @@ export function App() {
                   'sec02-intro': SEC02_VN_SCRIPT,
                   'sec02-epilogue': SEC02_EPILOGUE_VN_SCRIPT,
                   'sec03-intro': SEC03_VN_SCRIPT,
+                  'sec03-epilogue': SEC03_EPILOGUE_VN_SCRIPT,
                 } as const
               )[activeVnStory.kind]
             }

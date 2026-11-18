@@ -820,10 +820,10 @@ export class LocalAiAgent implements OpponentAgent {
           action: smartScan,
           dialogue: buildDialogue(
             speaker,
-            'tense',
+            'confident',
             `你的下注节奏与牌面结构对不上……预支 ${getEffectiveScanCost(state, this.playerId)} 算力扫描验真！`,
             telemetry,
-            'angry'
+            'smile'
           ),
         };
       }
@@ -878,7 +878,7 @@ export class LocalAiAgent implements OpponentAgent {
                 'confident',
                 `算力超频半池压进 +${halfAmt}——这手牌我没打算留给你便宜摊牌！`,
                 telemetry,
-                'angry'
+                'smile'
               ),
             };
           }
@@ -958,10 +958,10 @@ export class LocalAiAgent implements OpponentAgent {
           action: { type: 'raise', amount: raiseRange.max },
           dialogue: buildDialogue(
             speaker,
-            'confident',
-            `同步差额后再反加 +${raiseRange.max}！这一步陷阱已经合拢了。`,
+            'tense',
+            `别以为靠加注就能压住我——同步差额再反加 +${raiseRange.max}！`,
             telemetry,
-            'smile'
+            'angry'
           ),
         };
       }
@@ -970,10 +970,10 @@ export class LocalAiAgent implements OpponentAgent {
         action: { type: 'call' },
         dialogue: buildDialogue(
           speaker,
-          effectiveStrength > 0.62 ? 'confident' : 'tense',
+          effectiveStrength > 0.62 ? 'confident' : 'thinking',
           `跟注 +${paid}，启动终局解密核验吧！`,
           telemetry,
-          effectiveStrength > 0.62 ? 'smile' : 'angry'
+          effectiveStrength > 0.62 ? 'smile' : 'calm'
         ),
       };
     }
@@ -1010,6 +1010,40 @@ export class LocalAiAgent implements OpponentAgent {
             'surprise'
           ),
         };
+      }
+
+      const reRaiseRange = getLegalRaiseRange(state, this.playerId, paid);
+      const preRiverReRaiseThreshold = this.playStyle === 'pressure' ? 0.66 : 0.72;
+      const preRiverReRaiseProb =
+        this.playStyle === 'pressure' ? 0.56 : this.playStyle === 'trap' ? 0.44 : 0.34;
+      if (
+        reRaiseRange.allowed &&
+        effectiveStrength >= preRiverReRaiseThreshold &&
+        roll < preRiverReRaiseProb
+      ) {
+        const reRaiseAmt =
+          effectiveStrength > 0.8
+            ? reRaiseRange.max
+            : Math.max(
+                reRaiseRange.min,
+                Math.min(
+                  reRaiseRange.max,
+                  Math.round((reRaiseRange.max * 0.5) / 10) * 10 || reRaiseRange.min
+                )
+              );
+        const reRaiseAct: GameAction = { type: 'raise', amount: reRaiseAmt };
+        if (isActionLegal(state, reRaiseAct)) {
+          return {
+            action: reRaiseAct,
+            dialogue: buildDialogue(
+              speaker,
+              'tense',
+              `直接加注挑衅上来了？那我也反加 +${reRaiseAmt} 奉陪到底！`,
+              telemetry,
+              'angry'
+            ),
+          };
+        }
       }
 
       return {
@@ -1112,10 +1146,10 @@ export class LocalAiAgent implements OpponentAgent {
           action,
           dialogue: buildDialogue(
             speaker,
-            'tense',
+            'confident',
             `向主池注入 +${amt} 算力。跟还是退？`,
             telemetry,
-            'angry'
+            'smile'
           ),
         };
       }

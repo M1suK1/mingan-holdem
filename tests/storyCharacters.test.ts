@@ -17,6 +17,7 @@ import {
   getStoryCharacterByEscapeNode,
   isMuteGarbledCharacter,
   pickMuteActionThought,
+  resolveEcho0Sprite,
   resolveSec01Sprite,
   resolveSec02Sprite,
   resolveSec03Sprite,
@@ -29,6 +30,7 @@ import { SEC01_EPILOGUE_VN_SCRIPT } from '../src/engine/sec01Epilogue.ts';
 import { SEC02_VN_SCRIPT } from '../src/engine/sec02Intro.ts';
 import { SEC02_EPILOGUE_VN_SCRIPT } from '../src/engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from '../src/engine/sec03Intro.ts';
+import { SEC03_EPILOGUE_VN_SCRIPT } from '../src/engine/sec03Epilogue.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
   fetchContractCatalog,
@@ -779,6 +781,7 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
       ['SEC02_VN_SCRIPT', SEC02_VN_SCRIPT],
       ['SEC02_EPILOGUE_VN_SCRIPT', SEC02_EPILOGUE_VN_SCRIPT],
       ['SEC03_VN_SCRIPT', SEC03_VN_SCRIPT],
+      ['SEC03_EPILOGUE_VN_SCRIPT', SEC03_EPILOGUE_VN_SCRIPT],
     ] as const) {
       for (const line of script) {
         assert.equal(line.text.includes('；'), false, `${name} line ${line.lineNo} contains "；"`);
@@ -870,6 +873,45 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.ok(fullCopy.includes('强行拖入了对局'));
     for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
       assert.equal(fullCopy.includes(spoiler), false, `SEC-03 intro should not spoil "${spoiler}"`);
+    }
+  });
+
+  it('defines 18-line SEC-03 post-defeat epilogue with Lin Longxin recognition, ECHO-0 red-eye err1/err2 hijack, push-away, and no ECHO-0 mention by player', () => {
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT.length, 18);
+    assert.equal(resolveEcho0Sprite('err1'), './assets/story/echo0/err1.webp');
+    assert.equal(resolveEcho0Sprite('err2'), './assets/story/echo0/err2.webp');
+
+    for (const line of SEC03_EPILOGUE_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec03');
+      if (line.speakerKind === 'player') {
+        assert.equal(
+          /echo-?0/i.test(line.text),
+          false,
+          `Player line ${line.lineNo} should not mention ECHO-0 by name`
+        );
+      }
+    }
+
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[5].leftSprite?.expression, 'err1');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[7].leftSprite?.expression, 'err2');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[8].leftSprite?.expression, 'err2');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[12].leftSprite?.expression, 'err2');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[14].leftSprite?.expression, 'angry');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[14].leftSprite?.effect, 'push-apart');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[14].rightSprite?.effect, 'push-apart');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[15].leftSprite?.effect, 'distanced');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[15].rightSprite?.effect, 'distanced');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[17].rightSprite?.visibility, 'hidden');
+    assert.equal(SEC03_EPILOGUE_VN_SCRIPT[17].stageEffect, 'escape-cta');
+
+    const fullCopy = SEC03_EPILOGUE_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('林龙心'));
+    assert.ok(fullCopy.includes('强行夺取') || fullCopy.includes('强制实体夺取'));
+    assert.ok(fullCopy.includes('推退数步'));
+    assert.ok(fullCopy.includes('SEC-04'));
+    for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
+      assert.equal(fullCopy.includes(spoiler), false, `SEC-03 epilogue should not spoil "${spoiler}"`);
     }
   });
 });

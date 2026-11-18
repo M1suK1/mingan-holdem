@@ -9,6 +9,7 @@ import type {
 } from './types.ts';
 import {
   CONTRACT_EXPRESSIONS,
+  resolveShowdownOpponentExpression,
   type ContractCharacter,
 } from './contractCards.ts';
 import {
@@ -437,7 +438,7 @@ export function generateLocalPersonaReply(
     const reply =
       '别指望靠一副伪装诱饵就能在黑域协议下全身而退——算力清零之时，我会亲自核验你的本体签名。';
     return {
-      expression: 'angry',
+      expression: 'calm',
       reply,
       segments: [
         { kind: 'thought', text: thought },
@@ -452,7 +453,7 @@ export function generateLocalPersonaReply(
         ? `少用言语干扰我的频段——差额 ${diff} 摆在桌上，先跟注或者反加证明你的胆量。`
         : `心理战对我可不管用。桌面上还有 ${hiddenCount} 个加密节点未揭开，好戏才刚开始。`;
     return {
-      expression: 'angry',
+      expression: 'smile',
       reply,
       segments: [{ kind: 'speech', text: reply }],
     };
@@ -841,8 +842,9 @@ export async function requestEncounterDialogue(params: {
   const { eventKind, character, state, llmConfig, campaign, dossier, detailNote, roundResultSummary } = params;
 
   const fallbackWinner = state.result?.winner;
-  const fallbackRoundExpr: ContractExpression =
-    fallbackWinner === 'ai' ? 'smile' : fallbackWinner === 'human' ? 'sad' : 'surprise';
+  const fallbackRoundExpr: ContractExpression = state.result
+    ? resolveShowdownOpponentExpression(state.result, state.players.ai.totalCommitted)
+    : 'calm';
   const fallbackRoundReply =
     roundResultSummary ??
     (fallbackWinner === 'ai'
@@ -855,7 +857,7 @@ export async function requestEncounterDialogue(params: {
     'pursuer-arrive': {
       thought: `通缉目标 ${campaign.playerCodename} 的信号果然落在这个扇区……先把他逼进底池博弈。`,
       reply: `通缉目标 ${campaign.playerCodename}，我是${dossier.identityTitle}。黑域协议已锁定这片扇区，交出你的虚拟实体吧。`,
-      expression: 'angry',
+      expression: 'calm',
     },
     'pursuer-defeated': {
       reply: `可恶……算力防线被你彻底击穿了。按黑域协议，这具虚拟实体和技能权限归你了。`,

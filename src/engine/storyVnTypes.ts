@@ -30,9 +30,11 @@ export type StoryVnStageEffect =
   | 'lean-in'
   | 'blade-slash';
 
+export type StoryVnExpression = ContractExpression | 'err1' | 'err2';
+
 export interface StoryVnDualSprite {
   character: StoryVnCharacterId;
-  expression: ContractExpression;
+  expression: StoryVnExpression;
   visibility: 'active' | 'dimmed' | 'shell-dim' | 'silhouette' | 'hidden';
   label?: string;
   effect?:
@@ -44,7 +46,9 @@ export interface StoryVnDualSprite {
     | 'flashback'
     | 'blade-cut'
     | 'emerge'
-    | 'collide';
+    | 'collide'
+    | 'push-apart'
+    | 'distanced';
 }
 
 export interface StoryVnLine {

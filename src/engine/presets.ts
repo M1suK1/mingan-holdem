@@ -88,7 +88,7 @@ export const PROMPT_MACRO_HINTS: Array<{ key: string; label: string; hint: strin
 ];
 
 const EXPRESSION_GUIDE =
-  'expression 字段会实时切换你的虚拟实体立绘神态，请根据当前情绪与局势积极变化（禁止一直填 calm）：calm=冷静审视；smile=自信得意/占优/挑衅；surprise=惊愕意外/遇奇袭/诱饵脱逃；sad=失落挫败/丢池/被抓获；angry=警觉强硬/主动扫描或大额加注对峙；shy=动摇窘迫/偷鸡被识破/心防松动。';
+  'expression 字段会实时切换你的虚拟实体立绘神态，请根据当前情绪与局势积极变化（禁止一直填 calm）：calm=冷静审视；smile=自信得意/占优/主动加注或扫描施压；surprise=惊愕意外/遇奇袭/诱饵脱逃；sad=失落挫败/常规输池；angry=被激怒愤怒（仅用于被迫反加注或单轮损失大量算力>=300时）；shy=动摇窘迫/偷鸡被识破/受压弃牌。';
 
 export const CONTRACT_PROMPTS: PromptEntry[] = [
   {

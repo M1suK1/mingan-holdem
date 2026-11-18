@@ -1,4 +1,4 @@
-import type { ContractExpression, OpponentMood } from './types.ts';
+import type { ContractExpression, OpponentMood, ShowdownResult } from './types.ts';
 
 export const CONTRACT_EXPRESSIONS: ContractExpression[] = [
   'calm',
@@ -17,7 +17,7 @@ export const EXPRESSION_META: Record<
   smile: { label: '微笑', cyberCode: 'CONFIDENCE_UP', desc: '嘴角扬起，似乎握有高权重底牌或诱导陷阱' },
   surprise: { label: '惊讶', cyberCode: 'SIGNAL_SPIKE', desc: '遭遇意料之外的加注或牌面突变' },
   sad: { label: '低落', cyberCode: 'LINK_DRAIN', desc: '算力受损或关键听牌落空' },
-  angry: { label: '警觉', cyberCode: 'ICE_ALERT', desc: '进入高压攻防姿态，准备强硬反击' },
+  angry: { label: '激怒', cyberCode: 'ICE_ALERT', desc: '仅在遭到反加注挑衅或单轮损失大量算力（>=300）时露出怒色' },
   shy: { label: '动摇', cyberCode: 'FLUCTUATION', desc: '偷鸡被看穿或节奏被打乱时的微妙神情' },
 };
 
@@ -315,4 +315,19 @@ export function deriveAiStyleFromCharacter(
     return 'cautious';
   }
   return 'balanced';
+}
+
+export const HEAVY_ROUND_LOSS_THRESHOLD = 300;
+
+export function resolveShowdownOpponentExpression(
+  result: Pick<ShowdownResult, 'winner' | 'payouts'>,
+  aiTotalCommitted: number,
+  heavyLossThreshold = HEAVY_ROUND_LOSS_THRESHOLD
+): ContractExpression {
+  if (result.winner === 'ai') return 'smile';
+  if (result.winner === 'human') {
+    const netLoss = Math.max(0, aiTotalCommitted - (result.payouts?.ai ?? 0));
+    return netLoss >= heavyLossThreshold ? 'angry' : 'sad';
+  }
+  return 'surprise';
 }

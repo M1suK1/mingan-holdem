@@ -12,6 +12,11 @@ export const ECHO0_EXPRESSION_PATHS: Record<ContractExpression, string> = {
   shy: `${ECHO0_ASSET_BASE}/shy.webp`,
 };
 
+export const ECHO0_ERR_EXPRESSION_PATHS: Record<'err1' | 'err2', string> = {
+  err1: `${ECHO0_ASSET_BASE}/err1.webp`,
+  err2: `${ECHO0_ASSET_BASE}/err2.webp`,
+};
+
 export const SEC01_ASSET_BASE = './assets/story/sec01';
 
 export const SEC01_EXPRESSION_PATHS: Record<ContractExpression, string> = {
@@ -477,7 +482,12 @@ export const STORY_CHARACTER_DOSSIERS: ContractCharacter[] = [
   SEC04_CHARACTER_DOSSIER,
 ];
 
-export function resolveEcho0Sprite(expression: ContractExpression = 'calm'): string {
+export function resolveEcho0Sprite(
+  expression: ContractExpression | 'err1' | 'err2' = 'calm'
+): string {
+  if (expression === 'err1' || expression === 'err2') {
+    return ECHO0_ERR_EXPRESSION_PATHS[expression];
+  }
   return ECHO0_EXPRESSION_PATHS[expression] ?? ECHO0_EXPRESSION_PATHS.calm;
 }
 

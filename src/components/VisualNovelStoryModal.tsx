@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ContractExpression } from '../engine/types.ts';
 import type { StoryVnDualSprite, StoryVnLine } from '../engine/storyVnTypes.ts';
 import {
   LIN_LONGXIN_CASUAL_SPRITE,
@@ -8,6 +9,11 @@ import {
   resolveSec03Sprite,
 } from '../engine/storyCharacters.ts';
 import { playSound } from '../engine/soundEngine.ts';
+import {
+  MOSAIC_FLICKER_SHARDS,
+  MOSAIC_FLOOD_SHARDS,
+  PORTRAIT_TEAR_SLICES,
+} from '../engine/vfxPresets.ts';
 import {
   PixelCheckIcon,
   PixelNodesIcon,
@@ -26,9 +32,11 @@ interface VisualNovelStoryModalProps {
 }
 
 function resolveDualSpriteSrc(sprite: StoryVnDualSprite): string {
-  if (sprite.character === 'sec01') return resolveSec01Sprite(sprite.expression);
-  if (sprite.character === 'sec02') return resolveSec02Sprite(sprite.expression);
-  if (sprite.character === 'sec03') return resolveSec03Sprite(sprite.expression);
+  const contractExpr: ContractExpression =
+    sprite.expression === 'err1' || sprite.expression === 'err2' ? 'calm' : sprite.expression;
+  if (sprite.character === 'sec01') return resolveSec01Sprite(contractExpr);
+  if (sprite.character === 'sec02') return resolveSec02Sprite(contractExpr);
+  if (sprite.character === 'sec03') return resolveSec03Sprite(contractExpr);
   if (sprite.character === 'linlongxin') return LIN_LONGXIN_CASUAL_SPRITE;
   return resolveEcho0Sprite(sprite.expression);
 }
@@ -128,8 +136,12 @@ export default function VisualNovelStoryModal({
 
   const isDualMode = Boolean(line.auxLeftSprite || line.leftSprite || line.rightSprite);
   const hasAuxLeft = Boolean(line.auxLeftSprite);
+  const isCollisionEffect = (fx?: string) => fx === 'collide' || fx === 'push-apart';
   const hasCollisionFx =
-    line.leftSprite?.effect === 'collide' || line.rightSprite?.effect === 'collide';
+    isCollisionEffect(line.leftSprite?.effect) || isCollisionEffect(line.rightSprite?.effect);
+  const hasHijackBackdropMosaic =
+    line.stageEffect === 'glitch-override' &&
+    (line.leftSprite?.expression === 'err1' || line.leftSprite?.expression === 'err2');
   const singleSpriteMode = line.spriteMode ?? 'none';
   const portraitUrl = line.expression
     ? resolveEcho0Sprite(line.expression)
@@ -208,6 +220,26 @@ export default function VisualNovelStoryModal({
 
       {/* Main Visual Novel Character & Environment Stage */}
       <main className="lc-vn-stage">
+        {hasHijackBackdropMosaic && (
+          <div
+            key={`vn-stage-mosaic-${clampedIdx}`}
+            className="lc-mosaic-flicker-overlay lc-vn-stage-mosaic"
+            aria-hidden="true"
+          >
+            {MOSAIC_FLICKER_SHARDS.map((sh, i) => (
+              <span
+                key={i}
+                className={`lc-mosaic-tile ${sh.tone}`}
+                style={{
+                  left: sh.left,
+                  top: sh.top,
+                  width: sh.width,
+                  height: sh.height,
+                }}
+              />
+            ))}
+          </div>
+        )}
         <div className="lc-vn-hud-stack">
           {isAlarmTone && (
             <div className="lc-vn-alarm-ribbon" aria-hidden="true">
@@ -306,7 +338,11 @@ export default function VisualNovelStoryModal({
               return (
                 <div
                   key={side}
-                  className={`lc-vn-dual-slot is-${side} char-${sprite.character} vis-${sprite.visibility} fx-${sprite.effect ?? 'none'}`}
+                  className={`lc-vn-dual-slot is-${side} char-${sprite.character} vis-${sprite.visibility} fx-${sprite.effect ?? 'none'} ${
+                    sprite.expression === 'err1' || sprite.expression === 'err2'
+                      ? 'is-hijack-tear'
+                      : ''
+                  }`}
                 >
                   {resolvedLabel && sprite.visibility !== 'hidden' && (
                     <span
@@ -316,11 +352,66 @@ export default function VisualNovelStoryModal({
                     </span>
                   )}
                   <div className="lc-vn-dual-frame">
-                    <img
-                      src={resolveDualSpriteSrc(sprite)}
-                      alt={resolvedLabel ?? sprite.character}
-                      className="lc-vn-dual-img"
-                    />
+                    <div className="lc-vn-dual-img-wrap">
+                      <img
+                        src={resolveDualSpriteSrc(sprite)}
+                        alt={resolvedLabel ?? sprite.character}
+                        className="lc-vn-dual-img"
+                      />
+                      {(sprite.expression === 'err1' || sprite.expression === 'err2') &&
+                        sprite.visibility !== 'hidden' && (
+                          <>
+                            {PORTRAIT_TEAR_SLICES.map((s) => (
+                              <img
+                                key={s.cls}
+                                src={resolveDualSpriteSrc(sprite)}
+                                alt=""
+                                aria-hidden="true"
+                                className={`lc-vn-dual-img lc-opp-tear-slice ${s.cls}`}
+                                style={{ clipPath: `inset(${s.top}% 0 ${s.bottom}% 0)` }}
+                              />
+                            ))}
+                            <div
+                              key={`vn-mosaic-hit-${clampedIdx}`}
+                              className="lc-opp-mosaic-hit lc-vn-hijack-mosaic-hit"
+                              aria-hidden="true"
+                            >
+                              {MOSAIC_FLICKER_SHARDS.slice(0, 36).map((sh, i) => (
+                                <span
+                                  key={i}
+                                  className={`lc-mosaic-tile ${sh.tone}`}
+                                  style={{
+                                    left: sh.left,
+                                    top: sh.top,
+                                    width: sh.width,
+                                    height: sh.height,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                            {sprite.expression === 'err2' && (
+                              <div
+                                className="lc-mosaic-flood-overlay lc-vn-hijack-mosaic-flood"
+                                aria-hidden="true"
+                              >
+                                {MOSAIC_FLOOD_SHARDS.map((sh, i) => (
+                                  <span
+                                    key={i}
+                                    className={`lc-mosaic-flood-cell ${sh.tone}`}
+                                    style={{
+                                      left: sh.left,
+                                      top: sh.top,
+                                      width: sh.width,
+                                      height: sh.height,
+                                      animationDelay: sh.delay,
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                    </div>
                     {(sprite.character === 'echo0' || sprite.effect === 'flashback') && (
                       <div className="lc-vn-mirror-scanlines" aria-hidden="true" />
                     )}
