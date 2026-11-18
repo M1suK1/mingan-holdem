@@ -59,6 +59,7 @@ export interface EscapeMapProgress {
   equippedSkills: string[];
   pendingTransition: EscapeTransition | null;
   escapedReality: boolean;
+  rewindUnlocked?: boolean;
 }
 
 export const ESCAPE_MAP_STORAGE_KEY = 'mingan_escape_map_v1';
@@ -259,6 +260,7 @@ export function createInitialEscapeProgress(): EscapeMapProgress {
     equippedSkills: [],
     pendingTransition: null,
     escapedReality: false,
+    rewindUnlocked: false,
   };
 }
 
@@ -311,6 +313,14 @@ export function resetEscapeProgress(): EscapeMapProgress {
   const initial = createInitialEscapeProgress();
   saveEscapeProgress(initial);
   return initial;
+}
+
+export function unlockEscapeRewind(progress: EscapeMapProgress): EscapeMapProgress {
+  if (progress.rewindUnlocked) return progress;
+  return {
+    ...progress,
+    rewindUnlocked: true,
+  };
 }
 
 export function canEnterEscapeNode(progress: EscapeMapProgress, nodeIndex: number): boolean {
@@ -458,6 +468,7 @@ export function sanitizeEscapeProgress(raw: unknown): EscapeMapProgress {
     equippedSkills,
     pendingTransition,
     escapedReality: Boolean(obj.escapedReality) && highestUnlockedIndex >= MAX_NODE_INDEX,
+    rewindUnlocked: Boolean(obj.rewindUnlocked),
   };
 }
 
@@ -528,4 +539,17 @@ export function samplePolylinePoint(
     y: last.y,
     angleDeg: (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI,
   };
+}
+
+/**
+ * Only show the initial Windows pixel desktop automatically on a brand-new save
+ * before SEC-00 is cleared.
+ */
+export function shouldStartOnDesktop(progress: EscapeMapProgress): boolean {
+  return (
+    !progress.escapedReality &&
+    progress.currentNodeIndex === 0 &&
+    progress.clearedIndices.length === 0 &&
+    progress.highestUnlockedIndex === 0
+  );
 }

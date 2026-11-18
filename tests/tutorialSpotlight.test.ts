@@ -247,4 +247,26 @@ describe('tutorialSpotlight: 教程四周压暗聚光计划解析', () => {
     assert.equal(clamped.right, 204);
     assert.equal(clamped.bottom, 110);
   });
+
+  it('activates dim-surrounding spotlight targeting hud-btn-rewind when rewind unlocks on first zero compute even outside SEC-00 guide', () => {
+    const plan = resolveTutorialSpotlightPlan({
+      viewMode: 'arena',
+      hasModalOpen: false,
+      hasPendingSkillClaim: false,
+      sec00GuideActive: false,
+      sec00IntroIndex: null,
+      sec00Guidance: null,
+      selectedHandIndex: null,
+      scanMode: false,
+      showRaiseTiers: false,
+      thoughtSpotlightActive: false,
+      rewindUnlockSpotlightActive: true,
+    });
+    assert.equal(plan.active, true);
+    assert.equal(plan.mode, 'rewind-unlock');
+    assert.ok(plan.dimOpacity >= 0.7);
+    assert.equal(plan.targets.length, 1);
+    assert.equal(plan.targets[0].id, 'hud-btn-rewind');
+    assert.equal(plan.targets[0].tone, 'pink');
+  });
 });

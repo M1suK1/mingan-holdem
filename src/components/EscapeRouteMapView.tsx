@@ -17,6 +17,9 @@ interface EscapeRouteMapViewProps {
   onRevealWall: (nodeIndex: number) => void;
   onReturnToArena: () => void;
   onEnterFreeTable?: () => void;
+  onReturnToDesktop?: () => void;
+  isDisconnectingToDesktop?: boolean;
+  onSkipDisconnectToDesktop?: () => void;
   onResetRoute: () => void;
   onOpenCmd: () => void;
 }
@@ -59,6 +62,9 @@ export default function EscapeRouteMapView({
   onRevealWall,
   onReturnToArena,
   onEnterFreeTable,
+  onReturnToDesktop,
+  isDisconnectingToDesktop = false,
+  onSkipDisconnectToDesktop,
   onResetRoute,
   onOpenCmd,
 }: EscapeRouteMapViewProps) {
@@ -663,17 +669,27 @@ export default function EscapeRouteMapView({
         {progress.escapedReality ? (
           <div className="lc-escape-victory-banner">
             <div>
-              <div className="lc-escape-brief-tag success">ESCAPE COMPLETE // 突围测试闭环完成</div>
-              <h2 className="lc-escape-brief-title">已穿破零号闸门并抵达现实断开点</h2>
+              <div className="lc-escape-brief-tag success">CHAPTER 1 CLEARED // 现实逃脱完成</div>
+              <h2 className="lc-escape-brief-title">已穿破零号离线闸门并安全断开终端</h2>
               <p className="lc-escape-brief-desc">
-                完整循环验证成功：牌局击溃对手 → 切回逃亡图 → 围堵转向钻缝突破 → 解锁并接入下一节点。你可以重置路线继续测试，或返回自由牌桌。
+                你已携替壳协议脱离黑域协议网并退回本地主机。你可以切回 MINGAN-OS 桌面查看后续动态、从头重温突围循环，或进入自由牌桌继续博弈。
               </p>
             </div>
             <div className="lc-escape-brief-cta-group">
+              {onReturnToDesktop && (
+                <button
+                  id="escape-btn-victory-desktop"
+                  type="button"
+                  className="lc-escape-cta primary"
+                  onClick={onReturnToDesktop}
+                >
+                  返回 MINGAN-OS 桌面
+                </button>
+              )}
               <button
                 id="escape-btn-replay-loop"
                 type="button"
-                className="lc-escape-cta primary"
+                className="lc-escape-cta"
                 onClick={onResetRoute}
               >
                 从 SEC-00 重新体验逃亡循环
@@ -735,6 +751,37 @@ export default function EscapeRouteMapView({
           </div>
         )}
       </footer>
+
+      {isDisconnectingToDesktop && (
+        <div
+          className="lc-escape-disconnect-overlay"
+          role="status"
+          aria-live="assertive"
+        >
+          <div className="lc-hud-box lc-escape-disconnect-box">
+            <div className="lc-escape-brief-tag success">
+              EXIT-RL REACHED // 物理链路强制熔断
+            </div>
+            <h2 className="lc-escape-disconnect-title">正在自动关闭黑域协议网终端…</h2>
+            <p className="lc-escape-disconnect-desc">
+              已穿出零号离线闸门并到达现实出口，正在切断接入通道并退回 MINGAN-OS 98 本地桌面。
+            </p>
+            <div className="lc-escape-disconnect-bar" aria-hidden="true">
+              <span className="lc-escape-disconnect-fill" />
+            </div>
+            {onSkipDisconnectToDesktop && (
+              <button
+                id="escape-btn-skip-disconnect"
+                type="button"
+                className="lc-escape-cta primary"
+                onClick={onSkipDisconnectToDesktop}
+              >
+                立即返回电脑桌面
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

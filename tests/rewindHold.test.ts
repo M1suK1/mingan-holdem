@@ -11,6 +11,11 @@ import {
   getRewindButtonMeta,
   getSec04RewindDurability,
 } from '../src/engine/rewindHold.ts';
+import {
+  createInitialEscapeProgress,
+  sanitizeEscapeProgress,
+  unlockEscapeRewind,
+} from '../src/engine/escapeMap.ts';
 
 describe('rewindHold: 时间回溯点按与长按重开判定', () => {
   it('computes clamped progress and completion threshold accurately', () => {
@@ -206,5 +211,24 @@ describe('rewindHold: 时间回溯点按与长按重开判定', () => {
     assert.equal(shattered.isHolding, false);
     assert.equal(shattered.mainLabel, '回溯已碎裂');
     assert.equal(shattered.subLabel, '通道断开 · 0%');
+  });
+
+  it('keeps rewindUnlocked hidden initially until unlockEscapeRewind triggers on first zero compute and preserves across sanitize', async () => {
+    const initial = createInitialEscapeProgress();
+    assert.equal(initial.rewindUnlocked, false);
+
+    const unlocked = unlockEscapeRewind(initial);
+    assert.equal(unlocked.rewindUnlocked, true);
+    assert.equal(sanitizeEscapeProgress(unlocked).rewindUnlocked, true);
+    assert.equal(sanitizeEscapeProgress({}).rewindUnlocked, false);
+
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const appSrc = await fs.readFile(path.join(process.cwd(), 'src', 'App.tsx'), 'utf8');
+    const cssSrc = await fs.readFile(path.join(process.cwd(), 'src', 'styles', 'pixelCyberOs.css'), 'utf8');
+    assert.ok(appSrc.includes('triggerRewindReflowVfx'));
+    assert.ok(appSrc.includes('lc-rewind-reflow-overlay'));
+    assert.ok(appSrc.includes('lc-red-reflow-col'));
+    assert.ok(cssSrc.includes('@keyframes lcDataStreamReflow'));
   });
 });

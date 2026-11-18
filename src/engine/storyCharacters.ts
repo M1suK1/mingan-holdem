@@ -40,6 +40,17 @@ export const SEC02_EXPRESSION_PATHS: Record<ContractExpression, string> = {
 };
 
 export const SEC03_ASSET_BASE = './assets/story/sec03';
+export const LIN_LONGXIN_CASUAL_ASSET_BASE = './assets/story/longxin-casual';
+
+export const LIN_LONGXIN_CASUAL_EXPRESSION_PATHS: Record<ContractExpression, string> = {
+  calm: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/calm.webp`,
+  smile: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/smile.webp`,
+  surprise: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/surprise.webp`,
+  sad: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/sad.webp`,
+  angry: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/angry.webp`,
+  shy: `${LIN_LONGXIN_CASUAL_ASSET_BASE}/shy.webp`,
+};
+
 export const LIN_LONGXIN_CASUAL_SPRITE = `${SEC03_ASSET_BASE}/casual.webp`;
 
 export const SEC03_EXPRESSION_PATHS: Record<ContractExpression, string> = {
@@ -535,6 +546,10 @@ export function resolveSec02Sprite(expression: ContractExpression = 'calm'): str
 
 export function resolveSec03Sprite(expression: ContractExpression = 'calm'): string {
   return SEC03_EXPRESSION_PATHS[expression] ?? SEC03_EXPRESSION_PATHS.calm;
+}
+
+export function resolveLinLongxinCasualSprite(expression: ContractExpression = 'calm'): string {
+  return LIN_LONGXIN_CASUAL_EXPRESSION_PATHS[expression] ?? LIN_LONGXIN_CASUAL_EXPRESSION_PATHS.calm;
 }
 
 export function resolveSec04Sprite(expression: ContractExpression = 'calm'): string {

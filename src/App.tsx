@@ -158,6 +158,15 @@ import {
 } from './engine/rewindHold.ts';
 import type { DebugCmdLogEntry } from './components/DebugCmdModal.tsx';
 import {
+  activateM1DesktopEndingSequence,
+  resetDesktopPersistedState,
+  resetM1DesktopEndingSequence,
+} from './engine/desktopState.ts';
+import {
+  resolveArchiveTargetNodeIndex,
+  type TerminalSaveSlot,
+} from './engine/terminalLogin.ts';
+import {
   ESCAPE_ROUTE_NODES,
   canEnterEscapeNode,
   claimEscapeNodeSkill,
@@ -168,6 +177,8 @@ import {
   markEscapeWallRevealed,
   resetEscapeProgress,
   saveEscapeProgress,
+  shouldStartOnDesktop,
+  unlockEscapeRewind,
   type EscapeMapProgress,
 } from './engine/escapeMap.ts';
 import {
@@ -186,6 +197,7 @@ import { SEC02_EPILOGUE_VN_SCRIPT } from './engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from './engine/sec03Intro.ts';
 import { SEC03_EPILOGUE_VN_SCRIPT } from './engine/sec03Epilogue.ts';
 import { SEC04_VN_SCRIPT } from './engine/sec04Intro.ts';
+import { SEC04_EPILOGUE_VN_SCRIPT } from './engine/sec04Epilogue.ts';
 import {
   SEC04_BERSERK_VN_SCRIPT,
   SEC04_MAX_BERSERK_FOLDS,
@@ -256,17 +268,65 @@ const ProtocolManualModal = lazy(() => import('./components/ProtocolManualModal.
 const SandboxTuningModal = lazy(() => import('./components/SandboxTuningModal.tsx'));
 const P2pLobbyModal = lazy(() => import('./components/P2pLobbyModal.tsx'));
 const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.tsx'));
+const WindowsDesktopView = lazy(() => import('./components/WindowsDesktopView.tsx'));
+const TerminalLoginView = lazy(() => import('./components/TerminalLoginView.tsx'));
 const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
 const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
 const VisualNovelStoryModal = lazy(() => import('./components/VisualNovelStoryModal.tsx'));
-const Sec04VictoryModal = lazy(() => import('./components/Sec04VictoryModal.tsx'));
+
+type SettingsCategoryKey = 'mode' | 'p2p-role' | 'ai-rules' | 'audio-debug';
+
+const SETTINGS_CATEGORIES: Array<{
+  id: string;
+  keyName: SettingsCategoryKey;
+  title: string;
+  subtitle: string;
+  note: string;
+  icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
+}> = [
+  {
+    id: 'menu-cat-mode',
+    keyName: 'mode',
+    title: '模式与场景切换',
+    subtitle: '剧情 / 自由桌 / 终端 / 桌面',
+    note: '重玩 ECHO-0 教学、切换剧情路线图或自由牌桌，以及返回终端/桌面',
+    icon: 'rules',
+  },
+  {
+    id: 'menu-cat-p2p-role',
+    keyName: 'p2p-role',
+    title: '联机与角色档案',
+    subtitle: 'P2P 好友桌 · 追捕者立绘',
+    note: 'WebRTC 好友联机对战与契约角色双态档案浏览切换',
+    icon: 'contracts',
+  },
+  {
+    id: 'menu-cat-ai-rules',
+    keyName: 'ai-rules',
+    title: 'AI、规则与数值',
+    subtitle: 'LLM · 世界书 · 规则 · 调优',
+    note: '配置 AI 大模型网关、预设世界书、规则手册、流水与对局数值',
+    icon: 'llm',
+  },
+  {
+    id: 'menu-cat-audio-debug',
+    keyName: 'audio-debug',
+    title: '音效、特效与调试',
+    subtitle: '音量控制 · 战损预览 · CMD',
+    note: '调节音效音量、预览战损危机特效或打开调试控制台 (CMD)',
+    icon: 'tuning',
+  },
+];
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
+  category: SettingsCategoryKey;
   keyName:
     | 'tutorial'
     | 'escape-map'
     | 'free-table'
+    | 'terminal-login'
+    | 'desktop'
     | 'cmd'
     | 'p2p'
     | 'contracts'
@@ -279,17 +339,19 @@ const SETTINGS_MENU_ITEMS: Array<{
   note: string;
   icon: 'contracts' | 'llm' | 'rules' | 'audit' | 'tuning';
 }> = [
-  { id: 'menu-tutorial', keyName: 'tutorial', label: '重玩新手教学 (ECHO-0)', note: '重开 SEC-00 匿名终端单轮连贯教学与规则聚光引导', icon: 'rules' },
-  { id: 'menu-escape-map', keyName: 'escape-map', label: '逃亡路线图 (剧情)', note: '打开黑域逃亡路线图并接入剧情关卡牌桌', icon: 'rules' },
-  { id: 'menu-free-table', keyName: 'free-table', label: '切换自由牌桌', note: '退出剧情关卡进入自由对战/联机牌桌', icon: 'contracts' },
-  { id: 'menu-cmd', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
-  { id: 'menu-p2p', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
-  { id: 'menu-contracts', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
-  { id: 'menu-llm', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
-  { id: 'menu-preset-wb', keyName: 'preset-wb', label: '预设与世界书', note: '编辑 SillyTavern 兼容预设词条与世界书注入', icon: 'rules' },
-  { id: 'menu-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与黑域实体规则', icon: 'rules' },
-  { id: 'menu-audit', keyName: 'audit', label: '对局流水', note: '查看历史出牌与动作日志', icon: 'audit' },
-  { id: 'menu-tuning', keyName: 'tuning', label: '数值调优', note: '算力规模、换牌门票与AI风格', icon: 'tuning' },
+  { id: 'menu-tutorial', category: 'mode', keyName: 'tutorial', label: '重玩新手教学 (ECHO-0)', note: '重开 SEC-00 匿名终端单轮连贯教学与规则聚光引导', icon: 'rules' },
+  { id: 'menu-escape-map', category: 'mode', keyName: 'escape-map', label: '逃亡路线图 (剧情)', note: '打开黑域逃亡路线图并接入剧情关卡牌桌', icon: 'rules' },
+  { id: 'menu-free-table', category: 'mode', keyName: 'free-table', label: '切换自由牌桌', note: '退出剧情关卡进入自由对战/联机牌桌', icon: 'contracts' },
+  { id: 'menu-terminal-login', category: 'mode', keyName: 'terminal-login', label: '返回终端登录 (START)', note: '回到黑域协议网终端登录界面（管理多槽位存档或重开）', icon: 'rules' },
+  { id: 'menu-desktop', category: 'mode', keyName: 'desktop', label: '返回电脑桌面 (OS)', note: '最小化当前终端并回到 MINGAN-OS 像素电脑桌面', icon: 'rules' },
+  { id: 'menu-p2p', category: 'p2p-role', keyName: 'p2p', label: '好友联机 (P2P)', note: 'WebRTC 端到端与好友开桌对战，防抓包视野隔离', icon: 'contracts' },
+  { id: 'menu-contracts', category: 'p2p-role', keyName: 'contracts', label: '追捕者档案', note: '切换契约角色并预览现实礼装/虚拟实体双态', icon: 'contracts' },
+  { id: 'menu-llm', category: 'ai-rules', keyName: 'llm', label: 'LLM 网关', note: '配置 OpenAI 兼容或 Google Vertex AI 接入', icon: 'llm' },
+  { id: 'menu-preset-wb', category: 'ai-rules', keyName: 'preset-wb', label: '预设与世界书', note: '编辑 SillyTavern 兼容预设词条与世界书注入', icon: 'rules' },
+  { id: 'menu-tuning', category: 'ai-rules', keyName: 'tuning', label: '数值调优', note: '算力规模、换牌门票与AI风格', icon: 'tuning' },
+  { id: 'menu-rules', category: 'ai-rules', keyName: 'rules', label: '概率与规则', note: '双花色牌型阶梯与黑域实体规则', icon: 'rules' },
+  { id: 'menu-audit', category: 'ai-rules', keyName: 'audit', label: '对局流水', note: '查看历史出牌与动作日志', icon: 'audit' },
+  { id: 'menu-cmd', category: 'audio-debug', keyName: 'cmd', label: '调试控制台 (CMD)', note: '输入作弊码（win 直接过关 / goto / chips / hand / reveal）', icon: 'tuning' },
 ];
 
 const FLOOD_DATA_STREAMS = Array.from({ length: 42 }, (_, i) => {
@@ -339,7 +401,7 @@ const FIXED_CRUSHED_DOCK_H = 28;
 
 type ActiveModal =
   | { type: 'none' }
-  | { type: 'settings-menu' }
+  | { type: 'settings-menu'; section?: SettingsCategoryKey | 'root' }
   | { type: 'cmd' }
   | { type: 'p2p' }
   | { type: 'contracts' }
@@ -347,7 +409,8 @@ type ActiveModal =
   | { type: 'preset-wb'; section: 'preset' | 'worldbook' }
   | { type: 'protocol'; tab: 'rules' | 'suits' | 'audit' }
   | { type: 'tuning' }
-  | { type: 'confirm-reset' };
+  | { type: 'confirm-reset' }
+  | { type: 'confirm-desktop-reset' };
 
 interface ChatItem {
   id: string;
@@ -400,7 +463,10 @@ export function App() {
 
   const [campaign, setCampaign] = useState(() => loadCampaignState());
   const [escapeProgress, setEscapeProgress] = useState<EscapeMapProgress>(() => loadEscapeProgress());
-  const [viewMode, setViewMode] = useState<'arena' | 'escape-map'>('arena');
+  const [viewMode, setViewMode] = useState<
+    'desktop' | 'terminal-login' | 'arena' | 'escape-map'
+  >(() => (shouldStartOnDesktop(loadEscapeProgress()) ? 'desktop' : 'terminal-login'));
+  const [desktopResetEpoch, setDesktopResetEpoch] = useState(0);
   const [activeEscapeNodeIndex, setActiveEscapeNodeIndex] = useState<number | null>(() => {
     const initEsc = loadEscapeProgress();
     return initEsc.escapedReality ? 0 : Math.min(4, initEsc.currentNodeIndex);
@@ -440,7 +506,8 @@ export function App() {
       | 'sec03-intro'
       | 'sec03-epilogue'
       | 'sec04-intro'
-      | 'sec04-berserk';
+      | 'sec04-berserk'
+      | 'sec04-epilogue';
     index: number;
   } | null>(() => {
     const initEsc = loadEscapeProgress();
@@ -495,7 +562,6 @@ export function App() {
     choices: string[];
     clearedNodeIndex?: number;
   } | null>(null);
-  const [sec04VictoryOpen, setSec04VictoryOpen] = useState(false);
   const [sec04ClimaxPhase, setSec04ClimaxPhase] = useState<
     'idle' | 'thought' | 'hand-0' | 'hand-1' | 'hand-2' | 'board-ace' | 'four-aces'
   >('idle');
@@ -504,6 +570,8 @@ export function App() {
   const [sec04CardMorphIdx, setSec04CardMorphIdx] = useState<number | null>(null);
   const [sec04BerserkIntroPending, setSec04BerserkIntroPending] = useState(false);
   const sec04BerserkVnShownRef = useRef(false);
+  const [exitDisconnectActive, setExitDisconnectActive] = useState(false);
+  const exitDisconnectTimerRef = useRef<number | null>(null);
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
@@ -549,6 +617,47 @@ export function App() {
   const rewindHoldLastElapsedRef = useRef<number>(0);
   const rewindHoldTriggeredRef = useRef<boolean>(false);
   const rewindChargeStepRef = useRef<number>(-1);
+  const [rewindUnlockSpotlightActive, setRewindUnlockSpotlightActive] = useState(false);
+  const [rewindReflowKey, setRewindReflowKey] = useState<number | null>(null);
+  const rewindReflowTimerRef = useRef<number | null>(null);
+
+  const triggerRewindReflowVfx = useCallback(() => {
+    if (rewindReflowTimerRef.current !== null) {
+      window.clearTimeout(rewindReflowTimerRef.current);
+      rewindReflowTimerRef.current = null;
+    }
+    const nextKey = Date.now() + Math.floor(Math.random() * 1000);
+    setRewindReflowKey(nextKey);
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    rewindReflowTimerRef.current = window.setTimeout(
+      () => {
+        rewindReflowTimerRef.current = null;
+        setRewindReflowKey(null);
+      },
+      reduced ? 260 : 950
+    );
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rewindReflowTimerRef.current !== null) {
+        window.clearTimeout(rewindReflowTimerRef.current);
+        rewindReflowTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'arena' && rewindReflowKey !== null) {
+      if (rewindReflowTimerRef.current !== null) {
+        window.clearTimeout(rewindReflowTimerRef.current);
+        rewindReflowTimerRef.current = null;
+      }
+      setRewindReflowKey(null);
+    }
+  }, [viewMode, rewindReflowKey]);
 
   const [tableEntranceActive, setTableEntranceActive] = useState(false);
   const tableEntranceTimerRef = useRef<number | null>(null);
@@ -616,6 +725,55 @@ export function App() {
   const isP2pSessionActive =
     isP2pConnected ||
     (p2pMatchActiveRef.current && (p2pStatus === 'connecting' || p2pStatus === 'waiting-answer'));
+
+  useEffect(() => {
+    if (
+      viewMode === 'arena' &&
+      activeEscapeNodeIndex !== null &&
+      !isP2pSessionActive &&
+      state.players.human.chips <= 0 &&
+      !escapeProgressRef.current.rewindUnlocked
+    ) {
+      setEscapeProgress((prev) => {
+        const next = unlockEscapeRewind(prev);
+        escapeProgressRef.current = next;
+        return next;
+      });
+      setRewindUnlockSpotlightActive(true);
+      unlockAudioContext();
+      playSound('skill');
+    }
+  }, [viewMode, activeEscapeNodeIndex, isP2pSessionActive, state.players.human.chips]);
+
+  useEffect(() => {
+    if (!rewindUnlockSpotlightActive) return;
+    if (viewMode !== 'arena' || activeEscapeNodeIndex === null || isP2pSessionActive) {
+      setRewindUnlockSpotlightActive(false);
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setRewindUnlockSpotlightActive(false);
+      }
+    };
+    let pointerArmed = false;
+    const armTimer = window.setTimeout(() => {
+      pointerArmed = true;
+    }, 450);
+    const onPointerDown = (e: PointerEvent) => {
+      if (!pointerArmed) return;
+      const target = e.target as Element | null;
+      if (target?.closest('#hud-btn-rewind')) return;
+      setRewindUnlockSpotlightActive(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.clearTimeout(armTimer);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [rewindUnlockSpotlightActive, viewMode, activeEscapeNodeIndex, isP2pSessionActive]);
 
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [unreadMobileChat, setUnreadMobileChat] = useState(0);
@@ -2141,7 +2299,7 @@ export function App() {
         scheduleTimeout(() => {
           const latest = latestStateRef.current;
           if (!latest.sec04Escaped) return;
-          setSec04VictoryOpen(true);
+          setActiveVnStory({ kind: 'sec04-epilogue', index: 0 });
         }, 11400);
       }
       return;
@@ -3003,7 +3161,6 @@ export function App() {
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
-    setSec04VictoryOpen(false);
     setSec04ClimaxPhase('idle');
     setSec04ConvertedHandCount(0);
     setSec04RewritingHandIdx(null);
@@ -3028,7 +3185,6 @@ export function App() {
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
     setActiveVnStory(null);
-    setSec04VictoryOpen(false);
     setSec04ClimaxPhase('idle');
     setSec04ConvertedHandCount(0);
     setSec04RewritingHandIdx(null);
@@ -3181,7 +3337,6 @@ export function App() {
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
-    setSec04VictoryOpen(false);
     setSec04ClimaxPhase('idle');
     setSec04ConvertedHandCount(0);
     setSec04RewritingHandIdx(null);
@@ -3270,9 +3425,48 @@ export function App() {
     pushToast('info', `进入 ${node.code} · ${node.title}`, `对手：${node.opponentName}（算力 ${node.opponentChips}）`);
   };
 
-  const handleCompleteEscapeTransition = useCallback(() => {
-    setEscapeProgress((prev) => completeEscapeTransition(prev));
+  const finishExitDisconnectToDesktop = useCallback(() => {
+    if (exitDisconnectTimerRef.current !== null) {
+      window.clearTimeout(exitDisconnectTimerRef.current);
+      exitDisconnectTimerRef.current = null;
+    }
+    setExitDisconnectActive(false);
+    setViewMode('desktop');
   }, []);
+
+  const triggerExitDisconnectToDesktop = useCallback(() => {
+    if (exitDisconnectTimerRef.current !== null) {
+      window.clearTimeout(exitDisconnectTimerRef.current);
+      exitDisconnectTimerRef.current = null;
+    }
+    activateM1DesktopEndingSequence();
+    setExitDisconnectActive(true);
+    unlockAudioContext();
+    playSound('skill');
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    exitDisconnectTimerRef.current = window.setTimeout(
+      () => {
+        exitDisconnectTimerRef.current = null;
+        setExitDisconnectActive(false);
+        setViewMode('desktop');
+      },
+      reduced ? 220 : 1450
+    );
+  }, []);
+
+  const handleCompleteEscapeTransition = useCallback(() => {
+    const prev = escapeProgressRef.current;
+    if (!prev.pendingTransition) return;
+    const reachingExit = prev.pendingTransition.toIndex === 5 && !prev.escapedReality;
+    const next = completeEscapeTransition(prev);
+    escapeProgressRef.current = next;
+    setEscapeProgress(next);
+    if (reachingExit && next.escapedReality) {
+      triggerExitDisconnectToDesktop();
+    }
+  }, [triggerExitDisconnectToDesktop]);
 
   const handleEnterFreeTable = useCallback(() => {
     if (isP2pSessionActive) {
@@ -3297,6 +3491,7 @@ export function App() {
   }, [isP2pSessionActive, disconnectP2p, state.config, character, pushToast]);
 
   const handleTimeRewind = (forceFromCmd = false) => {
+    setRewindUnlockSpotlightActive(false);
     if (activeEscapeNodeRef.current === null || isP2pSessionActive) return;
     const isSec04Match = activeEscapeNodeRef.current === 4 && !isP2pSessionActive;
     const currentDurability = getSec04RewindDurability(
@@ -3321,10 +3516,13 @@ export function App() {
     }
     if (sec00GuideActiveRef.current) {
       startSec00Tutorial(true);
+      triggerRewindReflowVfx();
       playSound('skill');
       pushToast('info', 'ECHO-0 · 时间回溯', '已将 SEC-00 教学时间线回溯至初盘');
       return;
     }
+
+    triggerRewindReflowVfx();
 
     for (const id of timersRef.current) {
       window.clearTimeout(id);
@@ -3336,7 +3534,6 @@ export function App() {
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
-    setSec04VictoryOpen(false);
     setSec04ClimaxPhase('idle');
     setSec04ConvertedHandCount(0);
     setSec04RewritingHandIdx(null);
@@ -3499,6 +3696,7 @@ export function App() {
     }
     const wasSec00 = sec00GuideActiveRef.current;
     performFullReset();
+    triggerRewindReflowVfx();
     playSound('skill');
     pushToast(
       'info',
@@ -3518,6 +3716,7 @@ export function App() {
   };
 
   const startHoldStoryRewind = () => {
+    setRewindUnlockSpotlightActive(false);
     if (rewindHoldIntervalRef.current !== null || !isStoryRewindHoldUnlocked()) {
       return;
     }
@@ -3563,6 +3762,7 @@ export function App() {
   };
 
   const handleRewindButtonClick = () => {
+    setRewindUnlockSpotlightActive(false);
     const holdTriggered = rewindHoldTriggeredRef.current;
     const holdElapsedMs = rewindHoldLastElapsedRef.current;
     rewindHoldTriggeredRef.current = false;
@@ -3587,6 +3787,13 @@ export function App() {
   }, []);
 
   const handleResetEscapeRoute = () => {
+    if (exitDisconnectTimerRef.current !== null) {
+      window.clearTimeout(exitDisconnectTimerRef.current);
+      exitDisconnectTimerRef.current = null;
+    }
+    setExitDisconnectActive(false);
+    setRewindUnlockSpotlightActive(false);
+    resetM1DesktopEndingSequence();
     const fresh = resetEscapeProgress();
     setEscapeProgress(fresh);
     escapeProgressRef.current = fresh;
@@ -3640,6 +3847,15 @@ export function App() {
     if (finishedKind === 'sec04-berserk') {
       setActiveExpression('calm');
       setSec04BerserkIntroPending(false);
+      return;
+    }
+    if (finishedKind === 'sec04-epilogue') {
+      setEscapeProgress((prev) => {
+        const next = markEscapeNodeCleared(prev, 4);
+        escapeProgressRef.current = next;
+        return next;
+      });
+      setViewMode('escape-map');
       return;
     }
     if (finishedKind === 'sec01-epilogue') {
@@ -3781,6 +3997,7 @@ export function App() {
           }
           const idxToClear = Math.min(4, base.highestUnlockedIndex);
           const nextEsc = markEscapeNodeCleared(base, idxToClear);
+          escapeProgressRef.current = nextEsc;
           setEscapeProgress(nextEsc);
           setActiveModal({ type: 'none' });
           appendCmdLog('success', `[OK] 直接突破 ${ESCAPE_ROUTE_NODES[idxToClear]?.code}，播放钻缝动画`);
@@ -3826,6 +4043,7 @@ export function App() {
           setViewMode('escape-map');
           setActiveModal({ type: 'none' });
           appendCmdLog('success', '[OK] 已穿过零号闸门抵达现实出口');
+          triggerExitDisconnectToDesktop();
           return;
         }
         const nextIdx = Math.min(4, completed.currentNodeIndex);
@@ -4465,7 +4683,7 @@ export function App() {
     state.currentTurn,
   ]);
 
-  const hasTopGuideBar = sec00GuideActive;
+  const hasTopGuideBar = sec00GuideActive && viewMode === 'arena';
 
   const spotlightPlan = useMemo(
     () =>
@@ -4480,6 +4698,7 @@ export function App() {
         scanMode,
         showRaiseTiers,
         thoughtSpotlightActive,
+        rewindUnlockSpotlightActive,
       }),
     [
       viewMode,
@@ -4493,6 +4712,7 @@ export function App() {
       scanMode,
       showRaiseTiers,
       thoughtSpotlightActive,
+      rewindUnlockSpotlightActive,
     ]
   );
 
@@ -4521,6 +4741,8 @@ export function App() {
   return (
     <div
       className={`lc-shell ${hasTopGuideBar ? 'has-tutorial-bar' : ''} ${
+        viewMode === 'desktop' ? 'is-desktop-view' : ''
+      } ${viewMode === 'terminal-login' ? 'is-terminal-login-view' : ''} ${
         viewMode === 'escape-map' ? 'is-escape-map-view' : ''
       } ${isFourAcesSpotlight ? 'is-four-aces-spotlight' : ''}`}
     >
@@ -4531,7 +4753,113 @@ export function App() {
         playerBankrupt={isHumanBankrupt}
       />
 
-      {viewMode === 'escape-map' ? (
+      {viewMode === 'desktop' ? (
+        <Suspense fallback={null}>
+          <WindowsDesktopView
+            key={desktopResetEpoch}
+            soundSettings={soundSettings}
+            onUpdateSoundSettings={(next) => {
+              setSoundSettings(next);
+              saveSoundSettings(next);
+              if (next.enabled) {
+                unlockAudioContext();
+                playSound('ui-click');
+              }
+            }}
+            onOpenSettingsTarget={(target) => {
+              if (target === 'preset-wb') {
+                setActiveModal({ type: 'preset-wb', section: 'preset' });
+              } else if (target === 'protocol') {
+                setActiveModal({ type: 'protocol', tab: 'suits' });
+              } else {
+                setActiveModal({ type: target });
+              }
+            }}
+            onEnterFreeTable={handleEnterFreeTable}
+            onResetSaveFromDesktop={() => setActiveModal({ type: 'confirm-desktop-reset' })}
+            escapedReality={escapeProgress.escapedReality}
+            playerCodename={campaign.playerCodename}
+            hasExistingProgress={!shouldStartOnDesktop(escapeProgress)}
+            progressLabel={
+              escapeProgress.escapedReality
+                ? '已突破现实归途 · 可重入巡回'
+                : activeEscapeNode
+                  ? `${activeEscapeNode.code} · ${activeEscapeNode.title}`
+                  : '自由模式终端'
+            }
+            onPlayUiClick={() => {
+              unlockAudioContext();
+              playSound('ui-click');
+            }}
+            onLaunchMingan={() => {
+              unlockAudioContext();
+              playSound('skill');
+              setViewMode('terminal-login');
+            }}
+          />
+        </Suspense>
+      ) : viewMode === 'terminal-login' ? (
+        <Suspense fallback={null}>
+          <TerminalLoginView
+            escapeProgress={escapeProgress}
+            campaign={campaign}
+            onPlayUiClick={() => {
+              unlockAudioContext();
+              playSound('ui-click');
+            }}
+            onStartNewGame={() => {
+              unlockAudioContext();
+              playSound('skill');
+              setCampaign(createInitialCampaign(campaign.playerCodename));
+              handleResetEscapeRoute();
+            }}
+            onContinueGame={(target) => {
+              unlockAudioContext();
+              playSound('skill');
+              const esc = escapeProgressRef.current;
+              if (target === 'escape-map' || esc.escapedReality) {
+                setViewMode('escape-map');
+                return;
+              }
+              const nodeIdx = resolveArchiveTargetNodeIndex(esc);
+              handleEnterEscapeNode(nodeIdx);
+            }}
+            onApplyLoadedSlot={(slot: TerminalSaveSlot) => {
+              setEscapeProgress(slot.escapeProgress);
+              escapeProgressRef.current = slot.escapeProgress;
+              setCampaign(slot.campaign);
+              const nextIdx = slot.escapeProgress.escapedReality
+                ? 0
+                : Math.min(4, slot.escapeProgress.currentNodeIndex);
+              setActiveEscapeNodeIndex(nextIdx);
+              activeEscapeNodeRef.current = nextIdx;
+              pushToast(
+                'success',
+                `已读取存档槽 SLOT-${slot.slotId}`,
+                `${slot.label}（${slot.nodeCode}）`
+              );
+            }}
+            onOpenSettings={(subTarget) => {
+              if (subTarget === 'menu') {
+                setActiveModal({ type: 'settings-menu', section: 'root' });
+              } else if (subTarget === 'sound') {
+                setActiveModal({ type: 'settings-menu', section: 'audio-debug' });
+              } else if (subTarget === 'preset-wb') {
+                setActiveModal({ type: 'preset-wb', section: 'preset' });
+              } else if (subTarget === 'protocol') {
+                setActiveModal({ type: 'protocol', tab: 'suits' });
+              } else {
+                setActiveModal({ type: subTarget });
+              }
+            }}
+            onReturnToDesktop={() => {
+              unlockAudioContext();
+              playSound('ui-click');
+              setViewMode('desktop');
+            }}
+          />
+        </Suspense>
+      ) : viewMode === 'escape-map' ? (
         <Suspense fallback={null}>
           <EscapeRouteMapView
             progress={escapeProgress}
@@ -4540,6 +4868,13 @@ export function App() {
             onRevealWall={handleRevealEscapeWall}
             onReturnToArena={() => setViewMode('arena')}
             onEnterFreeTable={handleEnterFreeTable}
+            onReturnToDesktop={() => {
+              unlockAudioContext();
+              playSound('ui-click');
+              setViewMode('desktop');
+            }}
+            isDisconnectingToDesktop={exitDisconnectActive}
+            onSkipDisconnectToDesktop={finishExitDisconnectToDesktop}
             onResetRoute={handleResetEscapeRoute}
             onOpenCmd={() => setActiveModal({ type: 'cmd' })}
           />
@@ -4650,68 +4985,72 @@ export function App() {
                 </span>
               </button>
 
-              <button
-                id="hud-btn-rewind"
-                type="button"
-                disabled={rewindButtonMeta.disabled}
-                className={`lc-stack-btn pink lc-hold-btn ${
-                  !rewindButtonMeta.tapEnabled ? 'is-tap-locked' : ''
-                } ${rewindButtonMeta.isHolding ? 'is-holding' : ''} ${
-                  rewindButtonMeta.durability.isSec04
-                    ? `is-durability-${rewindButtonMeta.durability.stage}`
-                    : ''
-                }`}
-                data-tap-locked={human.chips > 0 ? 'true' : 'false'}
-                data-durability-stage={rewindButtonMeta.durability.stage}
-                data-durability-pct={rewindButtonMeta.durability.durabilityPct}
-                onPointerDown={(e) => {
-                  if (rewindButtonMeta.disabled) return;
-                  if (e.pointerType === 'mouse' && e.button !== 0) return;
-                  startHoldStoryRewind();
-                }}
-                onPointerUp={cancelHoldStoryRewind}
-                onPointerLeave={cancelHoldStoryRewind}
-                onPointerCancel={cancelHoldStoryRewind}
-                onContextMenu={(e) => e.preventDefault()}
-                onKeyDown={(e) => {
-                  if (rewindButtonMeta.disabled) return;
-                  if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
-                    e.preventDefault();
+              {(escapeProgress.rewindUnlocked || human.chips <= 0 || rewindUnlockSpotlightActive) && (
+                <button
+                  id="hud-btn-rewind"
+                  type="button"
+                  disabled={rewindButtonMeta.disabled}
+                  className={`lc-stack-btn pink lc-hold-btn ${
+                    !rewindButtonMeta.tapEnabled ? 'is-tap-locked' : ''
+                  } ${rewindButtonMeta.isHolding ? 'is-holding' : ''} ${
+                    rewindUnlockSpotlightActive ? 'is-rewind-reveal-blink' : ''
+                  } ${
+                    rewindButtonMeta.durability.isSec04
+                      ? `is-durability-${rewindButtonMeta.durability.stage}`
+                      : ''
+                  }`}
+                  data-tap-locked={human.chips > 0 ? 'true' : 'false'}
+                  data-durability-stage={rewindButtonMeta.durability.stage}
+                  data-durability-pct={rewindButtonMeta.durability.durabilityPct}
+                  onPointerDown={(e) => {
+                    if (rewindButtonMeta.disabled) return;
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
                     startHoldStoryRewind();
-                  }
-                }}
-                onKeyUp={(e) => {
-                  if (rewindButtonMeta.disabled) return;
-                  if (e.key === ' ' || e.key === 'Enter') {
-                    e.preventDefault();
-                    cancelHoldStoryRewind();
-                    handleRewindButtonClick();
-                  }
-                }}
-                onClick={handleRewindButtonClick}
-                title={rewindButtonMeta.title}
-                aria-label="发动女主 ECHO-0 的时间回溯（算力归零后可点按回溯或长按重开整场对局）"
-              >
-                <div
-                  className="lc-hold-fill is-rewind-fill"
-                  style={{ width: `${rewindButtonMeta.isHolding ? rewindHoldProgress : 0}%` }}
-                  aria-hidden="true"
-                />
-                <PixelRewindCrackOverlay stage={rewindButtonMeta.durability.stage} />
-                <span className="lc-btn-inline">
-                  {rewindButtonMeta.durability.isShattered ? <PixelSeverIcon size={15} /> : <PixelSyncIcon size={15} />}
-                  {rewindButtonMeta.mainLabel}
-                </span>
-                <span className="lc-stack-sub">{rewindButtonMeta.subLabel}</span>
-                {rewindButtonMeta.durability.isSec04 && (
-                  <div className="lc-rewind-durability-track" aria-hidden="true">
-                    <div
-                      className={`lc-rewind-durability-fill is-${rewindButtonMeta.durability.stage}`}
-                      style={{ width: `${rewindButtonMeta.durability.durabilityPct}%` }}
-                    />
-                  </div>
-                )}
-              </button>
+                  }}
+                  onPointerUp={cancelHoldStoryRewind}
+                  onPointerLeave={cancelHoldStoryRewind}
+                  onPointerCancel={cancelHoldStoryRewind}
+                  onContextMenu={(e) => e.preventDefault()}
+                  onKeyDown={(e) => {
+                    if (rewindButtonMeta.disabled) return;
+                    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                      e.preventDefault();
+                      startHoldStoryRewind();
+                    }
+                  }}
+                  onKeyUp={(e) => {
+                    if (rewindButtonMeta.disabled) return;
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault();
+                      cancelHoldStoryRewind();
+                      handleRewindButtonClick();
+                    }
+                  }}
+                  onClick={handleRewindButtonClick}
+                  title={rewindButtonMeta.title}
+                  aria-label="发动女主 ECHO-0 的时间回溯（算力归零后可点按回溯或长按重开整场对局）"
+                >
+                  <div
+                    className="lc-hold-fill is-rewind-fill"
+                    style={{ width: `${rewindButtonMeta.isHolding ? rewindHoldProgress : 0}%` }}
+                    aria-hidden="true"
+                  />
+                  <PixelRewindCrackOverlay stage={rewindButtonMeta.durability.stage} />
+                  <span className="lc-btn-inline">
+                    {rewindButtonMeta.durability.isShattered ? <PixelSeverIcon size={15} /> : <PixelSyncIcon size={15} />}
+                    {rewindButtonMeta.mainLabel}
+                  </span>
+                  <span className="lc-stack-sub">{rewindButtonMeta.subLabel}</span>
+                  {rewindButtonMeta.durability.isSec04 && (
+                    <div className="lc-rewind-durability-track" aria-hidden="true">
+                      <div
+                        className={`lc-rewind-durability-fill is-${rewindButtonMeta.durability.stage}`}
+                        style={{ width: `${rewindButtonMeta.durability.durabilityPct}%` }}
+                      />
+                    </div>
+                  )}
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -5975,14 +6314,21 @@ export function App() {
                   type="button"
                   className="lc-stack-btn"
                   disabled={isSec04PreFourAces}
-                  onClick={() => setSec04VictoryOpen(true)}
+                  onClick={() => {
+                    setEscapeProgress((prev) => {
+                      const next = markEscapeNodeCleared(prev, 4);
+                      escapeProgressRef.current = next;
+                      return next;
+                    });
+                    setViewMode('escape-map');
+                  }}
                 >
                   <span className="lc-btn-inline">
                     <PixelNodesIcon size={15} />
                     {isSec04PreFourAces ? '绝命覆写同步中...' : '断开牌桌 · 逃出黑域'}
                   </span>
                   <span className="lc-stack-sub">
-                    {isSec04PreFourAces ? '正在重映射手牌与公共牌 A' : '查看猎杀榜 NO.1 突围结算'}
+                    {isSec04PreFourAces ? '正在重映射手牌与公共牌 A' : '穿越零号闸门撤向 EXIT-RL 出口'}
                   </span>
                 </button>
               ) : human.chips > 0 && ai.chips > 0 ? (
@@ -6416,212 +6762,317 @@ export function App() {
         </div>
       )}
 
-      <TutorialSpotlightOverlay plan={spotlightPlan} mobileChatOpen={mobileChatOpen} />
-
-      <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
-
-      {/* Integrated Settings Menu Overlay */}
-      {activeModal.type === 'settings-menu' && (
+      {/* Time Rewind VFX: Upward Reverse Crimson Data-Stream Reflow */}
+      {rewindReflowKey !== null && (
         <div
-          className="lc-settings-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-label="系统集成设置菜单"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setActiveModal({ type: 'none' });
-          }}
+          key={rewindReflowKey}
+          className="lc-rewind-reflow-overlay"
+          aria-hidden="true"
         >
-          <div className="lc-settings-menu">
-            <div style={{ textAlign: 'center' }}>
-              <h2 className="lc-glitch-title">系统设置</h2>
-              <div className="lc-glitch-sub">&lt; CODE : MINGAN &gt;</div>
-            </div>
-
-            <div className="lc-menu-list" role="menu">
-              {SETTINGS_MENU_ITEMS.map((item) => (
-                <button
-                  key={item.id}
-                  id={item.id}
-                  type="button"
-                  role="menuitem"
-                  className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
-                  onMouseEnter={() => setActiveMenuId(item.id)}
-                  onClick={() => {
-                    if (item.keyName === 'tutorial') startSec00Tutorial(true);
-                    else if (item.keyName === 'escape-map') {
-                      setActiveModal({ type: 'none' });
-                      setViewMode('escape-map');
-                    } else if (item.keyName === 'free-table') handleEnterFreeTable();
-                    else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
-                    else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
-                    else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
-                    else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
-                    else if (item.keyName === 'preset-wb')
-                      setActiveModal({ type: 'preset-wb', section: 'preset' });
-                    else if (item.keyName === 'rules') setActiveModal({ type: 'protocol', tab: 'suits' });
-                    else if (item.keyName === 'audit') setActiveModal({ type: 'protocol', tab: 'audit' });
-                    else if (item.keyName === 'tuning') setActiveModal({ type: 'tuning' });
-                  }}
-                >
-                  <PixelMenuIcon kind={item.icon} size={15} />
-                  {item.label}
-                </button>
-              ))}
-              <button
-                id="menu-close-back"
-                type="button"
-                role="menuitem"
-                className="lc-menu-item"
-                onClick={() => setActiveModal({ type: 'none' })}
+          <div className="lc-red-flood-streams">
+            {FLOOD_DATA_STREAMS.map((s, idx) => (
+              <div
+                key={idx}
+                className="lc-red-flood-col lc-red-reflow-col"
+                style={{
+                  left: s.left,
+                  fontSize: s.fontSize,
+                  opacity: s.opacity,
+                  letterSpacing: s.letterSpacing,
+                  animationDuration: `${Math.max(0.55, Number.parseFloat(s.dur) * 0.42).toFixed(2)}s`,
+                  animationDelay: `${(Number.parseFloat(s.delay) * 0.35).toFixed(2)}s`,
+                }}
               >
-                <PixelMenuIcon kind="back" size={15} />
-                返回牌局
-              </button>
-            </div>
-
-            {/* Sound FX Mute & Volume Control Strip */}
-            <div className="lc-sound-strip">
-              <div className="lc-sound-row">
-                <button
-                  id="settings-btn-sound-toggle"
-                  type="button"
-                  className={`lc-vfx-chip ${soundSettings.enabled ? 'active' : ''}`}
-                  onClick={() => {
-                    const next = { ...soundSettings, enabled: !soundSettings.enabled };
-                    setSoundSettings(next);
-                    saveSoundSettings(next);
-                    if (next.enabled) {
-                      unlockAudioContext();
-                      playSound('ui-click');
-                    }
-                  }}
-                >
-                  {soundSettings.enabled ? '音效：开启' : '音效：已静音'}
-                </button>
-                <label htmlFor="settings-input-sound-volume" className="lc-sound-label">
-                  音量 {Math.round(soundSettings.volume * 100)}%
-                </label>
-                <input
-                  id="settings-input-sound-volume"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  className="lc-sound-slider"
-                  disabled={!soundSettings.enabled}
-                  value={Math.round(soundSettings.volume * 100)}
-                  onChange={(e) => {
-                    const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
-                    setSoundSettings(next);
-                    saveSoundSettings(next);
-                  }}
-                />
-                <button
-                  id="settings-btn-sound-test"
-                  type="button"
-                  className="lc-vfx-chip"
-                  disabled={!soundSettings.enabled}
-                  onClick={() => {
-                    unlockAudioContext();
-                    playSound('skill');
-                  }}
-                >
-                  试听
-                </button>
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
+                <span>{s.tokens}</span>
               </div>
-            </div>
-
-            {/* Quick VFX Preview Toggles so user can inspect all damage states for both sides independently */}
-            <div className="lc-vfx-strip">
-              <span className="lc-menu-note">战损与危机特效即时预览（双方独立隔离）</span>
-              <div className="lc-vfx-btn-row">
-                <button
-                  id="vfx-test-round-loss"
-                  type="button"
-                  className={`lc-vfx-chip ${roundLossFlicker ? 'active' : ''}`}
-                  onClick={() => {
-                    setActiveModal({ type: 'none' });
-                    setRoundLossFlicker(true);
-                    setAiRoundLossFlicker(true);
-                    window.setTimeout(() => {
-                      setRoundLossFlicker(false);
-                      setAiRoundLossFlicker(false);
-                    }, 1200);
-                  }}
-                >
-                  单轮败北闪烁
-                </button>
-                <button
-                  id="vfx-test-human-low"
-                  type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'human-low' ? 'active' : ''}`}
-                  onClick={() => {
-                    setVfxTestMode((m) => (m === 'human-low' ? 'auto' : 'human-low'));
-                    setActiveModal({ type: 'none' });
-                  }}
-                >
-                  {vfxTestMode === 'human-low' ? '关闭己方红流' : '己方低算力外流'}
-                </button>
-                <button
-                  id="vfx-test-human-bankrupt"
-                  type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'human-bankrupt' ? 'active' : ''}`}
-                  onClick={() => {
-                    setVfxTestMode((m) => (m === 'human-bankrupt' ? 'auto' : 'human-bankrupt'));
-                    setActiveModal({ type: 'none' });
-                  }}
-                >
-                  {vfxTestMode === 'human-bankrupt' ? '关闭己方淹没' : '己方红流淹没'}
-                </button>
-                <button
-                  id="vfx-test-ai-low"
-                  type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'ai-low' ? 'active' : ''}`}
-                  onClick={() => {
-                    setVfxTestMode((m) => (m === 'ai-low' ? 'auto' : 'ai-low'));
-                    setActiveModal({ type: 'none' });
-                  }}
-                >
-                  {vfxTestMode === 'ai-low' ? '关闭对手红流' : '对手低算力红流'}
-                </button>
-                <button
-                  id="vfx-test-ai-bankrupt"
-                  type="button"
-                  className={`lc-vfx-chip ${vfxTestMode === 'ai-bankrupt' ? 'active' : ''}`}
-                  onClick={() => {
-                    setVfxTestMode((m) => (m === 'ai-bankrupt' ? 'auto' : 'ai-bankrupt'));
-                    setActiveModal({ type: 'none' });
-                  }}
-                >
-                  {vfxTestMode === 'ai-bankrupt' ? '恢复对手立绘' : '对手归零扭曲'}
-                </button>
-                <button
-                  id="vfx-test-reset"
-                  type="button"
-                  className="lc-vfx-chip"
-                  onClick={() => {
-                    setVfxTestMode('auto');
-                    setRoundLossFlicker(false);
-                    setAiRoundLossFlicker(false);
-                    setActiveModal({ type: 'none' });
-                  }}
-                >
-                  恢复正常
-                </button>
-              </div>
-            </div>
-
-            <div className="lc-menu-note">
-              {SETTINGS_MENU_ITEMS.find((i) => i.id === activeMenuId)?.note ??
-                '支持拖拽手牌至暗牌互换'}
-            </div>
+            ))}
+          </div>
+          <div className="lc-rewind-reflow-scanbar" />
+          <div className="lc-rewind-reflow-banner">
+            TIME REWIND // 红色算力数据流逆向回流
           </div>
         </div>
       )}
 
+      <TutorialSpotlightOverlay plan={spotlightPlan} mobileChatOpen={mobileChatOpen} />
+
+      <CyberToastHub toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Integrated Settings Menu Overlay (2-Level Categorized Menu) */}
+      {activeModal.type === 'settings-menu' && (() => {
+        const currentSection: SettingsCategoryKey | 'root' = activeModal.section ?? 'root';
+        const activeCategoryMeta =
+          currentSection === 'root'
+            ? null
+            : SETTINGS_CATEGORIES.find((c) => c.keyName === currentSection) ?? null;
+        const visibleSubItems =
+          currentSection === 'root'
+            ? []
+            : SETTINGS_MENU_ITEMS.filter((i) => i.category === currentSection);
+        const hoveredNote =
+          SETTINGS_CATEGORIES.find((c) => c.id === activeMenuId)?.note ??
+          SETTINGS_MENU_ITEMS.find((i) => i.id === activeMenuId)?.note ??
+          activeCategoryMeta?.note ??
+          '选择分类进入对应设置 · 支持快捷键 ~ / F9 打开调试终端';
+
+        return (
+          <div
+            className="lc-settings-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="系统集成设置菜单"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setActiveModal({ type: 'none' });
+            }}
+          >
+            <div className="lc-settings-menu">
+              <div style={{ textAlign: 'center' }}>
+                <h2 className="lc-glitch-title">
+                  {activeCategoryMeta ? activeCategoryMeta.title : '系统设置'}
+                </h2>
+                <div className="lc-glitch-sub">
+                  {activeCategoryMeta
+                    ? `< CODE : MINGAN // ${activeCategoryMeta.subtitle} >`
+                    : '< CODE : MINGAN >'}
+                </div>
+              </div>
+
+              {currentSection === 'root' ? (
+                <div className="lc-menu-list" role="menu">
+                  {SETTINGS_CATEGORIES.map((cat) => (
+                    <button
+                      id={cat.id}
+                      key={cat.id}
+                      type="button"
+                      role="menuitem"
+                      className={`lc-menu-item lc-menu-cat-item ${activeMenuId === cat.id ? 'active' : ''}`}
+                      onMouseEnter={() => setActiveMenuId(cat.id)}
+                      onClick={() => {
+                        setActiveMenuId(cat.id);
+                        setActiveModal({ type: 'settings-menu', section: cat.keyName });
+                      }}
+                    >
+                      <span className="lc-menu-cat-main">
+                        <PixelMenuIcon kind={cat.icon} size={15} />
+                        <span className="lc-menu-cat-text">
+                          <strong>{cat.title}</strong>
+                          <span className="lc-menu-cat-sub">{cat.subtitle}</span>
+                        </span>
+                      </span>
+                      <span className="lc-menu-cat-arrow" aria-hidden="true">
+                        &gt;
+                      </span>
+                    </button>
+                  ))}
+                  <button
+                    id="menu-close-back"
+                    type="button"
+                    role="menuitem"
+                    className="lc-menu-item"
+                    onClick={() => setActiveModal({ type: 'none' })}
+                  >
+                    <PixelMenuIcon kind="back" size={15} />
+                    {viewMode === 'terminal-login' ? '返回终端登录' : '返回牌局'}
+                  </button>
+                </div>
+              ) : (
+                <div className="lc-menu-list" role="menu">
+                  {visibleSubItems.map((item) => (
+                    <button
+                      id={item.id}
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      className={`lc-menu-item ${activeMenuId === item.id ? 'active' : ''}`}
+                      onMouseEnter={() => setActiveMenuId(item.id)}
+                      onClick={() => {
+                        if (item.keyName === 'tutorial') startSec00Tutorial(true);
+                        else if (item.keyName === 'escape-map') {
+                          setActiveModal({ type: 'none' });
+                          setViewMode('escape-map');
+                        } else if (item.keyName === 'free-table') handleEnterFreeTable();
+                        else if (item.keyName === 'terminal-login') {
+                          setActiveModal({ type: 'none' });
+                          setViewMode('terminal-login');
+                        } else if (item.keyName === 'desktop') {
+                          setActiveModal({ type: 'none' });
+                          setViewMode('desktop');
+                        } else if (item.keyName === 'cmd') setActiveModal({ type: 'cmd' });
+                        else if (item.keyName === 'p2p') setActiveModal({ type: 'p2p' });
+                        else if (item.keyName === 'contracts') setActiveModal({ type: 'contracts' });
+                        else if (item.keyName === 'llm') setActiveModal({ type: 'llm' });
+                        else if (item.keyName === 'preset-wb')
+                          setActiveModal({ type: 'preset-wb', section: 'preset' });
+                        else if (item.keyName === 'rules') setActiveModal({ type: 'protocol', tab: 'suits' });
+                        else if (item.keyName === 'audit') setActiveModal({ type: 'protocol', tab: 'audit' });
+                        else if (item.keyName === 'tuning') setActiveModal({ type: 'tuning' });
+                      }}
+                    >
+                      <PixelMenuIcon kind={item.icon} size={15} />
+                      {item.label}
+                    </button>
+                  ))}
+
+                  <button
+                    id="menu-sub-back"
+                    type="button"
+                    role="menuitem"
+                    className="lc-menu-item lc-menu-sub-back"
+                    onClick={() => setActiveModal({ type: 'settings-menu', section: 'root' })}
+                  >
+                    <PixelMenuIcon kind="back" size={15} />
+                    返回上级分类
+                  </button>
+                </div>
+              )}
+
+              {/* Sound FX Mute & Volume Control Strip (shown on root & audio-debug submenu) */}
+              {(currentSection === 'root' || currentSection === 'audio-debug') && (
+                <div className="lc-sound-strip">
+                  <div className="lc-sound-row">
+                    <button
+                      id="settings-btn-sound-toggle"
+                      type="button"
+                      className={`lc-vfx-chip ${soundSettings.enabled ? 'active' : ''}`}
+                      onClick={() => {
+                        const next = { ...soundSettings, enabled: !soundSettings.enabled };
+                        setSoundSettings(next);
+                        saveSoundSettings(next);
+                        if (next.enabled) {
+                          unlockAudioContext();
+                          playSound('ui-click');
+                        }
+                      }}
+                    >
+                      {soundSettings.enabled ? '音效：开启' : '音效：已静音'}
+                    </button>
+                    <label htmlFor="settings-input-sound-volume" className="lc-sound-label">
+                      音量 {Math.round(soundSettings.volume * 100)}%
+                    </label>
+                    <input
+                      id="settings-input-sound-volume"
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      className="lc-sound-slider"
+                      disabled={!soundSettings.enabled}
+                      value={Math.round(soundSettings.volume * 100)}
+                      onChange={(e) => {
+                        const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
+                        setSoundSettings(next);
+                        saveSoundSettings(next);
+                      }}
+                    />
+                    <button
+                      id="settings-btn-sound-test"
+                      type="button"
+                      className="lc-vfx-chip"
+                      disabled={!soundSettings.enabled}
+                      onClick={() => {
+                        unlockAudioContext();
+                        playSound('skill');
+                      }}
+                    >
+                      试听
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Quick VFX Preview Toggles moved under audio-debug submenu */}
+              {currentSection === 'audio-debug' && (
+                <div className="lc-vfx-strip">
+                  <span className="lc-menu-note">战损与危机特效即时预览（双方独立隔离）</span>
+                  <div className="lc-vfx-btn-row">
+                    <button
+                      id="vfx-test-round-loss"
+                      type="button"
+                      className={`lc-vfx-chip ${roundLossFlicker ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveModal({ type: 'none' });
+                        setRoundLossFlicker(true);
+                        setAiRoundLossFlicker(true);
+                        window.setTimeout(() => {
+                          setRoundLossFlicker(false);
+                          setAiRoundLossFlicker(false);
+                        }, 1200);
+                      }}
+                    >
+                      单轮败北闪烁
+                    </button>
+                    <button
+                      id="vfx-test-human-low"
+                      type="button"
+                      className={`lc-vfx-chip ${vfxTestMode === 'human-low' ? 'active' : ''}`}
+                      onClick={() => {
+                        setVfxTestMode((m) => (m === 'human-low' ? 'auto' : 'human-low'));
+                        setActiveModal({ type: 'none' });
+                      }}
+                    >
+                      {vfxTestMode === 'human-low' ? '关闭己方红流' : '己方低算力外流'}
+                    </button>
+                    <button
+                      id="vfx-test-human-bankrupt"
+                      type="button"
+                      className={`lc-vfx-chip ${vfxTestMode === 'human-bankrupt' ? 'active' : ''}`}
+                      onClick={() => {
+                        setVfxTestMode((m) => (m === 'human-bankrupt' ? 'auto' : 'human-bankrupt'));
+                        setActiveModal({ type: 'none' });
+                      }}
+                    >
+                      {vfxTestMode === 'human-bankrupt' ? '关闭己方淹没' : '己方红流淹没'}
+                    </button>
+                    <button
+                      id="vfx-test-ai-low"
+                      type="button"
+                      className={`lc-vfx-chip ${vfxTestMode === 'ai-low' ? 'active' : ''}`}
+                      onClick={() => {
+                        setVfxTestMode((m) => (m === 'ai-low' ? 'auto' : 'ai-low'));
+                        setActiveModal({ type: 'none' });
+                      }}
+                    >
+                      {vfxTestMode === 'ai-low' ? '关闭对手红流' : '对手低算力红流'}
+                    </button>
+                    <button
+                      id="vfx-test-ai-bankrupt"
+                      type="button"
+                      className={`lc-vfx-chip ${vfxTestMode === 'ai-bankrupt' ? 'active' : ''}`}
+                      onClick={() => {
+                        setVfxTestMode((m) => (m === 'ai-bankrupt' ? 'auto' : 'ai-bankrupt'));
+                        setActiveModal({ type: 'none' });
+                      }}
+                    >
+                      {vfxTestMode === 'ai-bankrupt' ? '恢复对手立绘' : '对手归零扭曲'}
+                    </button>
+                    <button
+                      id="vfx-test-reset"
+                      type="button"
+                      className="lc-vfx-chip"
+                      onClick={() => {
+                        setVfxTestMode('auto');
+                        setRoundLossFlicker(false);
+                        setAiRoundLossFlicker(false);
+                        setActiveModal({ type: 'none' });
+                      }}
+                    >
+                      恢复正常
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="lc-menu-note">{hoveredNote}</div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Lazy-Loaded System Modals */}
       <Suspense fallback={null}>
-        {activeVnStory !== null && (
+        {activeVnStory !== null && viewMode !== 'desktop' && viewMode !== 'terminal-login' && (
           <VisualNovelStoryModal
             script={
               (
@@ -6635,6 +7086,7 @@ export function App() {
                   'sec03-epilogue': SEC03_EPILOGUE_VN_SCRIPT,
                   'sec04-intro': SEC04_VN_SCRIPT,
                   'sec04-berserk': SEC04_BERSERK_VN_SCRIPT,
+                  'sec04-epilogue': SEC04_EPILOGUE_VN_SCRIPT,
                 } as const
               )[activeVnStory.kind]
             }
@@ -6644,27 +7096,6 @@ export function App() {
               setActiveVnStory((prev) => (prev ? { ...prev, index: nextIdx } : null))
             }
             onFinish={handleFinishVnStory}
-          />
-        )}
-
-        {sec04VictoryOpen && state.sec04Escaped && (
-          <Sec04VictoryModal
-            playerCodename={campaign.playerCodename}
-            potWon={state.result?.potWon ?? 0}
-            humanChips={state.players.human.chips}
-            aiRemainingChips={state.players.ai.chips}
-            foldCount={state.sec04FoldCount ?? 0}
-            onConfirmEscape={() => {
-              setSec04VictoryOpen(false);
-              setEscapeProgress((prev) => completeEscapeTransition(markEscapeNodeCleared(prev, 4)));
-              setViewMode('escape-map');
-              pushToast(
-                'success',
-                'EXIT-RL · 突破黑域协议网！',
-                '已强制断开牌桌连接逃出生天（猎杀榜 NO.1 突围达成）'
-              );
-            }}
-            onStayReview={() => setSec04VictoryOpen(false)}
           />
         )}
 
@@ -6924,6 +7355,22 @@ export function App() {
           description={`此操作将终止当前牌局，并将你与「${ai.name}」的算力全部重置为 ${state.config.startingChips}。`}
           confirmLabel="确认重置战场"
           onConfirm={() => performFullReset()}
+          onCancel={() => setActiveModal({ type: 'none' })}
+        />
+      )}
+
+      {activeModal.type === 'confirm-desktop-reset' && (
+        <ConfirmCyberModal
+          title="确认重置本地黑域存档？"
+          description="此操作将清空当前逃亡进度、已解锁技能与本地战绩，重置为新开局状态并留在 MINGAN-OS 桌面。"
+          confirmLabel="确认清空存档"
+          onConfirm={() => {
+            setActiveModal({ type: 'none' });
+            resetDesktopPersistedState();
+            setDesktopResetEpoch((n) => n + 1);
+            handleResetEscapeRoute();
+            setViewMode('desktop');
+          }}
           onCancel={() => setActiveModal({ type: 'none' })}
         />
       )}

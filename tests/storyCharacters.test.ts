@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import {
   ECHO0_CHARACTER_DOSSIER,
   LIN_LONGXIN_CASUAL_SPRITE,
@@ -32,6 +34,7 @@ import { SEC02_EPILOGUE_VN_SCRIPT } from '../src/engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from '../src/engine/sec03Intro.ts';
 import { SEC03_EPILOGUE_VN_SCRIPT } from '../src/engine/sec03Epilogue.ts';
 import { SEC04_VN_SCRIPT } from '../src/engine/sec04Intro.ts';
+import { SEC04_EPILOGUE_VN_SCRIPT } from '../src/engine/sec04Epilogue.ts';
 import {
   SEC04_BERSERK_VN_SCRIPT,
   SEC04_ROUND_SPECS,
@@ -1088,5 +1091,46 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     assert.ok(copy.includes('公共牌区'));
     assert.ok(copy.includes('绝望'));
     assert.ok(copy.includes('叛逃者'));
+  });
+
+  it('defines 18-line SEC04_EPILOGUE_VN_SCRIPT with user-edited dialogue, zero Blackbox spoilers, ECHO-0 hibernation split-in, and direct escape-map wiring without intermediate victory card', async () => {
+    assert.equal(SEC04_EPILOGUE_VN_SCRIPT.length, 18);
+
+    for (const line of SEC04_EPILOGUE_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec04');
+      assert.equal(line.text.includes('；') || line.text.includes(';'), false);
+      assert.equal(line.text.includes('老子'), false);
+      assert.equal(line.text.includes('黑盒'), false);
+      assert.equal(/black\s*box/i.test(line.text), false);
+      if (line.speakerKind === 'narrator' && line.speakerName.startsWith('旁白')) {
+        assert.equal(line.text.includes('你'), false, `SEC-04 epilogue line ${line.lineNo} narrator should not say 你`);
+      }
+      if (line.speakerKind === 'player') {
+        assert.equal(line.text.includes('ECHO-0'), false, `Player line ${line.lineNo} should not directly name ECHO-0`);
+      }
+    }
+
+    // Verify user's exact edits from docs/sec04-epilogue-vn-script.md
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[0].text.includes('把绯凪·千夜精心铺就的黑曜同花顺当场逆转！'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[1].text.includes('原来你还留了后手啊，叛逃者'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[11].text.includes('被你从正面硬生生闯开了'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[13].text.includes('这辈子我都绝不会再碰黑域协议网半步'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[14].text.includes('全网通缉的——『猎杀榜 NO.1』'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[15].text.includes('踩着脚边最后一点冰凉余烬'));
+    assert.ok(SEC04_EPILOGUE_VN_SCRIPT[16].text.includes('回到再普通不过的现实房间里去'));
+
+    // ECHO-0 left-split hibernation sequence & final exit
+    assert.equal(SEC04_EPILOGUE_VN_SCRIPT[5].auxLeftSprite?.effect, 'split-out');
+    assert.equal(SEC04_EPILOGUE_VN_SCRIPT[6].auxLeftSprite?.effect, 'split-hold');
+    assert.equal(SEC04_EPILOGUE_VN_SCRIPT[8].auxLeftSprite?.effect, 'split-in');
+    assert.equal(SEC04_EPILOGUE_VN_SCRIPT[17].rightSprite?.visibility, 'hidden');
+
+    // App.tsx triggers sec04-epilogue and exits directly to escape-map without Sec04VictoryModal
+    const appSrc = await fs.readFile(path.join(process.cwd(), 'src', 'App.tsx'), 'utf8');
+    assert.ok(appSrc.includes("setActiveVnStory({ kind: 'sec04-epilogue', index: 0 })"));
+    assert.ok(appSrc.includes("if (finishedKind === 'sec04-epilogue')"));
+    assert.ok(appSrc.includes("'sec04-epilogue': SEC04_EPILOGUE_VN_SCRIPT"));
+    assert.equal(appSrc.includes('Sec04VictoryModal'), false);
   });
 });

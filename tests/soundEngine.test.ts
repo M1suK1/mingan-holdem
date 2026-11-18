@@ -89,5 +89,7 @@ describe('soundEngine: action/showdown cue mapping, settings clamping & Node fal
     assert.equal(playSound('rewind-crack'), false);
     assert.equal(playSound('rewind-shatter'), false);
     assert.equal(playSound('alarm-siren'), false);
+    assert.equal(playSound('popup-alert'), false);
+    assert.equal(playSound('wexin-ping'), false);
   });
 });

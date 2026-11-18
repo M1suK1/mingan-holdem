@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ContractExpression } from '../engine/types.ts';
 import type { StoryVnDualSprite, StoryVnLine } from '../engine/storyVnTypes.ts';
 import {
-  LIN_LONGXIN_CASUAL_SPRITE,
   resolveEcho0Sprite,
+  resolveLinLongxinCasualSprite,
   resolveSec01Sprite,
   resolveSec02Sprite,
   resolveSec03Sprite,
@@ -39,7 +39,7 @@ function resolveDualSpriteSrc(sprite: StoryVnDualSprite): string {
   if (sprite.character === 'sec02') return resolveSec02Sprite(contractExpr);
   if (sprite.character === 'sec03') return resolveSec03Sprite(contractExpr);
   if (sprite.character === 'sec04') return resolveSec04Sprite(contractExpr);
-  if (sprite.character === 'linlongxin') return LIN_LONGXIN_CASUAL_SPRITE;
+  if (sprite.character === 'linlongxin') return resolveLinLongxinCasualSprite(contractExpr);
   return resolveEcho0Sprite(sprite.expression);
 }
 

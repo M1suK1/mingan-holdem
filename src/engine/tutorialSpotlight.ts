@@ -31,7 +31,7 @@ export interface SpotlightLinkArrow {
 
 export interface SpotlightPlan {
   active: boolean;
-  mode: 'sec00-monologue' | 'sec00-thought' | 'sec00-step' | 'off';
+  mode: 'sec00-monologue' | 'sec00-thought' | 'sec00-step' | 'rewind-unlock' | 'off';
   dimOpacity: number;
   targets: SpotlightTargetSpec[];
   mobileFallbackTargets?: SpotlightTargetSpec[];
@@ -39,7 +39,7 @@ export interface SpotlightPlan {
 }
 
 export interface SpotlightInputContext {
-  viewMode: 'arena' | 'escape-map';
+  viewMode: 'desktop' | 'terminal-login' | 'arena' | 'escape-map';
   hasModalOpen: boolean;
   hasPendingSkillClaim: boolean;
   sec00GuideActive: boolean;
@@ -49,6 +49,7 @@ export interface SpotlightInputContext {
   scanMode: boolean;
   showRaiseTiers: boolean;
   thoughtSpotlightActive: boolean;
+  rewindUnlockSpotlightActive?: boolean;
 }
 
 export interface ClampedSpotlightRect {
@@ -81,7 +82,30 @@ export function clampSpotlightRect(
 }
 
 export function resolveTutorialSpotlightPlan(ctx: SpotlightInputContext): SpotlightPlan {
-  if (ctx.viewMode !== 'arena' || ctx.hasModalOpen || ctx.hasPendingSkillClaim || !ctx.sec00GuideActive) {
+  if (ctx.viewMode !== 'arena' || ctx.hasModalOpen || ctx.hasPendingSkillClaim) {
+    return { active: false, mode: 'off', dimOpacity: 0, targets: [] };
+  }
+
+  // First-time Time Rewind unlock spotlight on initial 0-compute crisis (works across any story node)
+  if (ctx.rewindUnlockSpotlightActive) {
+    return {
+      active: true,
+      mode: 'rewind-unlock',
+      dimOpacity: 0.78,
+      targets: [
+        {
+          id: 'hud-btn-rewind',
+          label: '时间回溯激活 // 点击回退或长按重开',
+          tone: 'pink',
+          padding: 10,
+          role: 'action',
+        },
+      ],
+      arrow: null,
+    };
+  }
+
+  if (!ctx.sec00GuideActive) {
     return { active: false, mode: 'off', dimOpacity: 0, targets: [] };
   }
 

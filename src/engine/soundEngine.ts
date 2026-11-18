@@ -25,7 +25,9 @@ export type SoundCue =
   | 'fire-burn'
   | 'rewind-crack'
   | 'rewind-shatter'
-  | 'alarm-siren';
+  | 'alarm-siren'
+  | 'popup-alert'
+  | 'wexin-ping';
 
 export interface SoundSettings {
   enabled: boolean;
@@ -570,6 +572,47 @@ export function playSound(cue: SoundCue, opts?: { progress?: number }): boolean 
         type: 'square',
         gain: 0.15,
         filterHz: 2600,
+      });
+      return true;
+
+    case 'popup-alert':
+      // Classic Win98-cyber system warning popup double chime (low stern pulse + crisp high alert tone)
+      playTone(ctx, out, {
+        duration: 0.11,
+        freqStart: 523.25,
+        freqEnd: 440,
+        type: 'square',
+        gain: 0.18,
+        filterHz: 2200,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.095,
+        duration: 0.22,
+        freqStart: 880,
+        freqEnd: 830,
+        type: 'triangle',
+        gain: 0.22,
+        filterHz: 3200,
+      });
+      return true;
+
+    case 'wexin-ping':
+      // Crisp two-note instant messenger notification bell (B5 -> E6)
+      playTone(ctx, out, {
+        duration: 0.09,
+        freqStart: 987.77,
+        freqEnd: 987.77,
+        type: 'sine',
+        gain: 0.2,
+      });
+      playTone(ctx, out, {
+        startOffset: 0.085,
+        duration: 0.22,
+        freqStart: 1318.51,
+        freqEnd: 1318.51,
+        type: 'triangle',
+        gain: 0.22,
+        filterHz: 4200,
       });
       return true;
 
