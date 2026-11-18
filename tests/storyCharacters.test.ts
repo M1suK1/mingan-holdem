@@ -31,6 +31,16 @@ import { SEC02_VN_SCRIPT } from '../src/engine/sec02Intro.ts';
 import { SEC02_EPILOGUE_VN_SCRIPT } from '../src/engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from '../src/engine/sec03Intro.ts';
 import { SEC03_EPILOGUE_VN_SCRIPT } from '../src/engine/sec03Epilogue.ts';
+import { SEC04_VN_SCRIPT } from '../src/engine/sec04Intro.ts';
+import {
+  SEC04_BERSERK_VN_SCRIPT,
+  SEC04_ROUND_SPECS,
+  advanceSec04NextHandState,
+  createSec04BerserkTransitionState,
+  createSec04ScriptedHandState,
+  pickSec04BerserkRaiseAmount,
+} from '../src/engine/sec04Battle.ts';
+import { LocalAiAgent } from '../src/engine/aiAgent.ts';
 import { ESCAPE_ROUTE_NODES } from '../src/engine/escapeMap.ts';
 import {
   fetchContractCatalog,
@@ -913,5 +923,170 @@ describe('storyCharacters: SEC-01 新人物「凌翡 // JADE-01」千金大小�
     for (const spoiler of ['猎杀榜', '黑盒', '叛逃']) {
       assert.equal(fullCopy.includes(spoiler), false, `SEC-03 epilogue should not spoil "${spoiler}"`);
     }
+  });
+
+  it('defines 20-line SEC-04 gatekeeper intro with flame slash blockade, KIRI-04 indictment, low-empathy ECHO-0 dimmed err ghost broadcast, and dutiful refusal', () => {
+    assert.equal(SEC04_VN_SCRIPT.length, 20);
+    for (const line of SEC04_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec04');
+      assert.equal(line.text.includes('；') || line.text.includes(';'), false);
+      assert.equal(line.text.includes('老子'), false);
+      if (line.speakerKind === 'narrator' && line.speakerName.startsWith('旁白')) {
+        assert.equal(line.text.includes('你'), false, `Line ${line.lineNo} narrator should not say 你`);
+      }
+      if (line.speakerKind === 'player') {
+        assert.equal(/echo-?0/i.test(line.text), false, `Player line ${line.lineNo} should not name ECHO-0`);
+      }
+    }
+    assert.ok(
+      SEC04_VN_SCRIPT.filter((l) => l.speakerKind === 'narrator' && l.speakerName.startsWith('旁白')).every(
+        (l) => !l.text.includes('玩家')
+      )
+    );
+    assert.ok(SEC04_VN_SCRIPT.some((l) => l.text.includes('{codename}')));
+
+    assert.equal(SEC04_VN_SCRIPT[2].stageEffect, 'blade-slash');
+    assert.equal(SEC04_VN_SCRIPT[2].leftSprite?.effect, 'blade-cut');
+    assert.equal(SEC04_VN_SCRIPT[2].rightSprite?.visibility, 'silhouette');
+
+    assert.equal(SEC04_VN_SCRIPT[5].text.includes('壳层'), false);
+    assert.ok(SEC04_VN_SCRIPT[5].text.includes('你犯下的这些累累罪行'));
+
+    assert.equal(SEC04_VN_SCRIPT[11].auxLeftSprite?.character, 'echo0');
+    assert.equal(SEC04_VN_SCRIPT[11].auxLeftSprite?.expression, 'err1');
+    assert.equal(SEC04_VN_SCRIPT[11].auxLeftSprite?.visibility, 'dimmed');
+    assert.equal(SEC04_VN_SCRIPT[11].auxLeftSprite?.effect, 'split-out');
+    assert.equal(SEC04_VN_SCRIPT[12].auxLeftSprite?.expression, 'err2');
+    assert.equal(SEC04_VN_SCRIPT[12].auxLeftSprite?.visibility, 'dimmed');
+    assert.equal(SEC04_VN_SCRIPT[12].auxLeftSprite?.effect, 'split-hold');
+    assert.equal(SEC04_VN_SCRIPT[13].auxLeftSprite?.expression, 'err1');
+    assert.equal(SEC04_VN_SCRIPT[13].auxLeftSprite?.visibility, 'dimmed');
+    assert.equal(SEC04_VN_SCRIPT[13].auxLeftSprite?.effect, 'split-hold');
+    assert.equal(SEC04_VN_SCRIPT[14].auxLeftSprite?.character, 'echo0');
+    assert.equal(SEC04_VN_SCRIPT[14].auxLeftSprite?.expression, 'err1');
+    assert.equal(SEC04_VN_SCRIPT[14].auxLeftSprite?.visibility, 'dimmed');
+    assert.equal(SEC04_VN_SCRIPT[14].auxLeftSprite?.effect, 'split-in');
+    assert.equal(SEC04_VN_SCRIPT[15].auxLeftSprite, undefined);
+
+    assert.equal(SEC04_VN_SCRIPT[16].rightSprite?.expression, 'surprise');
+    assert.equal(SEC04_VN_SCRIPT[17].rightSprite?.expression, 'calm');
+    assert.equal(SEC04_VN_SCRIPT[18].rightSprite?.expression, 'sad');
+    assert.equal(SEC04_VN_SCRIPT[19].rightSprite?.expression, 'calm');
+    assert.equal(SEC04_VN_SCRIPT[19].stageEffect, 'blade-slash');
+
+    const fullCopy = SEC04_VN_SCRIPT.map((l) => `${l.speakerName} ${l.text}`).join(' ');
+    assert.ok(fullCopy.includes('EXIT-RL'));
+    assert.ok(fullCopy.includes('KIRI-04'));
+    assert.ok(fullCopy.includes('绯凪·千夜'));
+    assert.ok(fullCopy.includes('反黑客安全官'));
+    assert.ok(fullCopy.includes('黑盒'));
+    assert.ok(fullCopy.includes('完美虚拟实体'));
+    assert.ok(fullCopy.includes('生物电信号'));
+    assert.ok(fullCopy.includes('痛觉屏蔽率 100%'));
+    assert.ok(fullCopy.includes('保持前进'));
+    assert.ok(fullCopy.includes('稳定住了'));
+    assert.ok(fullCopy.includes('稳定成了'));
+    assert.ok(fullCopy.includes('你现在也不过是强弩之末罢了。'));
+    assert.ok(fullCopy.includes('于心不忍'));
+    assert.ok(fullCopy.includes('公事公办'));
+  });
+
+  it('orchestrates SEC-04 scripted Rounds 1-4 without duplicate cards and showcases Two Pair > Flush + Berserk 4/4 traps + 3-fold lockout + Four Aces > Straight Flush escape with AI chips > 0', async () => {
+    for (const stage of [1, 2, 3, 4] as const) {
+      const s = createSec04ScriptedHandState({ stage });
+      const cards = [
+        ...s.players.human.hand.map((h) => h.card.id),
+        ...s.players.ai.hand.map((h) => h.card.id),
+        ...s.board.map((b) => b.card.id),
+      ];
+      assert.equal(new Set(cards).size, 10, `Round ${stage} initial 10 cards must all be unique`);
+      assert.deepEqual(s.trappedBoardIndices, SEC04_ROUND_SPECS[stage].trappedBoardIndices);
+      assert.equal(s.players.human.chips + s.players.ai.chips + s.pot, 2000);
+    }
+
+    // Round 2 showcases Two Pair (A+8) beating Pink Flush
+    const r2 = createSec04ScriptedHandState({ stage: 2 });
+    const r2HumanEval = evaluateSevenCards([
+      ...r2.players.human.hand.map((h) => h.card),
+      ...r2.board.map((b) => b.card),
+    ]);
+    const r2AiEval = evaluateSevenCards([
+      ...r2.players.ai.hand.map((h) => h.card),
+      ...r2.board.map((b) => b.card),
+    ]);
+    assert.equal(r2HumanEval.categoryKey, 'flush');
+    assert.equal(r2AiEval.categoryKey, 'two-pair');
+    assert.ok(r2AiEval.score > r2HumanEval.score);
+
+    // Round 4 Berserk mode: 4/4 traps, AI push > human.chips, 3 folds allowed then fold locked, Call triggers Four Aces > Straight Flush with ai.chips > 0
+    const agent = new LocalAiAgent('ai', 'balanced', SEC04_CHARACTER_DOSSIER);
+    agent.setDifficulty('master');
+    let bState = createSec04BerserkTransitionState(
+      createSec04ScriptedHandState({ stage: 3, chips: { human: 950, ai: 1050 } })
+    );
+    assert.equal(bState.sec04Berserk, true);
+    assert.deepEqual(bState.trappedBoardIndices, [0, 1, 2, 3]);
+    assert.equal(bState.currentTurn, 'ai');
+    assert.equal(bState.players.human.chips + bState.players.ai.chips + bState.pot, 2000);
+    assert.ok(pickSec04BerserkRaiseAmount(bState) > bState.players.human.chips);
+
+    for (let foldIdx = 0; foldIdx < 3; foldIdx += 1) {
+      const dec = await agent.decide(bState);
+      assert.equal(dec.action.type, 'raise');
+      assert.ok(dec.action.amount > bState.players.human.chips);
+      assert.ok(dec.dialogue.text.includes('叛逃者'));
+
+      bState = applyAction(bState, dec.action);
+      assert.equal(bState.currentTurn, 'human');
+      assert.equal(isActionLegal(bState, { type: 'fold' }), true);
+      assert.equal(isActionLegal(bState, { type: 'call' }), true);
+
+      bState = applyAction(bState, { type: 'fold' });
+      assert.equal(bState.phase, 'showdown');
+      bState = advanceSec04NextHandState(bState, 3);
+      assert.equal(bState.sec04FoldCount, foldIdx + 1);
+      assert.equal(bState.players.human.chips + bState.players.ai.chips + bState.pot, 2000);
+    }
+
+    // After 3 folds, AI raises > human.chips again, and fold is now sealed/disabled
+    const lockedDec = await agent.decide(bState);
+    assert.equal(lockedDec.action.type, 'raise');
+    assert.ok(lockedDec.dialogue.text.includes('叛逃者'));
+    bState = applyAction(bState, lockedDec.action);
+    assert.equal(bState.sec04FoldCount, 3);
+    assert.equal(isActionLegal(bState, { type: 'fold' }), false);
+    assert.equal(isActionLegal(bState, { type: 'call' }), true);
+
+    // Call commits all remaining chips -> autoRunoutToShowdown + ECHO-0 Four Aces > Obsidian Straight Flush
+    const settled = applyAction(bState, { type: 'call' });
+    assert.equal(settled.phase, 'showdown');
+    assert.equal(settled.sec04OverrideTriggered, true);
+    assert.equal(settled.sec04Escaped, true);
+    assert.equal(settled.result?.winner, 'human');
+    assert.equal(settled.result?.humanEval?.categoryKey, 'four-of-a-kind');
+    assert.equal(settled.result?.aiEval?.categoryKey, 'straight-flush');
+    assert.ok(settled.players.ai.chips > 0, 'KIRI-04 retains positive compute despite overdraw collapse');
+    assert.equal(settled.players.human.chips + settled.players.ai.chips, 2000);
+  });
+
+  it('defines 6-line SEC04_BERSERK_VN_SCRIPT explaining 4/4 fire traps, blocked board interaction, despair, and KIRI-04 calling player 叛逃者', () => {
+    assert.equal(SEC04_BERSERK_VN_SCRIPT.length, 6);
+    for (const line of SEC04_BERSERK_VN_SCRIPT) {
+      assert.equal(line.leftSprite?.character, 'echo0');
+      assert.equal(line.rightSprite?.character, 'sec04');
+      assert.equal(line.text.includes('；') || line.text.includes(';'), false);
+      if (line.speakerKind === 'narrator' && line.speakerName.startsWith('旁白')) {
+        assert.equal(line.text.includes('你'), false, `Berserk line ${line.lineNo} narrator should not say 你`);
+      }
+      if (line.speakerKind === 'opponent') {
+        assert.ok(line.text.includes('叛逃者'));
+      }
+    }
+    const copy = SEC04_BERSERK_VN_SCRIPT.map((l) => l.text).join(' ');
+    assert.ok(copy.includes('四张公共暗牌'));
+    assert.ok(copy.includes('公共牌区'));
+    assert.ok(copy.includes('绝望'));
+    assert.ok(copy.includes('叛逃者'));
   });
 });

@@ -5,7 +5,7 @@ export type StoryVnSpeakerKind = 'opponent' | 'narrator' | 'player';
 
 export type StoryVnSpriteMode = 'opponent' | 'dissipating' | 'none' | 'mirror';
 
-export type StoryVnCharacterId = 'echo0' | 'sec01' | 'sec02' | 'sec03' | 'linlongxin';
+export type StoryVnCharacterId = 'echo0' | 'sec01' | 'sec02' | 'sec03' | 'sec04' | 'linlongxin';
 
 export type StoryVnStageEffect =
   | 'none'
@@ -48,7 +48,10 @@ export interface StoryVnDualSprite {
     | 'emerge'
     | 'collide'
     | 'push-apart'
-    | 'distanced';
+    | 'distanced'
+    | 'split-out'
+    | 'split-hold'
+    | 'split-in';
 }
 
 export interface StoryVnLine {

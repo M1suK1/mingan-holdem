@@ -295,6 +295,11 @@ export interface GameState {
   trappedBoardIndices?: number[];
   confirmedTrapIndices?: number[];
   triggeredTrapIndex?: number;
+  sec04RoundStage?: 1 | 2 | 3 | 4;
+  sec04Berserk?: boolean;
+  sec04FoldCount?: number;
+  sec04OverrideTriggered?: boolean;
+  sec04Escaped?: boolean;
   lastAction?: VfxEvent;
   actionHistory: ActionLogEntry[];
   pastHands: HandRoundSummary[];

@@ -380,6 +380,10 @@ export interface CreateStateOptions {
   pastHands?: HandRoundSummary[];
   opponentName?: string;
   deckOverride?: Card[];
+  firstActorOverride?: PlayerId;
+  sec04RoundStage?: 1 | 2 | 3 | 4;
+  sec04Berserk?: boolean;
+  sec04FoldCount?: number;
   rng?: () => number;
 }
 
@@ -483,7 +487,7 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
   }));
 
   const pot = human.totalCommitted + ai.totalCommitted;
-  const firstTurn = pickFirstActor(humanCards, aiCards, tieStarter);
+  const firstTurn = options.firstActorOverride ?? pickFirstActor(humanCards, aiCards, tieStarter);
   const rngFn = options.rng ?? Math.random;
   const sigSkill = options.opponentSignatureSkill;
   const lockedHumanHackSkill =
@@ -531,6 +535,11 @@ export function createInitialState(options: CreateStateOptions = {}): GameState 
     trappedBoardIndices,
     confirmedTrapIndices: [...(options.confirmedTrapIndices ?? [])],
     triggeredTrapIndex: undefined,
+    sec04RoundStage: options.sec04RoundStage,
+    sec04Berserk: options.sec04Berserk,
+    sec04FoldCount: options.sec04FoldCount,
+    sec04OverrideTriggered: false,
+    sec04Escaped: false,
     pastHands: [...(options.pastHands ?? [])],
     lastAction: {
       id: makeEventId(),
@@ -797,6 +806,14 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
       );
     }
     if (action.type === 'raise') {
+      if (state.sec04Berserk && actorId === 'ai') {
+        return (
+          !opp.allIn &&
+          opp.chips > 0 &&
+          action.amount >= Math.min(state.config.minRaise, actor.chips) &&
+          action.amount <= actor.chips
+        );
+      }
       if (action.isHalfStack) {
         const halfAmt = getHalfStackRaiseAmount(state, actorId);
         return halfAmt > 0 && action.amount === halfAmt;
@@ -807,10 +824,16 @@ export function isActionLegal(state: GameState, action: GameAction): boolean {
     return false;
   }
 
-  if (action.type === 'fold' || action.type === 'call') return true;
+  if (action.type === 'fold') {
+    return !(actorId === 'human' && (state.sec04FoldCount ?? 0) >= 3);
+  }
+  if (action.type === 'call') return true;
   if (action.type === 'raise') {
     const paid = Math.min(diff, actor.chips);
     if (actor.chips - paid <= 0 || opp.allIn) return false;
+    if (state.sec04Berserk && actorId === 'ai') {
+      return action.amount >= Math.min(state.config.minRaise, actor.chips - paid) && action.amount <= actor.chips - paid;
+    }
     if (action.isHalfStack) {
       const halfAmt = getHalfStackRaiseAmount(state, actorId);
       return halfAmt > 0 && action.amount === halfAmt;
@@ -874,6 +897,42 @@ function resolveShowdown(state: GameState): GameState {
   }
   next.players.human.hiddenHackEscrow = 0;
   next.players.ai.hiddenHackEscrow = 0;
+
+  // SEC-04 P0-3 Climax: ECHO-0 sacrifices all permissions at showdown to shield 4/4 traps
+  // and overwrite player's 3 hand cards into Aces (paired with board A) for Four of a Kind!
+  if (next.sec04Berserk && !next.sec04OverrideTriggered) {
+    next.sec04OverrideTriggered = true;
+    next.sec04Escaped = true;
+    next.trappedBoardIndices = [];
+    next.confirmedTrapIndices = [];
+    const aceTargets: Array<{ suit: Suit; copy: 0 | 1 }> = [
+      { suit: 'B', copy: 0 },
+      { suit: 'P', copy: 0 },
+      { suit: 'B', copy: 1 },
+    ];
+    next.players.human.hand = next.players.human.hand.map((hc, idx) => {
+      const target = aceTargets[idx] ?? { suit: 'B' as Suit, copy: 0 as const };
+      const orig = hc.originalCard ?? { ...hc.card };
+      return {
+        ...hc,
+        originalCard: orig,
+        card: {
+          id: `14-${target.suit}-${target.copy}`,
+          rank: 14 as Rank,
+          suit: target.suit,
+          copy: target.copy,
+          isBlank: false,
+          isDoublePink: false,
+          isCounterTrap: false,
+        },
+        tamperedBy: Array.from(new Set([...(hc.tamperedBy ?? []), 'crown-ace' as HackSkillId])),
+      };
+    });
+    next.players.human.sealedSkills = Array.from(
+      new Set([...(next.players.human.sealedSkills ?? []), 'plus-one', 'minus-one', 'flip-suit', 'crown-ace'])
+    );
+  }
+
   // At Showdown (when not caught by Scan), any hacked card that entered the public board
   // takes real effect on the table for both hands.
   const boardCards = next.board.map((b) => b.card);

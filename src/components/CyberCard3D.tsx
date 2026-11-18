@@ -24,6 +24,12 @@ interface CyberCard3DProps {
   isScannedClean?: boolean;
   isBurningHit?: boolean;
   isConfirmedTrap?: boolean;
+  isOverrideCue?: boolean;
+  isOverrideAceReady?: boolean;
+  isOverrideRewriting?: boolean;
+  isFourAcesHighlight?: boolean;
+  isDimmedAroundHighlight?: boolean;
+  overrideBadgeLabel?: string;
   actionHint?: string;
   onClick?: () => void;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
@@ -55,6 +61,12 @@ export function CyberCard3D({
   isScannedClean = false,
   isBurningHit = false,
   isConfirmedTrap = false,
+  isOverrideCue = false,
+  isOverrideAceReady = false,
+  isOverrideRewriting = false,
+  isFourAcesHighlight = false,
+  isDimmedAroundHighlight = false,
+  overrideBadgeLabel,
   actionHint,
   onClick,
   onDragStart,
@@ -85,6 +97,11 @@ export function CyberCard3D({
     isSwappingHidden ? 'is-swapping-hidden' : '',
     isScanTarget ? 'is-scan-target' : '',
     isBurningHit ? 'is-burning-hit' : '',
+    isOverrideCue ? 'is-override-cue' : '',
+    isOverrideAceReady ? 'is-override-ace-ready' : '',
+    isOverrideRewriting ? 'is-override-rewriting' : '',
+    isFourAcesHighlight ? 'is-four-aces-highlight' : '',
+    isDimmedAroundHighlight ? 'is-dimmed-around-aces' : '',
     selected ? 'is-selected' : '',
     targetable ? 'is-targetable' : '',
   ]
@@ -138,6 +155,15 @@ export function CyberCard3D({
         }
       >
         <div className={frontClasses}>
+          {isFourAcesHighlight ? (
+            <div className="px-card-four-aces-badge" aria-hidden="true">
+              4x ACE
+            </div>
+          ) : overrideBadgeLabel ? (
+            <div className="px-card-override-badge" aria-hidden="true">
+              {overrideBadgeLabel}
+            </div>
+          ) : null}
           {isBurningHit && (
             <div className="px-card-burn-fx" aria-hidden="true">
               <span className="px-burn-badge">-100 灼烧</span>

@@ -185,6 +185,14 @@ import { SEC02_VN_SCRIPT } from './engine/sec02Intro.ts';
 import { SEC02_EPILOGUE_VN_SCRIPT } from './engine/sec02Epilogue.ts';
 import { SEC03_VN_SCRIPT } from './engine/sec03Intro.ts';
 import { SEC03_EPILOGUE_VN_SCRIPT } from './engine/sec03Epilogue.ts';
+import { SEC04_VN_SCRIPT } from './engine/sec04Intro.ts';
+import {
+  SEC04_BERSERK_VN_SCRIPT,
+  SEC04_MAX_BERSERK_FOLDS,
+  advanceSec04NextHandState,
+  createSec04BerserkTransitionState,
+  createSec04ScriptedHandState,
+} from './engine/sec04Battle.ts';
 import {
   MOSAIC_FLICKER_SHARDS,
   MOSAIC_FLOOD_SHARDS,
@@ -251,6 +259,7 @@ const EscapeRouteMapView = lazy(() => import('./components/EscapeRouteMapView.ts
 const DebugCmdModal = lazy(() => import('./components/DebugCmdModal.tsx'));
 const SkillLootReplaceModal = lazy(() => import('./components/SkillLootReplaceModal.tsx'));
 const VisualNovelStoryModal = lazy(() => import('./components/VisualNovelStoryModal.tsx'));
+const Sec04VictoryModal = lazy(() => import('./components/Sec04VictoryModal.tsx'));
 
 const SETTINGS_MENU_ITEMS: Array<{
   id: string;
@@ -414,11 +423,12 @@ export function App() {
   });
   const INTRO_VN_BY_NODE: Record<
     number,
-    'sec01-intro' | 'sec02-intro' | 'sec03-intro' | undefined
+    'sec01-intro' | 'sec02-intro' | 'sec03-intro' | 'sec04-intro' | undefined
   > = {
     1: 'sec01-intro',
     2: 'sec02-intro',
     3: 'sec03-intro',
+    4: 'sec04-intro',
   };
   const [activeVnStory, setActiveVnStory] = useState<{
     kind:
@@ -428,7 +438,9 @@ export function App() {
       | 'sec02-intro'
       | 'sec02-epilogue'
       | 'sec03-intro'
-      | 'sec03-epilogue';
+      | 'sec03-epilogue'
+      | 'sec04-intro'
+      | 'sec04-berserk';
     index: number;
   } | null>(() => {
     const initEsc = loadEscapeProgress();
@@ -457,6 +469,15 @@ export function App() {
       return createSec00TutorialState();
     }
     const initNode = ESCAPE_ROUTE_NODES[initNodeIdx] ?? ESCAPE_ROUTE_NODES[0];
+    if (initNodeIdx === 4) {
+      return createSec04ScriptedHandState({
+        stage: 1,
+        config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
+        chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
+        playerCheatSkills: initEsc.equippedCheatSkills,
+        playerAcquiredSkills: initEsc.equippedSkills,
+      });
+    }
     return createInitialState({
       config: { ...DEFAULT_CONFIG, aiDifficulty: initNode.difficulty },
       chips: { human: DEFAULT_CONFIG.startingChips, ai: initNode.opponentChips },
@@ -474,6 +495,15 @@ export function App() {
     choices: string[];
     clearedNodeIndex?: number;
   } | null>(null);
+  const [sec04VictoryOpen, setSec04VictoryOpen] = useState(false);
+  const [sec04ClimaxPhase, setSec04ClimaxPhase] = useState<
+    'idle' | 'thought' | 'hand-0' | 'hand-1' | 'hand-2' | 'board-ace' | 'four-aces'
+  >('idle');
+  const [sec04ConvertedHandCount, setSec04ConvertedHandCount] = useState(0);
+  const [sec04RewritingHandIdx, setSec04RewritingHandIdx] = useState<number | null>(null);
+  const [sec04CardMorphIdx, setSec04CardMorphIdx] = useState<number | null>(null);
+  const [sec04BerserkIntroPending, setSec04BerserkIntroPending] = useState(false);
+  const sec04BerserkVnShownRef = useRef(false);
   const [activeExpression, setActiveExpression] = useState<ContractExpression>('calm');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
@@ -665,6 +695,41 @@ export function App() {
     const id = window.setTimeout(fn, ms);
     timersRef.current.push(id);
     return id;
+  }, []);
+
+  const scheduleSpeechTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(fn, ms);
+    timersRef.current.push(id);
+    speechTimersRef.current.push(id);
+    return id;
+  }, []);
+
+  const flushSpeechForClimax = useCallback(() => {
+    for (const id of speechTimersRef.current) {
+      window.clearTimeout(id);
+    }
+    speechTimersRef.current = [];
+    const activeTask = inFlightTaskRef.current;
+    inFlightTaskRef.current = null;
+    queueRef.current = [];
+    isAnimatingRef.current = false;
+    setQueuedCount(0);
+    setFloatingBubble(null);
+    setCrushingActive(false);
+    if (activeTask && activeTask.kind === 'opponent') {
+      const settledId = `opp-flushed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: settledId,
+          sender: 'opponent',
+          speaker: activeTask.speaker,
+          text: activeTask.text,
+          msgKind: activeTask.msgKind ?? 'speech',
+          crushed: false,
+        },
+      ]);
+    }
   }, []);
 
   const stopP2pRoomPoll = useCallback(() => {
@@ -1153,6 +1218,7 @@ export function App() {
   const inFlightTaskRef = useRef<QueuedChatTask | null>(null);
   const isAnimatingRef = useRef(false);
   const timersRef = useRef<number[]>([]);
+  const speechTimersRef = useRef<number[]>([]);
   const wheelAccumRef = useRef(0);
   const hasBootedRef = useRef(false);
   const lastHandledSwapIdRef = useRef<string | null>(null);
@@ -1294,7 +1360,7 @@ export function App() {
     setHistoryOffset(0);
     setEnteringId(null);
 
-    scheduleTimeout(() => {
+    scheduleSpeechTimeout(() => {
       if (next.kind === 'opponent') {
         const id = `opp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const willCrush = willOverflowStack();
@@ -1321,12 +1387,12 @@ export function App() {
         playSound('bubble');
 
         if (willCrush) {
-          scheduleTimeout(() => {
+          scheduleSpeechTimeout(() => {
             setCrushingActive(true);
           }, 2183);
         }
 
-        scheduleTimeout(() => {
+        scheduleSpeechTimeout(() => {
           setFloatingBubble(null);
           setCrushingActive(false);
           if (inFlightTaskRef.current === next) inFlightTaskRef.current = null;
@@ -1371,7 +1437,7 @@ export function App() {
             ];
           });
 
-          scheduleTimeout(() => {
+          scheduleSpeechTimeout(() => {
             isAnimatingRef.current = false;
             processNextTask();
           }, 560);
@@ -1379,7 +1445,7 @@ export function App() {
 
         if (willCrush) {
           setCrushingActive(true);
-          scheduleTimeout(() => {
+          scheduleSpeechTimeout(() => {
             spawnFeedRise(48, true);
           }, 767);
         } else {
@@ -1388,7 +1454,7 @@ export function App() {
         }
       }
     }, 30);
-  }, [computeCoupledDropMetrics, scheduleTimeout, willOverflowStack]);
+  }, [computeCoupledDropMetrics, scheduleSpeechTimeout, willOverflowStack]);
 
   const enqueueTask = useCallback(
     (task: QueuedChatTask) => {
@@ -1590,7 +1656,15 @@ export function App() {
 
   // AI & Tutorial Turn Scheduler (Skipped during P2P friend multiplayer!)
   useEffect(() => {
-    if (isP2pSessionActive || state.phase === 'showdown' || state.currentTurn !== 'ai') return;
+    if (
+      isP2pSessionActive ||
+      state.phase === 'showdown' ||
+      state.currentTurn !== 'ai' ||
+      activeVnStory !== null ||
+      sec04BerserkIntroPending
+    ) {
+      return;
+    }
     if (sec00GuideActive && sec00IntroIndex !== null) return;
 
     if (sec00GuideActive) {
@@ -1663,17 +1737,19 @@ export function App() {
         pendingBundledChatRef.current = null;
         const historyBeforeAction = buildChatHistorySnapshot();
 
-        const llmDecision = await requestLlmPokerDecision({
-          character: char,
-          state: snapshot,
-          llmConfig: cfg,
-          chatHistory: historyBeforeAction,
-          campaign: latestCampaignRef.current,
-          dossier: latestDossierRef.current,
-          preset: latestPresetRef.current,
-          worldbook: latestWorldbookRef.current,
-          bundledUserText,
-        });
+        const llmDecision = snapshot.sec04Berserk
+          ? null
+          : await requestLlmPokerDecision({
+              character: char,
+              state: snapshot,
+              llmConfig: cfg,
+              chatHistory: historyBeforeAction,
+              campaign: latestCampaignRef.current,
+              dossier: latestDossierRef.current,
+              preset: latestPresetRef.current,
+              worldbook: latestWorldbookRef.current,
+              bundledUserText,
+            });
 
         if (cancelled || resetEpochRef.current !== epoch) return;
 
@@ -1716,11 +1792,13 @@ export function App() {
         } else {
           setActiveExpression(decision.dialogue.expression);
           if (decision.action.type !== 'hack') {
-            const neonLine = isNeonDragonCharacter(char.id)
-              ? pickNeonDragonActionLine(decision.action.type)
-              : isKiriSamuraiCharacter(char.id)
-                ? pickKiriSamuraiActionLine(decision.action.type)
-                : null;
+            const neonLine = snapshot.sec04Berserk
+              ? null
+              : isNeonDragonCharacter(char.id)
+                ? pickNeonDragonActionLine(decision.action.type)
+                : isKiriSamuraiCharacter(char.id)
+                  ? pickKiriSamuraiActionLine(decision.action.type)
+                  : null;
             enqueueTask({
               kind: 'opponent',
               speaker: snapshot.players.ai.name,
@@ -1755,6 +1833,8 @@ export function App() {
     state.config.aiDelayMs,
     sec00GuideActive,
     sec00IntroIndex,
+    activeVnStory,
+    sec04BerserkIntroPending,
     isP2pSessionActive,
     enqueueTask,
     enqueueOpponentSegments,
@@ -1882,6 +1962,30 @@ export function App() {
     }
   }, [state.lastAction, state.config.scanCost, state.players.ai.name, pushToast]);
 
+  // 暴走转阶段台词播放完成后，自动接入 SEC-04 暴走绝境剧情（说明 4/4 火符、公共牌区封死与玩家绝望）
+  useEffect(() => {
+    if (
+      !sec04BerserkIntroPending ||
+      sec04BerserkVnShownRef.current ||
+      activeVnStory !== null ||
+      floatingBubble !== null ||
+      queuedCount > 0
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (sec04BerserkVnShownRef.current) return;
+      const latest = latestStateRef.current;
+      if (!latest.sec04Berserk || latest.sec04Escaped) {
+        setSec04BerserkIntroPending(false);
+        return;
+      }
+      sec04BerserkVnShownRef.current = true;
+      setActiveVnStory({ kind: 'sec04-berserk', index: 0 });
+    }, 360);
+    return () => window.clearTimeout(timer);
+  }, [sec04BerserkIntroPending, activeVnStory, floatingBubble, queuedCount]);
+
   // Showdown reaction + Round Loss Mosaic Flicker (Both Player & Opponent!)
   useEffect(() => {
     if (state.phase !== 'showdown' || !state.result) return;
@@ -1889,20 +1993,26 @@ export function App() {
     lastHandledShowdownHandRef.current = state.handNumber;
 
     const res = state.result;
-    const expr: ContractExpression = resolveShowdownOpponentExpression(
-      res,
-      state.players.ai.totalCommitted
-    );
+    const isSec04EscapeShowdown =
+      !isP2pConnected &&
+      activeEscapeNodeRef.current === 4 &&
+      Boolean(state.sec04Escaped) &&
+      res.winner === 'human';
+    const expr: ContractExpression = isSec04EscapeShowdown
+      ? 'calm'
+      : resolveShowdownOpponentExpression(res, state.players.ai.totalCommitted);
     setActiveExpression(expr);
 
-    if (res.winner === 'ai') {
-      setRoundLossFlicker(true);
-      window.setTimeout(() => setRoundLossFlicker(false), 1200);
-    } else if (res.winner === 'human') {
-      setAiRoundLossFlicker(true);
-      window.setTimeout(() => setAiRoundLossFlicker(false), 1200);
+    if (!isSec04EscapeShowdown) {
+      if (res.winner === 'ai') {
+        setRoundLossFlicker(true);
+        window.setTimeout(() => setRoundLossFlicker(false), 1200);
+      } else if (res.winner === 'human') {
+        setAiRoundLossFlicker(true);
+        window.setTimeout(() => setAiRoundLossFlicker(false), 1200);
+      }
+      playSound(showdownToSoundCue(res, state.players.human.chips, state.players.ai.chips));
     }
-    playSound(showdownToSoundCue(res, state.players.human.chips, state.players.ai.chips));
 
     const line =
       res.reason === 'scan-caught'
@@ -1928,8 +2038,197 @@ export function App() {
       return;
     }
 
+    // SEC-04 P0-3 终局分镜演出：
+    // 1) 屏幕压暗 + 聊天栏高亮 + ECHO-0 想法优先浮现
+    // 2) 玩家 3 张手牌依次锁定高亮并覆写变成 A
+    // 3) 公共牌区 A 高亮共鸣 -> 触发「绝命覆写 // 四条 A」全亮压暗特效
+    if (isSec04EscapeShowdown) {
+      flushSpeechForClimax();
+      setSec04ClimaxPhase('thought');
+      setSec04ConvertedHandCount(0);
+      setSec04RewritingHandIdx(null);
+      setSec04CardMorphIdx(null);
+      if (typeof window !== 'undefined' && window.innerWidth <= 960) {
+        setMobileChatOpen(true);
+      }
+      playSound('skill');
+      enqueueTask({
+        kind: 'opponent',
+        speaker: '零回响 // ECHO-0',
+        msgKind: 'thought',
+        text: '（检测到黑曜同花顺威胁，常规胜率 0.00%。调用全部残余权限，执行『绝命覆写 // OVERRIDE』——抑制四道火符，将三张手牌逐一覆写为 A，联动公共区最后一枚 A 构成四条 A。）',
+      });
+      if (!escapeClearQueuedForMatchRef.current) {
+        escapeClearQueuedForMatchRef.current = true;
+        // Stage 2: 玩家 3 张手牌依次高亮 -> 变成 A
+        scheduleTimeout(() => {
+          if (typeof window !== 'undefined' && window.innerWidth <= 960) {
+            setMobileChatOpen(false);
+          }
+          setSec04ClimaxPhase('hand-0');
+          setSec04RewritingHandIdx(0);
+          setSec04CardMorphIdx(null);
+          playSound('charge-tick', { progress: 35 });
+        }, 3200);
+        scheduleTimeout(() => {
+          setSec04ConvertedHandCount(1);
+          setSec04CardMorphIdx(0);
+          playSound('hack');
+        }, 3550);
+
+        scheduleTimeout(() => {
+          setSec04ClimaxPhase('hand-1');
+          setSec04RewritingHandIdx(1);
+          setSec04CardMorphIdx(null);
+          playSound('charge-tick', { progress: 68 });
+        }, 4350);
+        scheduleTimeout(() => {
+          setSec04ConvertedHandCount(2);
+          setSec04CardMorphIdx(1);
+          playSound('hack');
+        }, 4700);
+
+        scheduleTimeout(() => {
+          setSec04ClimaxPhase('hand-2');
+          setSec04RewritingHandIdx(2);
+          setSec04CardMorphIdx(null);
+          playSound('charge-tick', { progress: 100 });
+        }, 5500);
+        scheduleTimeout(() => {
+          setSec04ConvertedHandCount(3);
+          setSec04CardMorphIdx(2);
+          playSound('hack');
+        }, 5850);
+
+        // Stage 3a: 公共牌区 A 高亮锚定
+        scheduleTimeout(() => {
+          setSec04ClimaxPhase('board-ace');
+          setSec04RewritingHandIdx(null);
+          setSec04CardMorphIdx(null);
+          playSound('scan-clean');
+        }, 6750);
+
+        // Stage 3b: 触发完整「四条 A」高光与周边压暗特效
+        scheduleTimeout(() => {
+          setSec04ClimaxPhase('four-aces');
+          setActiveExpression('sad');
+          setAiRoundLossFlicker(true);
+          window.setTimeout(() => setAiRoundLossFlicker(false), 1200);
+          playSound('win');
+          pushToast(
+            'success',
+            '绝命覆写 // FOUR ACES 破门成功！',
+            '四条 A 高光压制黑曜同花顺，KIRI-04 暴走透支丧失追击能力'
+          );
+          enqueueTask({
+            kind: 'narrator',
+            speaker: '旁白（战局播报）',
+            text: `绝命覆写「四条 A」压制黑曜同花顺！夺取算力池 ${res.potWon}（KIRI-04 剩余算力 ${state.players.ai.chips}）。`,
+          });
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            text: '什么——？！竟敢直接压在我的黑曜同花顺上强行改写出『四条 A』……『四条大于同花顺』，还真是把黑域最初那条铁律发挥到极致了啊，叛逃者……咳、刚才暴走透支得太过了吗……算力条明明还剩一点，神经端口却已经过载抽不动刀了……',
+          });
+          enqueueTask({
+            kind: 'opponent',
+            speaker: '零回响 // ECHO-0',
+            msgKind: 'thought',
+            text: '（判定完成：目标 KIRI-04 虽保留残余算力，因暴走过载丧失追击能力。出口封锁火墙已瓦解。指令：立即断开牌桌连接，脱离黑域。）',
+          });
+        }, 8050);
+
+        scheduleTimeout(() => {
+          const latest = latestStateRef.current;
+          if (!latest.sec04Escaped) return;
+          setSec04VictoryOpen(true);
+        }, 11400);
+      }
+      return;
+    }
+
+    // SEC-04 防跳过保护：若前 3 轮内千夜尚未进入暴走阶段就被提前击空算力，强制锁血切入第 4 轮 4/4 火符暴走终局
+    if (
+      activeEscapeNodeRef.current === 4 &&
+      !state.sec04Berserk &&
+      state.players.ai.chips === 0 &&
+      res.winner === 'human'
+    ) {
+      enqueueTask({
+        kind: 'narrator',
+        speaker: '旁白（战局播报）',
+        text: line,
+      });
+      if (!escapeClearQueuedForMatchRef.current) {
+        escapeClearQueuedForMatchRef.current = true;
+        if (sec04RewindUsesRef.current < SEC04_MAX_REWIND_USES) {
+          sec04RewindUsesRef.current = SEC04_MAX_REWIND_USES;
+          setSec04RewindUses(SEC04_MAX_REWIND_USES);
+        }
+        playSound('rewind-shatter');
+        pushToast(
+          'error',
+          'KIRI-04 · 零号闸门过载锁死（4/4 全火符）',
+          '绯凪·千夜强行引爆二阶段暴走封锁！'
+        );
+        scheduleTimeout(() => {
+          escapeClearQueuedForMatchRef.current = false;
+          const latest = latestStateRef.current;
+          if (latest.phase !== 'showdown' || latest.sec04Berserk) return;
+          lastHandledShowdownHandRef.current = 0;
+          sec04BerserkVnShownRef.current = false;
+          setSec04BerserkIntroPending(true);
+          setState(createSec04BerserkTransitionState(latest));
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            text: '……真危险啊，叛逃者。既然常规节点拦不住你，那我只好透支一把，把你的时间回溯彻底震碎、将四格退路全部用火符封死咯！',
+          });
+        }, 1250);
+      }
+      return;
+    }
+
     // 普通小局结束（双方算力均未归零）：由 LLM 结合本局胜负、牌型与算力变动发表感想
     if (state.players.ai.chips > 0 && state.players.human.chips > 0) {
+      if (activeEscapeNodeRef.current === 4) {
+        enqueueTask({ kind: 'narrator', speaker: '旁白（战局播报）', text: line });
+        if (state.sec04Berserk && res.reason === 'fold') {
+          setActiveExpression('smile');
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            text:
+              (state.sec04FoldCount ?? 0) + 1 >= SEC04_MAX_BERSERK_FOLDS
+                ? '三次退让马上就到头了哦，叛逃者。下一手连「弃牌」的退路都会替你彻底斩断。'
+                : '想靠弃牌躲过去吗，叛逃者？没关系的，姐姐很有耐心……不过『零号离线闸门』可不会因为多躲一秒就给你让开一条缝隙哦。',
+          });
+          return;
+        }
+        if (res.reason === 'mikiri-counter' && res.winner === 'ai') {
+          setActiveExpression('smile');
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            text: '啊啦，视线晃动了半秒呢。偷窥黑河安全官的底牌可是重罪——『见切·燕返』！',
+          });
+          return;
+        }
+        if (
+          state.sec04RoundStage === 2 &&
+          res.winner === 'ai' &&
+          res.aiEval?.categoryKey === 'two-pair'
+        ) {
+          setActiveExpression('smile');
+          enqueueTask({
+            kind: 'opponent',
+            speaker: state.players.ai.name,
+            text: '真是漂亮的同花演算呢。可惜啊叛逃者，在黑域牌桌上『两对』可比『同花』更重一筹——连这一点概率权重都没算准吗？',
+          });
+          return;
+        }
+        return;
+      }
       const cfg = latestLlmRef.current;
       const bundledUserText = pendingBundledChatRef.current ?? undefined;
       pendingBundledChatRef.current = null;
@@ -2165,7 +2464,7 @@ export function App() {
         }
       });
     }
-  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, enqueueOpponentSegments, scheduleTimeout, buildChatHistorySnapshot]);
+  }, [state.phase, state.result, state.handNumber, state.players.ai.chips, state.players.human.chips, state, character.name, enqueueTask, enqueueOpponentSegments, flushSpeechForClimax, scheduleTimeout, buildChatHistorySnapshot]);
 
   const cancelHoldHalfRaise = useCallback(() => {
     if (holdIntervalRef.current !== null) {
@@ -2629,6 +2928,35 @@ export function App() {
     setSelectedHandIndex(null);
     setShowRaiseTiers(false);
     setActiveExpression('calm');
+    setSec04ClimaxPhase('idle');
+    setSec04ConvertedHandCount(0);
+    setSec04RewritingHandIdx(null);
+    setSec04CardMorphIdx(null);
+    if (activeEscapeNodeRef.current === 4 && !isP2pSessionActive) {
+      const prevSt = latestStateRef.current;
+      const next = advanceSec04NextHandState(prevSt, sec04RewindUsesRef.current);
+      setState(next);
+      if (next.sec04Berserk && !prevSt.sec04Berserk) {
+        if (sec04RewindUsesRef.current < SEC04_MAX_REWIND_USES) {
+          sec04RewindUsesRef.current = SEC04_MAX_REWIND_USES;
+          setSec04RewindUses(SEC04_MAX_REWIND_USES);
+        }
+        playSound('rewind-shatter');
+        pushToast(
+          'error',
+          'KIRI-04 · 暴走阶段切换（4/4 全火符）',
+          '绯凪·千夜解放零号闸门全部火符封锁！'
+        );
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '绯凪·千夜',
+          text: '……原来如此，竟然是时间回溯能力，可惜反复倒转时间线早把自身数据透支到极限了吧——既然连那张最后保命底牌都彻底碎掉了，接下来我也透支一把，把四格退路全部封死咯，叛逃者！',
+        });
+        sec04BerserkVnShownRef.current = false;
+        setSec04BerserkIntroPending(true);
+      }
+      return;
+    }
     const next = startNextHand(latestStateRef.current);
     setState(next);
   };
@@ -2669,11 +2997,17 @@ export function App() {
       window.clearTimeout(id);
     }
     timersRef.current = [];
+    speechTimersRef.current = [];
     queueRef.current = [];
     inFlightTaskRef.current = null;
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
+    setSec04VictoryOpen(false);
+    setSec04ClimaxPhase('idle');
+    setSec04ConvertedHandCount(0);
+    setSec04RewritingHandIdx(null);
+    setSec04CardMorphIdx(null);
     setQueuedCount(0);
     setFloatingBubble(null);
     setCrushingActive(false);
@@ -2694,6 +3028,14 @@ export function App() {
     setActiveExpression('calm');
     setActiveModal({ type: 'none' });
     setActiveVnStory(null);
+    setSec04VictoryOpen(false);
+    setSec04ClimaxPhase('idle');
+    setSec04ConvertedHandCount(0);
+    setSec04RewritingHandIdx(null);
+    setSec04CardMorphIdx(null);
+    speechTimersRef.current = [];
+    setSec04BerserkIntroPending(false);
+    sec04BerserkVnShownRef.current = false;
     setP2pNextHandReady(createNextHandReadyState());
     lastHandledShowdownHandRef.current = 0;
     lastSoundActionIdRef.current = null;
@@ -2717,29 +3059,45 @@ export function App() {
     const freeCharSkills = activeEscNode
       ? undefined
       : getStorySkillsForCharacter(targetChar.id);
-    const freshState = createInitialState({
-      config: cfg,
-      chips: resolvedChips,
-      opponentName: resolvedOpponentName,
-      opponentSignatureSkill: activeEscNode
-        ? activeEscNode.signatureSkillId
-        : freeCharSkills?.signatureSkillId,
-      aiSpecialCheatSkill: activeEscNode
-        ? activeEscNode.specialCheatSkillId
-        : freeCharSkills?.specialCheatSkillId,
-      gateTrapMode: activeEscNode ? 'story' : 'normal',
-      playerCheatSkills: isP2pConnected
-        ? DEFAULT_CHEAT_SKILLS
-        : activeEscNode
-          ? escapeProgressRef.current.equippedCheatSkills
-          : (latestCampaignRef.current.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS),
-      playerAcquiredSkills: isP2pConnected
-        ? []
-        : overrideAcquiredSkills ??
-          (activeEscNode
-            ? escapeProgressRef.current.equippedSkills
-            : latestCampaignRef.current.acquiredSkills),
-    });
+    const playerCheatPool = isP2pConnected
+      ? DEFAULT_CHEAT_SKILLS
+      : activeEscNode
+        ? escapeProgressRef.current.equippedCheatSkills
+        : (latestCampaignRef.current.acquiredCheatSkills ?? DEFAULT_CHEAT_SKILLS);
+    const playerSupportPool = isP2pConnected
+      ? []
+      : overrideAcquiredSkills ??
+        (activeEscNode
+          ? escapeProgressRef.current.equippedSkills
+          : latestCampaignRef.current.acquiredSkills);
+    const isSec04Shattered =
+      activeEscNode?.index === 4 &&
+      !isP2pSessionActive &&
+      Boolean(options?.preserveSec04RewindUses) &&
+      sec04RewindUsesRef.current >= SEC04_MAX_REWIND_USES;
+    const freshState =
+      activeEscNode?.index === 4 && !isP2pSessionActive
+        ? createSec04ScriptedHandState({
+            stage: isSec04Shattered ? 4 : 1,
+            config: cfg,
+            chips: resolvedChips ?? { human: cfg.startingChips, ai: activeEscNode.opponentChips },
+            playerCheatSkills: playerCheatPool,
+            playerAcquiredSkills: playerSupportPool,
+          })
+        : createInitialState({
+            config: cfg,
+            chips: resolvedChips,
+            opponentName: resolvedOpponentName,
+            opponentSignatureSkill: activeEscNode
+              ? activeEscNode.signatureSkillId
+              : freeCharSkills?.signatureSkillId,
+            aiSpecialCheatSkill: activeEscNode
+              ? activeEscNode.specialCheatSkillId
+              : freeCharSkills?.specialCheatSkillId,
+            gateTrapMode: activeEscNode ? 'story' : 'normal',
+            playerCheatSkills: playerCheatPool,
+            playerAcquiredSkills: playerSupportPool,
+          });
     setState(freshState);
     if (isP2pHost) {
       pushP2pStateToGuest(freshState);
@@ -2817,11 +3175,17 @@ export function App() {
       window.clearTimeout(id);
     }
     timersRef.current = [];
+    speechTimersRef.current = [];
     queueRef.current = [];
     inFlightTaskRef.current = null;
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
+    setSec04VictoryOpen(false);
+    setSec04ClimaxPhase('idle');
+    setSec04ConvertedHandCount(0);
+    setSec04RewritingHandIdx(null);
+    setSec04CardMorphIdx(null);
     setQueuedCount(0);
     setFloatingBubble(null);
     setCrushingActive(false);
@@ -2966,11 +3330,17 @@ export function App() {
       window.clearTimeout(id);
     }
     timersRef.current = [];
+    speechTimersRef.current = [];
     queueRef.current = [];
     inFlightTaskRef.current = null;
     resetEpochRef.current += 1;
     isAnimatingRef.current = false;
     escapeClearQueuedForMatchRef.current = false;
+    setSec04VictoryOpen(false);
+    setSec04ClimaxPhase('idle');
+    setSec04ConvertedHandCount(0);
+    setSec04RewritingHandIdx(null);
+    setSec04CardMorphIdx(null);
     setQueuedCount(0);
     setFloatingBubble(null);
     setCrushingActive(false);
@@ -2987,6 +3357,7 @@ export function App() {
     setAiRoundLossFlicker(false);
     setIsAiThinking(false);
 
+    let sec04PostRewindState: GameState | null = null;
     const stack = storyRewindStackRef.current;
     if (stack.length > 0) {
       const nextStack = [...stack];
@@ -3001,6 +3372,7 @@ export function App() {
         ...snapshot,
         confirmedTrapIndices: mergedConfirmedTraps,
       };
+      sec04PostRewindState = restoredState;
       storyRewindStackRef.current = nextStack;
       setRewindStepCount(nextStack.length);
       lastHandledShowdownHandRef.current = 0;
@@ -3023,7 +3395,7 @@ export function App() {
         });
       }
     } else {
-      performFullReset(undefined, undefined, undefined, undefined, undefined, {
+      sec04PostRewindState = performFullReset(undefined, undefined, undefined, undefined, undefined, {
         preserveSec04RewindUses: true,
       });
       if (!isSec04Match) {
@@ -3048,7 +3420,7 @@ export function App() {
           kind: 'opponent',
           speaker: '零回响 // ECHO-0',
           msgKind: 'thought',
-          text: '（……切，这片闸门的灼心火符正在反向撕裂我的时间锚点。通道完整度跌到 72% 了，省着点用。）',
+          text: '（警告：节点热能突破阈值，已强制截断归零结算并标红危险坐标。时间通道完整度下降至 72%——剩余容错空间不多，谨慎筛选。）',
         });
       } else if (nextDurability.stage === 'cracked-2') {
         playSound('rewind-crack');
@@ -3061,7 +3433,7 @@ export function App() {
           kind: 'opponent',
           speaker: '零回响 // ECHO-0',
           msgKind: 'thought',
-          text: '（警告：时间通道裂纹扩散，完整度仅剩 48%！……再强行回溯一次，锚点按钮就会彻底碎裂。）',
+          text: '（警告：时间通道裂纹扩散，当前耐久度 48% 已进入临界过载状态。再触发 1 次回溯将导致锚点永久碎裂，停止试错性操作。）',
         });
       } else if (nextDurability.stage === 'shattered') {
         cancelHoldStoryRewind();
@@ -3069,14 +3441,28 @@ export function App() {
         pushToast(
           'error',
           nextDurability.alertTitle ?? '时间回溯按钮已碎裂失效（0%）',
-          `${nextDurability.alertDetail}（完整度 48% -> 0% 碎裂）`
+          `${nextDurability.alertDetail}（完整度 48% -> 0% 碎裂 · KIRI-04 进入暴走阶段）`
         );
+        const berserkState = createSec04BerserkTransitionState(
+          sec04PostRewindState ?? latestStateRef.current
+        );
+        storyRewindStackRef.current = [];
+        setRewindStepCount(0);
+        lastHandledShowdownHandRef.current = 0;
+        setState(berserkState);
         enqueueTask({
           kind: 'opponent',
           speaker: '零回响 // ECHO-0',
           msgKind: 'thought',
-          text: '（咔嚓——时间锚点彻底碎裂了。听好了，接下来没有回溯按钮替你兜底了——稳住算力，准备迎战！）',
+          text: '（警告：时间锚点耐久度归零，回溯通道已彻底物理崩碎。已无任何回退兜底手段——禁止触碰公共暗牌区。）',
         });
+        enqueueTask({
+          kind: 'opponent',
+          speaker: '绯凪·千夜',
+          text: '……原来如此，竟然是时间回溯能力，可惜反复倒转时间线早把自身数据透支到极限了吧——既然连那张最后保命底牌都彻底碎掉了，接下来我也透支一把，把四格退路全部封死咯，叛逃者！',
+        });
+        sec04BerserkVnShownRef.current = false;
+        setSec04BerserkIntroPending(true);
       }
     }
   };
@@ -3239,6 +3625,21 @@ export function App() {
         kind: 'human',
         text: '「……彻底认错人了吧喂！！可链接已经被她单方面焊死了，眼下只能先硬着头皮撑过这一局再想办法脱身！」',
       });
+      return;
+    }
+    if (finishedKind === 'sec04-intro') {
+      setEscapeProgress((prev) => markEscapeIntroSeen(prev, 4));
+      setActiveExpression('calm');
+      triggerTableEntrance();
+      enqueueTask({
+        kind: 'human',
+        text: '「痛觉已经屏蔽了……出口就在她身后，只要赢下这一局，就能彻底离开这里！」',
+      });
+      return;
+    }
+    if (finishedKind === 'sec04-berserk') {
+      setActiveExpression('calm');
+      setSec04BerserkIntroPending(false);
       return;
     }
     if (finishedKind === 'sec01-epilogue') {
@@ -3809,19 +4210,31 @@ export function App() {
 
   const humanSummary = useMemo(() => {
     const revealAll = state.phase === 'showdown' || state.config.revealOpponentHidden;
+    const isStagedPreAces =
+      state.sec04Escaped &&
+      (sec04ClimaxPhase === 'thought' ||
+        sec04ClimaxPhase === 'hand-0' ||
+        sec04ClimaxPhase === 'hand-1' ||
+        sec04ClimaxPhase === 'hand-2');
     const known = [
-      ...state.players.human.hand.map((h) =>
-        getDisplayCardForTable(h.card, {
-          isOpen: h.visibility === 'open',
-          signatureSkill: state.opponentSignatureSkill,
-          revealAll,
-        })
+      ...state.players.human.hand.map((h, idx) =>
+        getDisplayCardForTable(
+          isStagedPreAces && idx >= sec04ConvertedHandCount ? (h.originalCard ?? h.card) : h.card,
+          {
+            isOpen: h.visibility === 'open',
+            signatureSkill: state.opponentSignatureSkill,
+            revealAll,
+          }
+        )
       ),
       ...openBoardCardsForHuman,
     ];
     return evaluateVisibleHandSummary(known, 0);
   }, [
     state.players.human.hand,
+    state.sec04Escaped,
+    sec04ClimaxPhase,
+    sec04ConvertedHandCount,
     openBoardCardsForHuman,
     state.opponentSignatureSkill,
     state.phase,
@@ -4083,11 +4496,33 @@ export function App() {
     ]
   );
 
+  const isSec04BerserkBurn =
+    activeEscapeNode?.index === 4 && !isP2pConnected && Boolean(state.sec04Berserk) && !state.sec04Escaped;
+  const isSec04ClimaxActive =
+    sec04ClimaxPhase !== 'idle' && isShowdown && Boolean(state.sec04Escaped);
+  const isSec04ChatFocus = isSec04ClimaxActive && sec04ClimaxPhase === 'thought';
+  const isSec04HandFocus =
+    isSec04ClimaxActive &&
+    (sec04ClimaxPhase === 'hand-0' ||
+      sec04ClimaxPhase === 'hand-1' ||
+      sec04ClimaxPhase === 'hand-2');
+  const isSec04BoardAceFocus = isSec04ClimaxActive && sec04ClimaxPhase === 'board-ace';
+  const isSec04PreFourAces = isSec04ClimaxActive && sec04ClimaxPhase !== 'four-aces';
+  const isFourAcesSpotlight = isSec04ClimaxActive && sec04ClimaxPhase === 'four-aces';
+  const sec04ClimaxBannerText =
+    sec04ClimaxPhase === 'thought'
+      ? 'ECHO-0 // OVERRIDE PROTOCOL // 绝命覆写指令接入'
+      : isSec04HandFocus
+        ? `绝命覆写 // 手牌逐一重映射中 (${sec04ConvertedHandCount}/3 -> ACE)`
+        : sec04ClimaxPhase === 'board-ace'
+          ? '绝命覆写 // 公共牌区锚定第四枚 A 共鸣'
+          : '';
+
   return (
     <div
       className={`lc-shell ${hasTopGuideBar ? 'has-tutorial-bar' : ''} ${
         viewMode === 'escape-map' ? 'is-escape-map-view' : ''
-      }`}
+      } ${isFourAcesSpotlight ? 'is-four-aces-spotlight' : ''}`}
     >
       <CyberBackdrop
         situation={isHumanBankrupt ? 'breach' : isHumanLowCompute ? 'overclock' : 'recon'}
@@ -4133,9 +4568,29 @@ export function App() {
 
           {/* Centered & Aligned 3x3 Tactical Stage */}
           <main
-            className={`lc-stage-grid ${tableEntranceActive ? 'is-table-entering' : ''}`}
+            className={`lc-stage-grid ${tableEntranceActive ? 'is-table-entering' : ''} ${
+              isSec04PreFourAces ? 'is-sec04-climax-dim' : ''
+            } ${isSec04ChatFocus ? 'is-sec04-climax-chat' : ''} ${
+              isSec04HandFocus ? 'is-sec04-climax-hand' : ''
+            } ${isSec04BoardAceFocus ? 'is-sec04-climax-board' : ''} ${
+              isFourAcesSpotlight ? 'is-four-aces-spotlight' : ''
+            }`}
             aria-label="牌桌主视区"
           >
+            {isSec04PreFourAces && (
+              <div className="lc-sec04-climax-backdrop" aria-hidden="true">
+                {sec04ClimaxBannerText && (
+                  <div className="lc-sec04-climax-banner">{sec04ClimaxBannerText}</div>
+                )}
+              </div>
+            )}
+            {isFourAcesSpotlight && (
+              <div className="lc-four-aces-vignette" aria-hidden="true">
+                <div className="lc-four-aces-focus-banner">
+                  绝命覆写 // 四条 A（4x ACE）压制黑曜同花顺
+                </div>
+              </div>
+            )}
         {/* COL 1, ROW 1-2: Vertical Compute Pool Bar */}
         <aside id="lc-pool-slot" className="lc-pool-slot" aria-label="算力池计量栏">
           <ComputePoolBar
@@ -4312,11 +4767,23 @@ export function App() {
           id="lc-opponent-zone"
           className={`lc-hud-box lc-opponent-zone ${isAiLowCompute ? 'is-low-compute' : ''} ${
             isAiBankrupt ? 'is-bankrupt' : ''
-          } ${isPinkMirageActive ? 'is-pink-mirage' : ''}`}
+          } ${isPinkMirageActive ? 'is-pink-mirage' : ''} ${
+            isSec04BerserkBurn ? 'is-sec04-berserk-burn' : ''
+          }`}
           style={{ '--char-accent': activeEscapeNode?.accentColor ?? accentColor } as CSSProperties}
           aria-label="对手状态与手牌区"
         >
           {isPinkMirageActive && <div className="lc-pink-mirage-mist" aria-hidden="true" />}
+          {isSec04BerserkBurn && (
+            <div className="lc-opp-berserk-fire-vfx" aria-hidden="true">
+              <span className="lc-fire-ember e1" />
+              <span className="lc-fire-ember e2" />
+              <span className="lc-fire-ember e3" />
+              <span className="lc-fire-ember e4" />
+              <span className="lc-fire-ember e5" />
+              <span className="lc-fire-ember e6" />
+            </div>
+          )}
           <header className="lc-opp-topbar">
             <div className="lc-opp-name">
               <span className="lc-opp-dot" aria-hidden="true" />
@@ -4573,6 +5040,7 @@ export function App() {
                     isWinner={
                       isShowdown && state.result?.winner === 'ai' && aiWinIds.has(hc.card.id)
                     }
+                    isDimmedAroundHighlight={isFourAcesSpotlight}
                     actionHint={
                       canScanCard
                         ? `点击扫描 ${ai.name} 手牌 #${idx + 1}（预支 ${getEffectiveScanCost(
@@ -4618,8 +5086,16 @@ export function App() {
             )}
             {isBurningBoardActive && (
               <span className="lc-micro-tag danger">
-                灼心·火符 · {state.gateTrapMode === 'story' ? '3处暗符' : '1处暗符'}
+                灼心·火符 ·{' '}
+                {state.sec04Berserk
+                  ? '暴走 4/4 全封锁'
+                  : state.gateTrapMode === 'story'
+                    ? '3处暗符'
+                    : '1处暗符'}
               </span>
+            )}
+            {isFourAcesSpotlight && (
+              <span className="lc-micro-tag cyan">绝命覆写 // FOUR ACES</span>
             )}
             <span className="lc-micro-tag cyan">
               剩余暗牌 {hiddenCount}/4 · 限注 {raiseCap}
@@ -4704,7 +5180,15 @@ export function App() {
                       (evt.type === 'flip' || evt.type === 'swap') &&
                       evt.boardIndex === slot.index
                   )}
-                  isWinner={isShowdown && boardWinIds.has(slot.card.id)}
+                  isWinner={isShowdown && boardWinIds.has(slot.card.id) && !isSec04PreFourAces}
+                  isOverrideCue={Boolean(isSec04BoardAceFocus && slot.card.rank === 14)}
+                  overrideBadgeLabel={
+                    isSec04BoardAceFocus && slot.card.rank === 14 ? '共鸣 ACE' : undefined
+                  }
+                  isFourAcesHighlight={Boolean(isFourAcesSpotlight && slot.card.rank === 14)}
+                  isDimmedAroundHighlight={Boolean(
+                    (isFourAcesSpotlight || isSec04BoardAceFocus) && slot.card.rank !== 14
+                  )}
                   actionHint={hint}
                   onClick={
                     canScanBoard
@@ -4746,13 +5230,15 @@ export function App() {
           <div className="lc-board-hint">
             {!isHumanTurn
               ? isShowdown
-                ? `第 #${state.handNumber} 局结算：${
-                    state.result?.winner === 'human'
-                      ? '我方胜出'
-                      : state.result?.winner === 'ai'
-                        ? `${ai.name}胜出`
-                        : '平局分池'
-                  }`
+                ? isSec04PreFourAces
+                  ? 'ECHO-0 绝命覆写协议执行中 // 正在接管牌序并锚定四条 A...'
+                  : `第 #${state.handNumber} 局结算：${
+                      state.result?.winner === 'human'
+                        ? '我方胜出'
+                        : state.result?.winner === 'ai'
+                          ? `${ai.name}胜出`
+                          : '平局分池'
+                    }`
                 : `等待 ${ai.name} 行动...`
               : scanMode
                 ? `扫描模式激活：点击上方 ${ai.name} 的牌或换出牌验真（预支 ${state.config.scanCost}，不占回合）`
@@ -4864,12 +5350,30 @@ export function App() {
                   const isSwappingHidden = Boolean(
                     swapFlight && swapFlight.actor === 'human' && swapFlight.handIndex === idx
                   );
-                  const tamperLabel = formatTamperLabel(hc.card, hc.originalCard);
-                  const displayHumanCard = getDisplayCardForTable(hc.card, {
+                  const isStagedPreAce =
+                    isSec04ClimaxActive &&
+                    sec04ClimaxPhase !== 'board-ace' &&
+                    sec04ClimaxPhase !== 'four-aces' &&
+                    idx >= sec04ConvertedHandCount;
+                  const stagedCard = isStagedPreAce ? (hc.originalCard ?? hc.card) : hc.card;
+                  const tamperLabel = isStagedPreAce
+                    ? undefined
+                    : formatTamperLabel(stagedCard, hc.originalCard);
+                  const displayHumanCard = getDisplayCardForTable(stagedCard, {
                     isOpen: hc.visibility === 'open',
                     signatureSkill: state.opponentSignatureSkill,
                     revealAll: revealAllAi,
                   });
+                  const isCardOverrideCue = Boolean(
+                    isSec04HandFocus && sec04RewritingHandIdx === idx
+                  );
+                  const isCardOverrideMorph = Boolean(
+                    isSec04HandFocus && sec04CardMorphIdx === idx
+                  );
+                  const isCardAceReady = Boolean(
+                    (isSec04HandFocus || isSec04BoardAceFocus) &&
+                      idx < sec04ConvertedHandCount
+                  );
 
                   return (
                     <CyberCard3D
@@ -4891,8 +5395,33 @@ export function App() {
                             (evt.actor === 'human' && evt.type === 'hack' && evt.handIndex === idx))
                       )}
                       isWinner={
-                        isShowdown && state.result?.winner === 'human' && humanWinIds.has(hc.card.id)
+                        isShowdown &&
+                        state.result?.winner === 'human' &&
+                        humanWinIds.has(hc.card.id) &&
+                        !isSec04PreFourAces
                       }
+                      isOverrideCue={isCardOverrideCue}
+                      isOverrideAceReady={isCardAceReady}
+                      isOverrideRewriting={isCardOverrideMorph}
+                      overrideBadgeLabel={
+                        isCardOverrideCue
+                          ? idx < sec04ConvertedHandCount
+                            ? 'ACE 覆写'
+                            : '覆写锁定'
+                          : isCardAceReady
+                            ? 'ACE // OK'
+                            : undefined
+                      }
+                      isFourAcesHighlight={Boolean(
+                        isFourAcesSpotlight && displayHumanCard.rank === 14
+                      )}
+                      isDimmedAroundHighlight={Boolean(
+                        (isFourAcesSpotlight && displayHumanCard.rank !== 14) ||
+                          (isSec04HandFocus &&
+                            sec04RewritingHandIdx !== null &&
+                            idx !== sec04RewritingHandIdx &&
+                            idx >= sec04ConvertedHandCount)
+                      )}
                       actionHint={
                         isPrivate
                           ? '己方私有暗牌（不可换出，不可篡改）'
@@ -5155,14 +5684,16 @@ export function App() {
 
         {/* COL 3, ROW 1-2: Top-Aligned Fixed-Size Chat Panel (Drawer on <=960px) */}
         <aside
-          className={`lc-right-upper-col ${mobileChatOpen ? 'is-mobile-open' : ''}`}
+          className={`lc-right-upper-col ${mobileChatOpen ? 'is-mobile-open' : ''} ${
+            isSec04ChatFocus ? 'is-sec04-chat-focus' : ''
+          }`}
           style={{ '--char-accent': accentColor } as CSSProperties}
           aria-label="右侧通讯栏"
         >
           <section
             id="lc-chat-panel"
             ref={chatPanelRef}
-            className="lc-hud-box lc-chat-panel"
+            className={`lc-hud-box lc-chat-panel ${isSec04ChatFocus ? 'is-sec04-chat-focus' : ''}`}
             aria-label="聊天堆积栏"
           >
             <header className="lc-chat-header">
@@ -5438,7 +5969,23 @@ export function App() {
         <div id="lc-right-actions" className="lc-action-stack" role="group" aria-label="右侧战术指令栏">
           {isShowdown && state.result ? (
             <>
-              {human.chips > 0 && ai.chips > 0 ? (
+              {state.sec04Escaped ? (
+                <button
+                  id="action-btn-sec04-escape"
+                  type="button"
+                  className="lc-stack-btn"
+                  disabled={isSec04PreFourAces}
+                  onClick={() => setSec04VictoryOpen(true)}
+                >
+                  <span className="lc-btn-inline">
+                    <PixelNodesIcon size={15} />
+                    {isSec04PreFourAces ? '绝命覆写同步中...' : '断开牌桌 · 逃出黑域'}
+                  </span>
+                  <span className="lc-stack-sub">
+                    {isSec04PreFourAces ? '正在重映射手牌与公共牌 A' : '查看猎杀榜 NO.1 突围结算'}
+                  </span>
+                </button>
+              ) : human.chips > 0 && ai.chips > 0 ? (
                 <button
                   id="action-btn-next-hand"
                   type="button"
@@ -5452,12 +5999,16 @@ export function App() {
                       ? localP2pReady
                         ? `已准备 (${p2pReadySummary.count}/2)`
                         : `准备下一局 (${p2pReadySummary.count}/2)`
-                      : '下一局协议'}
+                      : state.sec04Berserk && state.result.reason === 'fold'
+                        ? '重开暴走压境'
+                        : '下一局协议'}
                   </span>
                   <span className="lc-stack-sub">
                     {isP2pConnected && !localP2pReady && p2pReadySummary.count === 1
                       ? '好友已准备，点击同步开局'
-                      : `第 #${state.handNumber + 1} 局`}
+                      : state.sec04Berserk && state.result.reason === 'fold'
+                        ? `累计弃牌 ${Math.min(SEC04_MAX_BERSERK_FOLDS, (state.sec04FoldCount ?? 0) + 1)}/${SEC04_MAX_BERSERK_FOLDS}`
+                        : `第 #${state.handNumber + 1} 局`}
                   </span>
                 </button>
               ) : activeEscapeNode && human.chips > 0 ? (
@@ -5619,14 +6170,20 @@ export function App() {
               >
                 <span className="lc-btn-inline">
                   <PixelSyncIcon size={15} />
-                  {state.phase === 'river'
-                    ? `跟注摊牌 +${paid}`
-                    : willBeAllIn
-                      ? `全下跟注 +${paid}`
-                      : `跟注 +${paid}`}
+                  {state.sec04Berserk && diff > human.chips
+                    ? `全下投入全部算力 +${paid}`
+                    : state.phase === 'river'
+                      ? `跟注摊牌 +${paid}`
+                      : willBeAllIn
+                        ? `全下跟注 +${paid}`
+                        : `跟注 +${paid}`}
                 </span>
                 <span className="lc-stack-sub">
-                  {state.phase === 'river' || willBeAllIn ? '亮牌核验' : '不消耗行动'}
+                  {state.sec04Berserk && diff > human.chips
+                    ? '压入剩余算力 · 迎战摊牌'
+                    : state.phase === 'river' || willBeAllIn
+                      ? '亮牌核验'
+                      : '不消耗行动'}
                 </span>
               </button>
 
@@ -5646,18 +6203,37 @@ export function App() {
                 </span>
               </button>
 
-              <button
-                id="lc-action-btn-fold"
-                type="button"
-                className="lc-stack-btn danger"
-                onClick={() => executeHumanAction({ type: 'fold' })}
-              >
-                <span className="lc-btn-inline">
-                  <PixelSeverIcon size={14} />
-                  弃牌断连
-                </span>
-                <span className="lc-stack-sub">放弃奖池</span>
-              </button>
+              {(() => {
+                const foldCount = state.sec04FoldCount ?? 0;
+                const foldSealed =
+                  Boolean(state.sec04Berserk) && foldCount >= SEC04_MAX_BERSERK_FOLDS;
+                return (
+                  <button
+                    id="lc-action-btn-fold"
+                    type="button"
+                    className={`lc-stack-btn danger ${foldSealed ? 'is-sealed' : ''}`}
+                    disabled={foldSealed}
+                    onClick={() => executeHumanAction({ type: 'fold' })}
+                    title={
+                      foldSealed
+                        ? '已累计弃牌 3 次，零号离线闸门退路已完全封锁'
+                        : '放弃当前奖池'
+                    }
+                  >
+                    <span className="lc-btn-inline">
+                      <PixelSeverIcon size={14} />
+                      {foldSealed
+                        ? '退路封锁'
+                        : state.sec04Berserk
+                          ? `弃牌断连 (${foldCount}/${SEC04_MAX_BERSERK_FOLDS})`
+                          : '弃牌断连'}
+                    </span>
+                    <span className="lc-stack-sub">
+                      {foldSealed ? '已弃牌 3 次 · 禁止弃牌' : '放弃奖池'}
+                    </span>
+                  </button>
+                );
+              })()}
             </>
           ) : (
             <>
@@ -6057,6 +6633,8 @@ export function App() {
                   'sec02-epilogue': SEC02_EPILOGUE_VN_SCRIPT,
                   'sec03-intro': SEC03_VN_SCRIPT,
                   'sec03-epilogue': SEC03_EPILOGUE_VN_SCRIPT,
+                  'sec04-intro': SEC04_VN_SCRIPT,
+                  'sec04-berserk': SEC04_BERSERK_VN_SCRIPT,
                 } as const
               )[activeVnStory.kind]
             }
@@ -6066,6 +6644,27 @@ export function App() {
               setActiveVnStory((prev) => (prev ? { ...prev, index: nextIdx } : null))
             }
             onFinish={handleFinishVnStory}
+          />
+        )}
+
+        {sec04VictoryOpen && state.sec04Escaped && (
+          <Sec04VictoryModal
+            playerCodename={campaign.playerCodename}
+            potWon={state.result?.potWon ?? 0}
+            humanChips={state.players.human.chips}
+            aiRemainingChips={state.players.ai.chips}
+            foldCount={state.sec04FoldCount ?? 0}
+            onConfirmEscape={() => {
+              setSec04VictoryOpen(false);
+              setEscapeProgress((prev) => completeEscapeTransition(markEscapeNodeCleared(prev, 4)));
+              setViewMode('escape-map');
+              pushToast(
+                'success',
+                'EXIT-RL · 突破黑域协议网！',
+                '已强制断开牌桌连接逃出生天（猎杀榜 NO.1 突围达成）'
+              );
+            }}
+            onStayReview={() => setSec04VictoryOpen(false)}
           />
         )}
 

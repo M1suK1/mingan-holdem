@@ -7,6 +7,7 @@ import {
   resolveSec01Sprite,
   resolveSec02Sprite,
   resolveSec03Sprite,
+  resolveSec04Sprite,
 } from '../engine/storyCharacters.ts';
 import { playSound } from '../engine/soundEngine.ts';
 import {
@@ -37,6 +38,7 @@ function resolveDualSpriteSrc(sprite: StoryVnDualSprite): string {
   if (sprite.character === 'sec01') return resolveSec01Sprite(contractExpr);
   if (sprite.character === 'sec02') return resolveSec02Sprite(contractExpr);
   if (sprite.character === 'sec03') return resolveSec03Sprite(contractExpr);
+  if (sprite.character === 'sec04') return resolveSec04Sprite(contractExpr);
   if (sprite.character === 'linlongxin') return LIN_LONGXIN_CASUAL_SPRITE;
   return resolveEcho0Sprite(sprite.expression);
 }
@@ -135,7 +137,12 @@ export default function VisualNovelStoryModal({
   }, [clampedIdx, isLast, resolvedText.length, revealedCount, onChangeLine, onFinish]);
 
   const isDualMode = Boolean(line.auxLeftSprite || line.leftSprite || line.rightSprite);
-  const hasAuxLeft = Boolean(line.auxLeftSprite);
+  const hasAuxSlot = Boolean(line.auxLeftSprite);
+  const isSplitCloneAux =
+    line.auxLeftSprite?.effect === 'split-out' ||
+    line.auxLeftSprite?.effect === 'split-hold' ||
+    line.auxLeftSprite?.effect === 'split-in';
+  const hasAuxLeft = hasAuxSlot && !isSplitCloneAux;
   const isCollisionEffect = (fx?: string) => fx === 'collide' || fx === 'push-apart';
   const hasCollisionFx =
     isCollisionEffect(line.leftSprite?.effect) || isCollisionEffect(line.rightSprite?.effect);
@@ -306,6 +313,18 @@ export default function VisualNovelStoryModal({
               hasCollisionFx ? 'has-collision-fx' : ''
             }`}
           >
+            {line.stageEffect === 'blade-slash' && (
+              <div
+                key={`flame-wall-${clampedIdx}`}
+                className="lc-vn-flame-barrier-fx"
+                aria-hidden="true"
+              >
+                <span className="lc-vn-flame-wall-glow" />
+                <span className="lc-vn-flame-arc arc-upper" />
+                <span className="lc-vn-flame-arc arc-lower" />
+                <span className="lc-vn-flame-blaze" />
+              </div>
+            )}
             {hasCollisionFx && (
               <div
                 key={`collide-${clampedIdx}`}
@@ -320,7 +339,7 @@ export default function VisualNovelStoryModal({
                 <span className="lc-vn-collision-spark spark-4" />
               </div>
             )}
-            {(hasAuxLeft
+            {(hasAuxSlot
               ? [
                   { side: 'aux-left' as const, sprite: line.auxLeftSprite },
                   { side: 'left' as const, sprite: line.leftSprite },
@@ -335,11 +354,19 @@ export default function VisualNovelStoryModal({
                 return <div key={side} className={`lc-vn-dual-slot is-${side} vis-hidden`} />;
               }
               const resolvedLabel = sprite.label?.replaceAll('{codename}', playerCodename);
+              const isSplitClone =
+                side === 'aux-left' &&
+                (sprite.effect === 'split-out' ||
+                  sprite.effect === 'split-hold' ||
+                  sprite.effect === 'split-in');
               return (
                 <div
                   key={side}
                   className={`lc-vn-dual-slot is-${side} char-${sprite.character} vis-${sprite.visibility} fx-${sprite.effect ?? 'none'} ${
-                    sprite.expression === 'err1' || sprite.expression === 'err2'
+                    isSplitClone ? 'is-split-clone' : ''
+                  } ${
+                    side !== 'aux-left' &&
+                    (sprite.expression === 'err1' || sprite.expression === 'err2')
                       ? 'is-hijack-tear'
                       : ''
                   }`}
@@ -358,7 +385,8 @@ export default function VisualNovelStoryModal({
                         alt={resolvedLabel ?? sprite.character}
                         className="lc-vn-dual-img"
                       />
-                      {(sprite.expression === 'err1' || sprite.expression === 'err2') &&
+                      {side !== 'aux-left' &&
+                        (sprite.expression === 'err1' || sprite.expression === 'err2') &&
                         sprite.visibility !== 'hidden' && (
                           <>
                             {PORTRAIT_TEAR_SLICES.map((s) => (

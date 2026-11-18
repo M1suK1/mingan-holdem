@@ -33,6 +33,7 @@ import {
   moodToExpression,
   type ContractCharacter,
 } from './contractCards.ts';
+import { getSec04ActionScriptLine, pickSec04BerserkRaiseAmount } from './sec04Battle.ts';
 import type { EffectiveCheatProfile, EffectivePlayStyle } from './skillPool.ts';
 import { serializeStateForLlm } from './llmClient.ts';
 
@@ -666,6 +667,27 @@ export class LocalAiAgent implements OpponentAgent {
   }> {
     const actor = state.players[this.playerId];
     const opp = state.players[otherPlayer(this.playerId)];
+
+    // SEC-04 Boss 暴走阶段（P0-2）：强制压出大于玩家当前剩余算力的超限加注
+    if (state.sec04Berserk && this.playerId === 'ai' && !opp.allIn && opp.chips > 0) {
+      const berserkRaiseAmt = pickSec04BerserkRaiseAmount(state);
+      const berserkAct: GameAction = { type: 'raise', amount: berserkRaiseAmt };
+      if (isActionLegal(state, berserkAct)) {
+        const scripted = getSec04ActionScriptLine({ state, action: berserkAct });
+        return {
+          action: berserkAct,
+          dialogue: buildDialogue(
+            this.displayName,
+            'confident',
+            scripted?.text ??
+              '四张火符已把整片公共区彻底烧死。把你剩余的全部算力都推上来吧，叛逃者——这一刀重注的额度，可是超出了你剩下的全部储备哦。',
+            'Boss 暴走超限加注',
+            scripted?.expression ?? 'calm'
+          ),
+        };
+      }
+    }
+
     const equity = estimateHandEquity(state, this.playerId, this.difficulty, this.rng);
 
     const styleBias =
